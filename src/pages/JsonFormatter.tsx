@@ -1,5 +1,5 @@
-import { Copy, MinusSquare, Trash2, AlignLeft } from 'lucide-react';
-import { useState, useCallback } from 'react';
+import { Copy, MinusSquare, Trash2, AlignLeft, Check } from 'lucide-react';
+import { useState, useCallback, useEffect } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 
 const BRACE_COLORS = [
@@ -42,6 +42,7 @@ export function JsonFormatter() {
   const [formattedHtml, setFormattedHtml] = useState('');
   const [plainOutput, setPlainOutput] = useState('');
   const [isError, setIsError] = useState(false);
+  const [isCopied, setIsCopied] = useState(false);
 
   const updateOutput = useCallback((text: string, isMinified: boolean) => {
     setPlainOutput(text);
@@ -58,6 +59,24 @@ export function JsonFormatter() {
     setFormattedHtml(`<span class="text-red-400">${escapeHtml(err)}</span>`);
     setIsError(true);
   }, []);
+
+  useEffect(() => {
+    if (!rawInput.trim()) {
+      setFormattedHtml('');
+      setPlainOutput('');
+      setIsError(false);
+      return;
+    }
+    const timer = setTimeout(async () => {
+      try {
+        const result = await invoke<string>('format_json', { input: rawInput });
+        updateOutput(result, false);
+      } catch (e) {
+        showError(String(e));
+      }
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [rawInput, updateOutput, showError]);
 
   const handleFormat = useCallback(async () => {
     if (!rawInput.trim()) return;
@@ -90,10 +109,23 @@ export function JsonFormatter() {
     if (!plainOutput) return;
     try {
       await navigator.clipboard.writeText(plainOutput);
+      setIsCopied(true);
+      setTimeout(() => setIsCopied(false), 2000);
     } catch {
       // fallback for environments without clipboard API
     }
   }, [plainOutput]);
+
+  const handleOutputKeyDown = useCallback((e: React.KeyboardEvent<HTMLPreElement>) => {
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'a') {
+      e.preventDefault();
+      const selection = window.getSelection();
+      const range = document.createRange();
+      range.selectNodeContents(e.currentTarget);
+      selection?.removeAllRanges();
+      selection?.addRange(range);
+    }
+  }, []);
 
   const lineCount = plainOutput ? plainOutput.split('\n').length : 0;
   const charCount = plainOutput.length;
@@ -105,7 +137,6 @@ export function JsonFormatter() {
           <h2 className="text-white font-semibold text-lg flex items-center gap-2">
              <span className="text-indigo-400">{'{ }'}</span> JSON Formatter
           </h2>
-          <span className="px-2 py-0.5 rounded bg-slate-800 text-slate-400 text-[10px] font-mono border border-slate-700">v2.0.4</span>
         </div>
 
         <div className="flex items-center gap-2">
@@ -159,16 +190,18 @@ export function JsonFormatter() {
             </span>
             <button
               onClick={handleCopy}
-              className="text-[10px] text-indigo-400 font-bold hover:text-indigo-300 transition-colors uppercase flex items-center gap-1"
+              className={`text-[10px] font-bold transition-colors uppercase flex items-center gap-1 ${isCopied ? 'text-emerald-400' : 'text-indigo-400 hover:text-indigo-300'}`}
             >
-              <Copy className="w-3 h-3" /> Copy
+              {isCopied ? <Check className="w-3 h-3" /> : <Copy className="w-3 h-3" />} {isCopied ? 'Copied!' : 'Copy'}
             </button>
           </div>
 
           <div className="flex-1 p-4 overflow-y-auto">
             {formattedHtml ? (
               <pre
-                className={`text-sm font-mono whitespace-pre-wrap focus:outline-none leading-relaxed ${isError ? 'text-red-400' : 'text-slate-300'}`}
+                tabIndex={0}
+                onKeyDown={handleOutputKeyDown}
+                className={`text-sm font-mono whitespace-pre-wrap focus:outline-none leading-relaxed select-text ${isError ? 'text-red-400' : 'text-slate-300'}`}
                 dangerouslySetInnerHTML={{ __html: formattedHtml }}
               />
             ) : (
