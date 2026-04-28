@@ -1,6 +1,5 @@
 import { useState } from 'react';
 import { Sidebar } from './components/Sidebar';
-import { TopBar } from './components/TopBar';
 import { JsonFormatter } from './pages/JsonFormatter';
 import { SettingsPage } from './pages/Settings';
 import { TextToQr } from './pages/TextToQr';
@@ -13,7 +12,6 @@ export default function App() {
       <Sidebar activePage={activePage} onNavigate={setActivePage} />
       
       <div className="flex-1 flex flex-col min-w-0 bg-slate-950">
-        <TopBar />
         
         <main className="flex-1 overflow-y-auto p-6">
           {activePage === 'json' && <JsonFormatter />}
