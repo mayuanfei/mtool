@@ -5,7 +5,7 @@ type Language = 'en' | 'zh';
 const translations = {
   en: {
     // Sidebar
-    'Data Tools': 'Data Tools',
+    'Tools': 'Tools',
     'JSON Formatter': 'JSON Formatter',
     'Text to QR': 'Text to QR',
     'System': 'System',
@@ -75,7 +75,7 @@ const translations = {
   },
   zh: {
     // Sidebar
-    'Data Tools': '数据工具',
+    'Tools': '工具',
     'JSON Formatter': 'JSON 格式化',
     'Text to QR': '文本转二维码',
     'System': '系统',

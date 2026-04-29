@@ -55,7 +55,7 @@ export function Sidebar({ activePage, onNavigate, jsonEnabled, qrEnabled, pwdEna
       </div>
 
       <div className="flex-1 px-3 space-y-1">
-        <div className="text-[10px] font-bold text-slate-500 uppercase tracking-widest px-3 mb-2 mt-2">{t('Data Tools')}</div>
+        <div className="text-[10px] font-bold text-slate-500 uppercase tracking-widest px-3 mb-2 mt-2">{t('Tools')}</div>
         {navItems.map((item) => (
           <NavItem key={item.id} item={item} />
         ))}
