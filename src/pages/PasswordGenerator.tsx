@@ -53,7 +53,7 @@ export function PasswordGenerator() {
   const [isCopied, setIsCopied] = useState(false);
   const [historyCopiedId, setHistoryCopiedId] = useState<string | null>(null);
 
-  const calculateStrength = () => {
+  const calculateStrength = (): 'STRONG' | 'GOOD' | 'FAIR' | 'WEAK' => {
     let score = 0;
     if (useUpper) score += 1;
     if (useLower) score += 1;
