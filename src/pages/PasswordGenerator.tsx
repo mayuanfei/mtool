@@ -227,10 +227,26 @@ export function PasswordGenerator() {
           <div className="mb-8">
             <div className="flex justify-between items-center mb-4">
               <span className="text-sm font-bold text-slate-300">{t('Password Length')}</span>
-              <span className="text-sm font-mono text-slate-400">{length}</span>
+              <div className="flex items-center gap-3">
+                <input 
+                  type="number" 
+                  min="4" max="128"
+                  value={length}
+                  onChange={(e) => {
+                    let val = parseInt(e.target.value);
+                    if (isNaN(val)) val = 4;
+                    if (val > 128) val = 128;
+                    setLength(val);
+                  }}
+                  onBlur={() => {
+                    if (length < 4) setLength(4);
+                  }}
+                  className="w-16 bg-slate-950 border border-slate-700 text-slate-300 text-sm font-mono rounded px-2 py-1 focus:outline-none focus:border-indigo-500 text-center"
+                />
+              </div>
             </div>
             <input 
-              type="range" min="4" max="64" step="1"
+              type="range" min="4" max="128" step="1"
               value={length}
               onChange={(e) => setLength(parseInt(e.target.value))}
               className="w-full h-1.5 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-indigo-500"
