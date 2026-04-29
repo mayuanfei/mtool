@@ -103,6 +103,7 @@ fn download_qr(base64_str: &str) -> Result<(), String> {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_window_state::Builder::default().build())
         .plugin(tauri_plugin_opener::init())
         .invoke_handler(tauri::generate_handler![greet, format_json, minify_json, generate_qr, read_text_from_clipboard, copy_qr_to_clipboard, download_qr])
         .run(tauri::generate_context!())
