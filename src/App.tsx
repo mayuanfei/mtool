@@ -3,9 +3,11 @@ import { Sidebar } from './components/Sidebar';
 import { JsonFormatter } from './pages/JsonFormatter';
 import { SettingsPage } from './pages/Settings';
 import { TextToQr } from './pages/TextToQr';
+import { useI18n } from './i18n';
 
 export default function App() {
   const [activePage, setActivePage] = useState('settings');
+  const { t } = useI18n();
 
   const [jsonEnabled, setJsonEnabled] = useState(() => {
     const saved = localStorage.getItem('mtool_json_enabled');
@@ -50,7 +52,7 @@ export default function App() {
           {activePage !== 'settings' && 
            !(activePage === 'json' && jsonEnabled) && 
            !(activePage === 'qr' && qrEnabled) && (
-             <div className="text-white flex items-center justify-center h-full text-slate-500 font-medium">Select a tool from the sidebar</div>
+             <div className="text-white flex items-center justify-center h-full text-slate-500 font-medium">{t('Select a tool from the sidebar')}</div>
           )}
         </main>
       </div>

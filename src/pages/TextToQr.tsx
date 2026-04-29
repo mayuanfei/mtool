@@ -1,8 +1,10 @@
 import { Copy, Download, Clipboard, Trash2, QrCode, Check } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import { invoke } from '@tauri-apps/api/core';
+import { useI18n } from '../i18n';
 
 export function TextToQr() {
+  const { t } = useI18n();
   const [payload, setPayload] = useState('');
   const [redundancy, setRedundancy] = useState('Q');
   const [resolution, setResolution] = useState(512);
@@ -59,7 +61,7 @@ export function TextToQr() {
     <div className="w-full h-full flex flex-col">
       <div className="mb-6 border-b border-slate-800 pb-4">
         <h2 className="text-white font-semibold text-lg flex items-center gap-2">
-          <span className="text-indigo-400 px-1"><QrCode className="w-5 h-5" /></span> Text to QR
+          <span className="text-indigo-400 px-1"><QrCode className="w-5 h-5" /></span> {t('Text to QR')}
         </h2>
       </div>
 
@@ -72,16 +74,16 @@ export function TextToQr() {
           <div className="bg-slate-900 border border-slate-800 rounded-xl p-5 shadow-2xl">
             <div className="flex justify-between items-center mb-3">
               <h3 className="text-[11px] font-bold text-slate-400 uppercase tracking-tighter flex items-center gap-2">
-                Raw Payload
+                {t('Raw Payload')}
               </h3>
-              <span className="text-xs text-slate-500 font-mono bg-slate-950 px-2 py-0.5 rounded border border-slate-800">{payload.length} / 2048 chars</span>
+              <span className="text-xs text-slate-500 font-mono bg-slate-950 px-2 py-0.5 rounded border border-slate-800">{payload.length} / 2048 {t('chars')}</span>
             </div>
             
             <textarea
               value={payload}
               onChange={(e) => setPayload(e.target.value)}
               className="w-full bg-slate-950/50 border border-slate-700/50 rounded-md p-4 text-slate-300 text-sm focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 resize-none h-32 mb-3 shadow-inner placeholder:text-slate-600 placeholder:font-light"
-              placeholder="Enter URL, text, or JSON payload..."
+              placeholder={t('Enter URL, text, or JSON payload...')}
             />
             
             <div className="flex justify-end gap-2">
@@ -98,7 +100,7 @@ export function TextToQr() {
             {/* Redundancy */}
             <div className="flex-1 bg-slate-900 border border-slate-800 rounded-xl p-5 shadow-2xl">
               <h3 className="text-[11px] font-bold text-slate-400 uppercase tracking-tighter flex items-center gap-2 mb-4">
-                Redundancy Level
+                {t('Redundancy Level')}
               </h3>
               <div className="grid grid-cols-4 gap-2 bg-slate-950/50 p-1.5 rounded-lg border border-slate-800/50">
                 {['L', 'M', 'Q', 'H'].map((level) => (
@@ -122,7 +124,7 @@ export function TextToQr() {
             {/* Matrix Resolution */}
             <div className="flex-1 bg-slate-900 border border-slate-800 rounded-xl p-5 shadow-2xl">
               <h3 className="text-[11px] font-bold text-slate-400 uppercase tracking-tighter flex items-center gap-2 mb-6">
-                Matrix Resolution
+                {t('Matrix Resolution')}
               </h3>
               
               <div className="px-2">
@@ -145,7 +147,7 @@ export function TextToQr() {
           {/* Chromatic Injection */}
           <div className="bg-slate-900 border border-slate-800 rounded-xl p-5 shadow-2xl">
              <h3 className="text-[11px] font-bold text-slate-400 uppercase tracking-tighter flex items-center gap-2 mb-4">
-                Chromatic Injection
+                {t('Chromatic Injection')}
              </h3>
              <div className="flex items-center gap-4">
                 <div className="flex gap-2">
@@ -155,7 +157,7 @@ export function TextToQr() {
                 </div>
                 <div className="h-8 w-px bg-slate-800"></div>
                 <div className="flex-1 flex items-center bg-slate-950/50 border border-slate-700/50 rounded-md px-3 py-1.5 focus-within:border-indigo-500 transition-colors shadow-inner">
-                   <span className="text-slate-500 text-xs font-mono mr-2">HEX</span>
+                   <span className="text-slate-500 text-xs font-mono mr-2">{t('HEX')}</span>
                    <input type="text" value={selectedColor} onChange={(e) => setSelectedColor(e.target.value)} className="bg-transparent border-none text-slate-300 text-sm font-mono focus:outline-none w-full" />
                 </div>
              </div>
@@ -175,7 +177,7 @@ export function TextToQr() {
              
              <div className="absolute top-6 left-0 right-0 flex justify-center">
                 <span className="text-[10px] font-bold text-indigo-400 uppercase flex items-center gap-2 bg-slate-900 px-2 tracking-widest">
-                   <span className="w-1.5 h-1.5 rounded-full bg-indigo-500 animate-pulse"></span> Preview
+                   <span className="w-1.5 h-1.5 rounded-full bg-indigo-500 animate-pulse"></span> {t('Preview')}
                 </span>
              </div>
 
@@ -189,23 +191,23 @@ export function TextToQr() {
                         className={`w-full h-full object-contain ${isGenerating ? 'opacity-50' : 'opacity-100'} transition-opacity`}
                       />
                    ) : (
-                      <div className="text-slate-600 text-xs font-mono text-center">Enter payload to generate</div>
+                      <div className="text-slate-600 text-xs font-mono text-center">{t('Enter payload to generate')}</div>
                    )}
                 </div>
              </div>
              
              <div className="mt-8 text-center space-y-1 text-xs text-slate-500 font-mono">
-                <p>Format: PNG</p>
-                <p>Dimensions: {resolution}x{resolution}px</p>
+                <p>{t('Format: PNG')}</p>
+                <p>{t('Dimensions')}: {resolution}x{resolution}px</p>
              </div>
           </div>
           
           <div className="flex gap-4">
             <button onClick={handleCopyImage} className={`flex-1 flex items-center justify-center gap-2 py-2.5 rounded-md transition-colors border text-sm font-medium shadow-sm focus:outline-none disabled:opacity-50 ${isCopied ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' : 'bg-slate-800 text-slate-300 hover:bg-slate-700 border-slate-700'}`} disabled={!qrBase64}>
-              {isCopied ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />} {isCopied ? 'Copied!' : 'Copy Image'}
+              {isCopied ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />} {isCopied ? t('Copied!') : t('Copy Image')}
             </button>
             <button onClick={handleDownload} className="flex-1 flex items-center justify-center gap-2 py-2.5 bg-indigo-600 text-white rounded-md hover:bg-indigo-500 transition-colors text-sm font-medium shadow-lg shadow-indigo-600/20 focus:outline-none disabled:opacity-50" disabled={!qrBase64}>
-              <Download className="w-4 h-4" /> Download
+              <Download className="w-4 h-4" /> {t('Download')}
             </button>
           </div>
         </div>

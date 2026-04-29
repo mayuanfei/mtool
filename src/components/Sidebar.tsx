@@ -1,4 +1,5 @@
 import { Code2, QrCode, Settings, User } from 'lucide-react';
+import { useI18n } from '../i18n';
 
 interface SidebarProps {
   activePage: string;
@@ -8,14 +9,16 @@ interface SidebarProps {
 }
 
 export function Sidebar({ activePage, onNavigate, jsonEnabled, qrEnabled }: SidebarProps) {
+  const { t } = useI18n();
+
   const navItems = [
-    ...(jsonEnabled ? [{ id: 'json', label: 'JSON Formatter', icon: Code2 }] : []),
-    ...(qrEnabled ? [{ id: 'qr', label: 'Text to QR', icon: QrCode }] : []),
+    ...(jsonEnabled ? [{ id: 'json', label: t('JSON Formatter'), icon: Code2 }] : []),
+    ...(qrEnabled ? [{ id: 'qr', label: t('Text to QR'), icon: QrCode }] : []),
   ];
 
   const bottomItems = [
-    { id: 'settings', label: 'Settings', icon: Settings },
-    { id: 'user', label: 'User', icon: User },
+    { id: 'settings', label: t('Settings'), icon: Settings },
+    { id: 'user', label: t('User'), icon: User },
   ];
 
   const NavItem = ({ item }: { item: any }) => {
@@ -50,14 +53,14 @@ export function Sidebar({ activePage, onNavigate, jsonEnabled, qrEnabled }: Side
       </div>
 
       <div className="flex-1 px-3 space-y-1">
-        <div className="text-[10px] font-bold text-slate-500 uppercase tracking-widest px-3 mb-2 mt-2">Data Tools</div>
+        <div className="text-[10px] font-bold text-slate-500 uppercase tracking-widest px-3 mb-2 mt-2">{t('Data Tools')}</div>
         {navItems.map((item) => (
           <NavItem key={item.id} item={item} />
         ))}
       </div>
 
       <div className="mt-auto p-3 space-y-1">
-        <div className="text-[10px] font-bold text-slate-500 uppercase tracking-widest px-3 mb-2">System</div>
+        <div className="text-[10px] font-bold text-slate-500 uppercase tracking-widest px-3 mb-2">{t('System')}</div>
         {bottomItems.map((item) => (
           <NavItem key={item.id} item={item} />
         ))}
