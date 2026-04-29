@@ -1,4 +1,4 @@
-import { Code2, QrCode, Settings, User } from 'lucide-react';
+import { Code2, QrCode, Settings, User, Key } from 'lucide-react';
 import { useI18n } from '../i18n';
 
 interface SidebarProps {
@@ -6,14 +6,16 @@ interface SidebarProps {
   onNavigate: (page: string) => void;
   jsonEnabled: boolean;
   qrEnabled: boolean;
+  pwdEnabled: boolean;
 }
 
-export function Sidebar({ activePage, onNavigate, jsonEnabled, qrEnabled }: SidebarProps) {
+export function Sidebar({ activePage, onNavigate, jsonEnabled, qrEnabled, pwdEnabled }: SidebarProps) {
   const { t } = useI18n();
 
   const navItems = [
     ...(jsonEnabled ? [{ id: 'json', label: t('JSON Formatter'), icon: Code2 }] : []),
     ...(qrEnabled ? [{ id: 'qr', label: t('Text to QR'), icon: QrCode }] : []),
+    ...(pwdEnabled ? [{ id: 'pwd', label: t('Password Generator'), icon: Key }] : []),
   ];
 
   const bottomItems = [
