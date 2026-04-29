@@ -1,5 +1,4 @@
 import { Globe, Wrench } from 'lucide-react';
-import { useState } from 'react';
 
 const Toggle = ({ checked, onChange }: { checked: boolean; onChange: () => void }) => {
   return (
@@ -18,10 +17,14 @@ const Toggle = ({ checked, onChange }: { checked: boolean; onChange: () => void 
   );
 };
 
-export function SettingsPage() {
-  const [jsonEnabled, setJsonEnabled] = useState(true);
-  const [qrEnabled, setQrEnabled] = useState(true);
-  const [apiEnabled, setApiEnabled] = useState(false);
+interface SettingsPageProps {
+  jsonEnabled: boolean;
+  setJsonEnabled: (v: boolean) => void;
+  qrEnabled: boolean;
+  setQrEnabled: (v: boolean) => void;
+}
+
+export function SettingsPage({ jsonEnabled, setJsonEnabled, qrEnabled, setQrEnabled }: SettingsPageProps) {
 
   return (
     <div className="max-w-4xl max-w-5xl mx-auto w-full">
@@ -55,13 +58,7 @@ export function SettingsPage() {
               <Toggle checked={qrEnabled} onChange={() => setQrEnabled(!qrEnabled)} />
             </div>
 
-            <div className="px-6 py-5 flex items-center justify-between hover:bg-slate-800/50 transition-colors opacity-60">
-              <div>
-                <p className="text-base font-medium text-slate-200 mb-1">API Tester</p>
-                <p className="text-sm text-slate-500">Send REST/GraphQL requests and inspect responses.</p>
-              </div>
-              <Toggle checked={apiEnabled} onChange={() => setApiEnabled(!apiEnabled)} />
-            </div>
+
           </div>
         </section>
 

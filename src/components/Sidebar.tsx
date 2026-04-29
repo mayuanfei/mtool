@@ -3,12 +3,14 @@ import { Code2, QrCode, Settings, User } from 'lucide-react';
 interface SidebarProps {
   activePage: string;
   onNavigate: (page: string) => void;
+  jsonEnabled: boolean;
+  qrEnabled: boolean;
 }
 
-export function Sidebar({ activePage, onNavigate }: SidebarProps) {
+export function Sidebar({ activePage, onNavigate, jsonEnabled, qrEnabled }: SidebarProps) {
   const navItems = [
-    { id: 'json', label: 'JSON Formatter', icon: Code2 },
-    { id: 'qr', label: 'Text to QR', icon: QrCode },
+    ...(jsonEnabled ? [{ id: 'json', label: 'JSON Formatter', icon: Code2 }] : []),
+    ...(qrEnabled ? [{ id: 'qr', label: 'Text to QR', icon: QrCode }] : []),
   ];
 
   const bottomItems = [
