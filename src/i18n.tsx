@@ -66,6 +66,23 @@ const translations = {
     'ACTION': 'ACTION',
     'Create secure passwords.': 'Create secure passwords.',
     
+    // SqlInBuilder
+    'SQL IN Builder': 'SQL IN Builder',
+    'Convert a column of values into a SQL IN clause string.': 'Convert a column of values into a SQL IN clause string.',
+    'Quote Style': 'Quote Style',
+    'Single Quote': 'Single Quote',
+    'Double Quote': 'Double Quote',
+    'No Quote': 'No Quote',
+    'Input Values': 'Input Values',
+    'SQL Output': 'SQL Output',
+    'Paste one value per line...': 'Paste one value per line...',
+    'items': 'items',
+    'duplicates removed': 'duplicates removed',
+    'SQL IN clause will appear here...': 'SQL IN clause will appear here...',
+    'unique values': 'unique values',
+    'SQL Preview': 'SQL Preview',
+    'Build SQL IN clause from column values.': 'Build SQL IN clause from column values.',
+    
     // Settings
     'Configure MTOOL behaviors and active utilities.': 'Configure MTOOL behaviors and active utilities.',
     'Utility Configuration': 'Utility Configuration',
@@ -138,6 +155,23 @@ const translations = {
     'STRENGTH': '强度',
     'ACTION': '操作',
     'Create secure passwords.': '创建安全的密码。',
+    
+    // SqlInBuilder
+    'SQL IN Builder': 'SQL IN 构建器',
+    'Convert a column of values into a SQL IN clause string.': '将一列值转换为 SQL IN 子句字符串。',
+    'Quote Style': '引号风格',
+    'Single Quote': '单引号',
+    'Double Quote': '双引号',
+    'No Quote': '无引号',
+    'Input Values': '输入值',
+    'SQL Output': 'SQL 输出',
+    'Paste one value per line...': '每行粘贴一个值...',
+    'items': '项',
+    'duplicates removed': '个重复项已去除',
+    'SQL IN clause will appear here...': 'SQL IN 子句将显示在此处...',
+    'unique values': '个唯一值',
+    'SQL Preview': 'SQL 预览',
+    'Build SQL IN clause from column values.': '将一列值组装为 SQL IN 子句。',
     
     // Settings
     'Configure MTOOL behaviors and active utilities.': '配置 MTOOL 的行为和启用的工具。',

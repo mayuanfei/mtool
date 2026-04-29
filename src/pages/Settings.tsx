@@ -25,9 +25,11 @@ interface SettingsPageProps {
   setQrEnabled: (v: boolean) => void;
   pwdEnabled: boolean;
   setPwdEnabled: (v: boolean) => void;
+  sqlInEnabled: boolean;
+  setSqlInEnabled: (v: boolean) => void;
 }
 
-export function SettingsPage({ jsonEnabled, setJsonEnabled, qrEnabled, setQrEnabled, pwdEnabled, setPwdEnabled }: SettingsPageProps) {
+export function SettingsPage({ jsonEnabled, setJsonEnabled, qrEnabled, setQrEnabled, pwdEnabled, setPwdEnabled, sqlInEnabled, setSqlInEnabled }: SettingsPageProps) {
   const { t, language, setLanguage } = useI18n();
 
   return (
@@ -68,6 +70,14 @@ export function SettingsPage({ jsonEnabled, setJsonEnabled, qrEnabled, setQrEnab
                 <p className="text-sm text-slate-500">{t('Create secure passwords.')}</p>
               </div>
               <Toggle checked={pwdEnabled} onChange={() => setPwdEnabled(!pwdEnabled)} />
+            </div>
+
+            <div className="px-6 py-5 flex items-center justify-between hover:bg-slate-800/50 transition-colors">
+              <div>
+                <p className="text-base font-medium text-slate-200 mb-1">{t('SQL IN Builder')}</p>
+                <p className="text-sm text-slate-500">{t('Build SQL IN clause from column values.')}</p>
+              </div>
+              <Toggle checked={sqlInEnabled} onChange={() => setSqlInEnabled(!sqlInEnabled)} />
             </div>
 
           </div>

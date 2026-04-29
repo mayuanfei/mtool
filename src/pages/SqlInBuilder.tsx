@@ -1,0 +1,187 @@
+import { Copy, Check, Database, Trash2 } from 'lucide-react';
+import { useState, useCallback } from 'react';
+import { useI18n } from '../i18n';
+
+type QuoteStyle = 'single' | 'double' | 'none';
+
+export function SqlInBuilder() {
+  const { t } = useI18n();
+  const [input, setInput] = useState('');
+  const [quoteStyle, setQuoteStyle] = useState<QuoteStyle>('single');
+  const [isCopied, setIsCopied] = useState(false);
+
+  const buildOutput = useCallback(() => {
+    if (!input.trim()) return '';
+
+    const lines = input
+      .split(/[\n\r]+/)
+      .map(line => line.trim())
+      .filter(line => line.length > 0);
+
+    // Deduplicate while preserving order
+    const unique = [...new Set(lines)];
+
+    if (unique.length === 0) return '';
+
+    let formatted: string;
+    switch (quoteStyle) {
+      case 'single':
+        formatted = unique.map(v => `'${v}'`).join(', ');
+        break;
+      case 'double':
+        formatted = unique.map(v => `"${v}"`).join(', ');
+        break;
+      case 'none':
+        formatted = unique.join(', ');
+        break;
+    }
+
+    return formatted;
+  }, [input, quoteStyle]);
+
+  const output = buildOutput();
+
+  const inputCount = input
+    .split(/[\n\r]+/)
+    .map(l => l.trim())
+    .filter(l => l.length > 0).length;
+
+  const outputCount = output
+    ? [...new Set(
+        input
+          .split(/[\n\r]+/)
+          .map(l => l.trim())
+          .filter(l => l.length > 0)
+      )].length
+    : 0;
+
+  const duplicateCount = inputCount - outputCount;
+
+  const handleCopy = async () => {
+    if (!output) return;
+    try {
+      await navigator.clipboard.writeText(output);
+      setIsCopied(true);
+      setTimeout(() => setIsCopied(false), 2000);
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
+  const handleClear = () => {
+    setInput('');
+  };
+
+  return (
+    <div className="max-w-4xl max-w-5xl mx-auto w-full">
+      <div className="mb-10">
+        <h1 className="text-4xl font-bold tracking-tight text-white mb-2">{t('SQL IN Builder')}</h1>
+        <p className="text-slate-400">{t('Convert a column of values into a SQL IN clause string.')}</p>
+      </div>
+
+      <div className="space-y-6">
+
+        {/* Config Card */}
+        <section className="bg-slate-900 border border-slate-800 rounded-xl p-6 shadow-2xl">
+
+          {/* Quote Style */}
+          <div className="mb-6">
+            <span className="text-sm font-bold text-slate-300 block mb-3">{t('Quote Style')}</span>
+            <div className="flex gap-3">
+              {([
+                { value: 'single' as QuoteStyle, label: t("Single Quote") + " ( ' )" },
+                { value: 'double' as QuoteStyle, label: t("Double Quote") + ' ( " )' },
+                { value: 'none' as QuoteStyle, label: t("No Quote") },
+              ]).map(opt => (
+                <button
+                  key={opt.value}
+                  onClick={() => setQuoteStyle(opt.value)}
+                  className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors border focus:outline-none ${
+                    quoteStyle === opt.value
+                      ? 'bg-indigo-600/15 text-indigo-400 border-indigo-500/30 shadow-sm'
+                      : 'bg-slate-950/50 text-slate-400 border-slate-700 hover:bg-slate-800 hover:text-slate-300'
+                  }`}
+                >
+                  {opt.label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Input / Output Grid */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+
+            {/* Input Panel */}
+            <div>
+              <div className="flex items-center justify-between mb-3">
+                <div className="flex items-center gap-2">
+                  <Database className="w-4 h-4 text-indigo-400" />
+                  <span className="text-[11px] font-bold text-slate-400 uppercase tracking-widest">{t('Input Values')}</span>
+                </div>
+                <button
+                  onClick={handleClear}
+                  className="p-1.5 text-slate-500 hover:text-white hover:bg-slate-800 rounded transition-colors focus:outline-none"
+                  title={t('Clear')}
+                >
+                  <Trash2 className="w-4 h-4" />
+                </button>
+              </div>
+              <textarea
+                value={input}
+                onChange={(e) => setInput(e.target.value)}
+                placeholder={t('Paste one value per line...')}
+                className="w-full h-72 bg-slate-950 border border-slate-800 rounded-lg p-4 text-sm font-mono text-slate-300 placeholder-slate-600 resize-none focus:outline-none focus:border-indigo-500 transition-colors"
+                spellCheck={false}
+              />
+              <div className="mt-2 text-xs text-slate-500 font-mono">
+                {inputCount} {t('items')}
+                {duplicateCount > 0 && (
+                  <span className="text-amber-500 ml-2">
+                    ({duplicateCount} {t('duplicates removed')})
+                  </span>
+                )}
+              </div>
+            </div>
+
+            {/* Output Panel */}
+            <div>
+              <div className="flex items-center justify-between mb-3">
+                <div className="flex items-center gap-2">
+                  <Database className="w-4 h-4 text-emerald-400" />
+                  <span className="text-[11px] font-bold text-slate-400 uppercase tracking-widest">{t('SQL Output')}</span>
+                </div>
+                <button
+                  onClick={handleCopy}
+                  disabled={!output}
+                  className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 disabled:bg-slate-700 disabled:text-slate-500 text-white rounded-lg text-xs font-medium transition-colors flex items-center gap-1.5 focus:outline-none shadow-lg shadow-indigo-600/20"
+                >
+                  {isCopied ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
+                  {isCopied ? t('Copied!') : t('Copy')}
+                </button>
+              </div>
+              <div className="w-full h-72 bg-slate-950 border border-slate-800 rounded-lg p-4 text-sm font-mono text-emerald-400 overflow-y-auto break-all whitespace-pre-wrap">
+                {output || <span className="text-slate-600">{t('SQL IN clause will appear here...')}</span>}
+              </div>
+              <div className="mt-2 text-xs text-slate-500 font-mono">
+                {outputCount} {t('unique values')}
+              </div>
+            </div>
+          </div>
+
+          {/* Preview */}
+          {output && (
+            <div className="mt-6 bg-slate-950 border border-slate-800 rounded-lg p-4">
+              <span className="text-[11px] font-bold text-slate-400 uppercase tracking-widest block mb-3">{t('SQL Preview')}</span>
+              <pre className="text-sm font-mono text-slate-300 overflow-x-auto whitespace-pre-wrap break-all">
+                <span className="text-blue-400">WHERE</span> <span className="text-slate-300">column_name</span> <span className="text-blue-400">IN</span> <span className="text-slate-500">(</span>
+                <span className="text-emerald-400">{output}</span>
+                <span className="text-slate-500">)</span>
+              </pre>
+            </div>
+          )}
+
+        </section>
+      </div>
+    </div>
+  );
+}

@@ -4,6 +4,7 @@ import { JsonFormatter } from './pages/JsonFormatter';
 import { SettingsPage } from './pages/Settings';
 import { TextToQr } from './pages/TextToQr';
 import { PasswordGenerator } from './pages/PasswordGenerator';
+import { SqlInBuilder } from './pages/SqlInBuilder';
 import { useI18n } from './i18n';
 
 export default function App() {
@@ -25,6 +26,11 @@ export default function App() {
     return saved !== null ? saved === 'true' : true;
   });
 
+  const [sqlInEnabled, setSqlInEnabled] = useState(() => {
+    const saved = localStorage.getItem('mtool_sqlin_enabled');
+    return saved !== null ? saved === 'true' : true;
+  });
+
   useEffect(() => {
     localStorage.setItem('mtool_json_enabled', jsonEnabled.toString());
   }, [jsonEnabled]);
@@ -37,6 +43,10 @@ export default function App() {
     localStorage.setItem('mtool_pwd_enabled', pwdEnabled.toString());
   }, [pwdEnabled]);
 
+  useEffect(() => {
+    localStorage.setItem('mtool_sqlin_enabled', sqlInEnabled.toString());
+  }, [sqlInEnabled]);
+
   return (
     <div className="flex h-screen overflow-hidden font-sans text-slate-300 antialiased" style={{ backgroundColor: '#0f1115' }}>
       <Sidebar 
@@ -45,6 +55,7 @@ export default function App() {
         jsonEnabled={jsonEnabled}
         qrEnabled={qrEnabled}
         pwdEnabled={pwdEnabled}
+        sqlInEnabled={sqlInEnabled}
       />
       
       <div className="flex-1 flex flex-col min-w-0 bg-slate-950">
@@ -53,6 +64,7 @@ export default function App() {
           {activePage === 'json' && jsonEnabled && <JsonFormatter />}
           {activePage === 'qr' && qrEnabled && <TextToQr />}
           {activePage === 'pwd' && pwdEnabled && <PasswordGenerator />}
+          {activePage === 'sqlIn' && sqlInEnabled && <SqlInBuilder />}
           {activePage === 'settings' && (
             <SettingsPage 
               jsonEnabled={jsonEnabled} 
@@ -61,12 +73,15 @@ export default function App() {
               setQrEnabled={setQrEnabled}
               pwdEnabled={pwdEnabled}
               setPwdEnabled={setPwdEnabled}
+              sqlInEnabled={sqlInEnabled}
+              setSqlInEnabled={setSqlInEnabled}
             />
           )}
           {activePage !== 'settings' && 
            !(activePage === 'json' && jsonEnabled) && 
            !(activePage === 'qr' && qrEnabled) && 
-           !(activePage === 'pwd' && pwdEnabled) && (
+           !(activePage === 'pwd' && pwdEnabled) && 
+           !(activePage === 'sqlIn' && sqlInEnabled) && (
              <div className="text-white flex items-center justify-center h-full text-slate-500 font-medium">{t('Select a tool from the sidebar')}</div>
           )}
         </main>
@@ -74,3 +89,4 @@ export default function App() {
     </div>
   );
 }
+
