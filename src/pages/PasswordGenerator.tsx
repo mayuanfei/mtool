@@ -29,21 +29,36 @@ interface HistoryItem {
 const UPPERCASE = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
 const LOWERCASE = 'abcdefghijklmnopqrstuvwxyz';
 const NUMBERS = '0123456789';
-const SYMBOLS = '!@#$%^&*';
 
 export function PasswordGenerator() {
   const { t } = useI18n();
-  const [password, setPassword] = useState('');
-  const [length, setLength] = useState(16);
+  const [passwords, setPasswords] = useState<string[]>([]);
+  const [length, setLength] = useState(() => {
+    const saved = localStorage.getItem('mtool_pwd_length');
+    const val = saved ? parseInt(saved, 10) : 16;
+    return isNaN(val) ? 16 : val;
+  });
+  const [generateCount, setGenerateCount] = useState(() => {
+    const saved = localStorage.getItem('mtool_pwd_count');
+    const val = saved ? parseInt(saved, 10) : 1;
+    return isNaN(val) ? 1 : val;
+  });
   const [useUpper, setUseUpper] = useState(true);
   const [useLower, setUseLower] = useState(true);
   const [useNumbers, setUseNumbers] = useState(true);
   const [useSymbols, setUseSymbols] = useState(true);
+  const [customSymbols, setCustomSymbols] = useState(() => {
+    return localStorage.getItem('mtool_pwd_symbols') || '!@#$%^&*';
+  });
+  const [excludeChars, setExcludeChars] = useState(() => {
+    return localStorage.getItem('mtool_pwd_exclude') || '';
+  });
   const [history, setHistory] = useState<HistoryItem[]>(() => {
     const saved = localStorage.getItem('mtool_pwd_history');
     if (saved) {
       try {
-        return JSON.parse(saved);
+        const parsed = JSON.parse(saved);
+        return Array.isArray(parsed) ? parsed.slice(0, 5) : [];
       } catch (e) {
         return [];
       }
@@ -53,7 +68,7 @@ export function PasswordGenerator() {
   const [isCopied, setIsCopied] = useState(false);
   const [historyCopiedId, setHistoryCopiedId] = useState<string | null>(null);
 
-  const calculateStrength = (): 'STRONG' | 'GOOD' | 'FAIR' | 'WEAK' => {
+  const calculateStrength = useCallback((): 'STRONG' | 'GOOD' | 'FAIR' | 'WEAK' => {
     let score = 0;
     if (useUpper) score += 1;
     if (useLower) score += 1;
@@ -64,48 +79,57 @@ export function PasswordGenerator() {
     if (score === 3) return 'GOOD';
     if (score === 2) return 'FAIR';
     return 'WEAK';
-  };
+  }, [useUpper, useLower, useNumbers, useSymbols]);
 
   const generatePassword = useCallback((addToHistory = true) => {
     let charset = '';
     if (useUpper) charset += UPPERCASE;
     if (useLower) charset += LOWERCASE;
     if (useNumbers) charset += NUMBERS;
-    if (useSymbols) charset += SYMBOLS;
+    if (useSymbols) charset += customSymbols;
+
+    if (excludeChars) {
+      const excludeSet = new Set(excludeChars);
+      charset = [...charset].filter(c => !excludeSet.has(c)).join('');
+    }
 
     if (!charset) {
-      setPassword('');
+      setPasswords([]);
       return;
     }
 
-    let generated = '';
-    const array = new Uint32Array(length);
-    window.crypto.getRandomValues(array);
-    for (let i = 0; i < length; i++) {
-      generated += charset[array[i] % charset.length];
-    }
+    const newPasswords: string[] = [];
+    const historyAdditions: HistoryItem[] = [];
+    
+    const now = new Date();
+    const pad = (n: number) => String(n).padStart(2, '0');
+    const timeStr = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())} ${pad(now.getHours())}:${pad(now.getMinutes())}:${pad(now.getSeconds())}`;
 
-    setPassword(generated);
-
-    if (addToHistory && generated) {
-      const now = new Date();
-      const pad = (n: number) => String(n).padStart(2, '0');
-      const timeStr = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())} ${pad(now.getHours())}:${pad(now.getMinutes())}:${pad(now.getSeconds())}`;
+    for (let c = 0; c < generateCount; c++) {
+      let generated = '';
+      const array = new Uint32Array(length);
+      window.crypto.getRandomValues(array);
+      for (let i = 0; i < length; i++) {
+        generated += charset[array[i] % charset.length];
+      }
+      newPasswords.push(generated);
       
-      setHistory(prev => {
-        const newHistory = [
-          {
-            id: Math.random().toString(36).substring(7),
-            timestamp: timeStr,
-            password: generated,
-            strength: calculateStrength()
-          },
-          ...prev
-        ].slice(0, 5); // Keep last 5
-        return newHistory;
-      });
+      if (addToHistory && generated) {
+        historyAdditions.push({
+          id: Math.random().toString(36).substring(7) + c,
+          timestamp: timeStr,
+          password: generated,
+          strength: calculateStrength()
+        });
+      }
     }
-  }, [length, useUpper, useLower, useNumbers, useSymbols]);
+
+    setPasswords(newPasswords);
+
+    if (addToHistory && historyAdditions.length > 0) {
+      setHistory(prev => [...historyAdditions, ...prev].slice(0, 5)); // Keep last 5
+    }
+  }, [length, useUpper, useLower, useNumbers, useSymbols, customSymbols, excludeChars, generateCount, calculateStrength]);
 
   // Initial generation
   useEffect(() => {
@@ -118,10 +142,30 @@ export function PasswordGenerator() {
     localStorage.setItem('mtool_pwd_history', JSON.stringify(history));
   }, [history]);
 
-  // When length or options change, generate new one automatically (without adding to history for slider drag)
+  // Save custom symbols to localStorage
+  useEffect(() => {
+    localStorage.setItem('mtool_pwd_symbols', customSymbols);
+  }, [customSymbols]);
+
+  // Save exclude chars to localStorage
+  useEffect(() => {
+    localStorage.setItem('mtool_pwd_exclude', excludeChars);
+  }, [excludeChars]);
+
+  // Save length to localStorage
+  useEffect(() => {
+    localStorage.setItem('mtool_pwd_length', length.toString());
+  }, [length]);
+
+  // Save generate count to localStorage
+  useEffect(() => {
+    localStorage.setItem('mtool_pwd_count', generateCount.toString());
+  }, [generateCount]);
+
+  // When options change, generate new one automatically (without adding to history for slider drag)
   useEffect(() => {
     generatePassword(false);
-  }, [length, useUpper, useLower, useNumbers, useSymbols, generatePassword]);
+  }, [length, useUpper, useLower, useNumbers, useSymbols, customSymbols, excludeChars, generateCount, generatePassword]);
 
   const handleCopy = async (text: string, isHistoryId: string | null = null) => {
     if (!text) return;
@@ -194,11 +238,13 @@ export function PasswordGenerator() {
           
           {/* Password Display */}
           <div className="bg-slate-950 border border-slate-800 rounded-lg p-5 mb-8">
-            <div className="flex items-center justify-between mb-6">
-              <div className="text-3xl font-mono tracking-widest text-white overflow-hidden text-ellipsis whitespace-nowrap mr-4">
-                {password || '---'}
+            <div className="flex items-start justify-between mb-6">
+              <div className={`font-mono tracking-widest text-white overflow-y-auto max-h-40 mr-4 flex flex-col gap-2 w-full ${passwords.length > 1 ? 'text-xl' : 'text-3xl whitespace-nowrap overflow-hidden text-ellipsis'}`}>
+                {passwords.length > 0 ? passwords.map((p, i) => (
+                  <div key={i} className="break-all">{p}</div>
+                )) : '---'}
               </div>
-              <div className="flex items-center gap-3 shrink-0">
+              <div className="flex items-center gap-3 shrink-0 mt-1">
                 <button 
                   onClick={() => generatePassword(true)}
                   className="p-2 text-slate-400 hover:text-white hover:bg-slate-800 rounded-lg transition-colors focus:outline-none"
@@ -206,7 +252,7 @@ export function PasswordGenerator() {
                   <RefreshCcw className="w-5 h-5" />
                 </button>
                 <button 
-                  onClick={() => handleCopy(password)}
+                  onClick={() => handleCopy(passwords.join('\n'))}
                   className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg font-medium transition-colors flex items-center gap-2 focus:outline-none shadow-lg shadow-indigo-600/20"
                 >
                   {isCopied ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
@@ -279,11 +325,47 @@ export function PasswordGenerator() {
             </div>
 
             <div className="bg-slate-950/50 border border-slate-800 rounded-lg p-4 flex items-center justify-between">
-              <div>
+              <div className="flex-1 mr-4">
                 <p className="text-sm font-bold text-slate-300 mb-1">{t('Symbols')}</p>
-                <p className="text-xs text-slate-500 font-mono">{t('!@#$%^&*')}</p>
+                <input 
+                  type="text" 
+                  value={customSymbols}
+                  onChange={(e) => setCustomSymbols(e.target.value)}
+                  className="w-full bg-slate-900 border border-slate-700 text-slate-300 text-xs font-mono rounded px-2 py-1 focus:outline-none focus:border-indigo-500"
+                />
               </div>
               <Toggle checked={useSymbols} onChange={() => setUseSymbols(!useSymbols)} />
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4">
+            <div className="bg-slate-950/50 border border-slate-800 rounded-lg p-4">
+              <p className="text-sm font-bold text-slate-300 mb-2">{t('Exclude Characters')}</p>
+              <input 
+                type="text" 
+                value={excludeChars}
+                onChange={(e) => setExcludeChars(e.target.value)}
+                placeholder={t('e.g. iIl1Oo0')}
+                className="w-full bg-slate-900 border border-slate-700 text-slate-300 text-xs font-mono rounded px-3 py-2 focus:outline-none focus:border-indigo-500"
+              />
+            </div>
+            <div className="bg-slate-950/50 border border-slate-800 rounded-lg p-4">
+              <p className="text-sm font-bold text-slate-300 mb-2">{t('Generate Count')}</p>
+              <input 
+                type="number" 
+                min="1" max="100"
+                value={generateCount}
+                onChange={(e) => {
+                  let val = parseInt(e.target.value);
+                  if (isNaN(val)) val = 1;
+                  setGenerateCount(val);
+                }}
+                onBlur={() => {
+                  if (generateCount < 1) setGenerateCount(1);
+                  if (generateCount > 100) setGenerateCount(100);
+                }}
+                className="w-full bg-slate-900 border border-slate-700 text-slate-300 text-sm font-mono rounded px-3 py-1.5 focus:outline-none focus:border-indigo-500"
+              />
             </div>
           </div>
         </section>
