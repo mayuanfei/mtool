@@ -1,5 +1,5 @@
-import { Copy, Check, Database, Trash2 } from 'lucide-react';
-import { useState, useCallback } from 'react';
+import { Copy, Check, Database, Trash2, ChevronDown, ChevronUp } from 'lucide-react';
+import { useState, useCallback, useMemo } from 'react';
 import { useI18n } from '../i18n';
 
 type QuoteStyle = 'single' | 'double' | 'none';
@@ -9,6 +9,7 @@ export function SqlInBuilder() {
   const [input, setInput] = useState('');
   const [quoteStyle, setQuoteStyle] = useState<QuoteStyle>('single');
   const [isCopied, setIsCopied] = useState(false);
+  const [showDuplicates, setShowDuplicates] = useState(false);
 
   const buildOutput = useCallback(() => {
     if (!input.trim()) return '';
@@ -36,7 +37,7 @@ export function SqlInBuilder() {
         break;
     }
 
-    return formatted;
+    return `(${formatted})`;
   }, [input, quoteStyle]);
 
   const output = buildOutput();
@@ -56,6 +57,21 @@ export function SqlInBuilder() {
     : 0;
 
   const duplicateCount = inputCount - outputCount;
+
+  // Compute which values are duplicated and how many times
+  const duplicateDetails = useMemo(() => {
+    const lines = input
+      .split(/[\n\r]+/)
+      .map(l => l.trim())
+      .filter(l => l.length > 0);
+    const countMap = new Map<string, number>();
+    for (const line of lines) {
+      countMap.set(line, (countMap.get(line) || 0) + 1);
+    }
+    return [...countMap.entries()]
+      .filter(([, count]) => count > 1)
+      .map(([value, count]) => ({ value, count }));
+  }, [input]);
 
   const handleCopy = async () => {
     if (!output) return;
@@ -136,11 +152,28 @@ export function SqlInBuilder() {
               <div className="mt-2 text-xs text-slate-500 font-mono">
                 {inputCount} {t('items')}
                 {duplicateCount > 0 && (
-                  <span className="text-amber-500 ml-2">
+                  <button
+                    onClick={() => setShowDuplicates(!showDuplicates)}
+                    className="text-amber-500 ml-2 hover:text-amber-400 transition-colors cursor-pointer inline-flex items-center gap-1 focus:outline-none"
+                  >
                     ({duplicateCount} {t('duplicates removed')})
-                  </span>
+                    {showDuplicates
+                      ? <ChevronUp className="w-3 h-3" />
+                      : <ChevronDown className="w-3 h-3" />
+                    }
+                  </button>
                 )}
               </div>
+              {showDuplicates && duplicateDetails.length > 0 && (
+                <div className="mt-2 bg-slate-950 border border-amber-500/20 rounded-lg p-3 space-y-1.5">
+                  {duplicateDetails.map((d, i) => (
+                    <div key={i} className="flex items-center justify-between text-xs font-mono">
+                      <span className="text-amber-400 truncate mr-3">{d.value}</span>
+                      <span className="text-slate-500 shrink-0">×{d.count}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
 
             {/* Output Panel */}
@@ -173,9 +206,7 @@ export function SqlInBuilder() {
             <div className="mt-6 bg-slate-950 border border-slate-800 rounded-lg p-4">
               <span className="text-[11px] font-bold text-slate-400 uppercase tracking-widest block mb-3">{t('SQL Preview')}</span>
               <pre className="text-sm font-mono text-slate-300 overflow-x-auto whitespace-pre-wrap break-all">
-                <span className="text-blue-400">WHERE</span> <span className="text-slate-300">column_name</span> <span className="text-blue-400">IN</span> <span className="text-slate-500">(</span>
-                <span className="text-emerald-400">{output}</span>
-                <span className="text-slate-500">)</span>
+                <span className="text-blue-400">WHERE</span> <span className="text-slate-300">column_name</span> <span className="text-blue-400">IN</span> <span className="text-emerald-400">{output}</span>
               </pre>
             </div>
           )}
