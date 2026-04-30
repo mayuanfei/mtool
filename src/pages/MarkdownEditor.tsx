@@ -12,7 +12,7 @@ export function MarkdownEditor() {
   const [filePath, setFilePath] = useState('');
   const [isDirty, setIsDirty] = useState(false);
   const [isCopied, setIsCopied] = useState(false);
-  const [viewMode, setViewMode] = useState<'split' | 'edit' | 'preview'>('split');
+  const [viewMode, setViewMode] = useState<'split' | 'edit' | 'preview'>('preview');
   const previewRef = useRef<HTMLDivElement>(null);
   const editorRef = useRef<HTMLTextAreaElement>(null);
   // Tracks which pane is driving the scroll to prevent infinite loops
