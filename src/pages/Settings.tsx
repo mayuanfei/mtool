@@ -52,6 +52,14 @@ export function SettingsPage({ jsonEnabled, setJsonEnabled, qrEnabled, setQrEnab
           <div className="divide-y divide-slate-800">
             <div className="px-6 py-5 flex items-center justify-between hover:bg-slate-800/50 transition-colors">
               <div>
+                <p className="text-base font-medium text-slate-200 mb-1">{t('Markdown Editor')}</p>
+                <p className="text-sm text-slate-500">{t('View and edit Markdown files with live preview.')}</p>
+              </div>
+              <Toggle checked={mdEnabled} onChange={() => setMdEnabled(!mdEnabled)} />
+            </div>
+
+            <div className="px-6 py-5 flex items-center justify-between hover:bg-slate-800/50 transition-colors">
+              <div>
                 <p className="text-base font-medium text-slate-200 mb-1">{t('JSON Formatter')}</p>
                 <p className="text-sm text-slate-500">{t('Parse, validate, and beautify raw JSON payloads.')}</p>
               </div>
@@ -80,14 +88,6 @@ export function SettingsPage({ jsonEnabled, setJsonEnabled, qrEnabled, setQrEnab
                 <p className="text-sm text-slate-500">{t('Build SQL IN clause from column values.')}</p>
               </div>
               <Toggle checked={sqlInEnabled} onChange={() => setSqlInEnabled(!sqlInEnabled)} />
-            </div>
-
-            <div className="px-6 py-5 flex items-center justify-between hover:bg-slate-800/50 transition-colors">
-              <div>
-                <p className="text-base font-medium text-slate-200 mb-1">{t('Markdown Editor')}</p>
-                <p className="text-sm text-slate-500">{t('View and edit Markdown files with live preview.')}</p>
-              </div>
-              <Toggle checked={mdEnabled} onChange={() => setMdEnabled(!mdEnabled)} />
             </div>
 
           </div>
