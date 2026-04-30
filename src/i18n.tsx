@@ -107,7 +107,9 @@ const translations = {
     'Words': 'Words',
     'Edit Mode': 'Edit Mode',
     'Split View': 'Split View',
-    'Preview Mode': 'Preview Mode'
+    'Preview Mode': 'Preview Mode',
+    'Collapse Sidebar': 'Collapse Sidebar',
+    'Expand Sidebar': 'Expand Sidebar'
   },
   zh: {
     // Sidebar
@@ -213,7 +215,9 @@ const translations = {
     'Words': '单词',
     'Edit Mode': '编辑模式',
     'Split View': '分栏视图',
-    'Preview Mode': '预览模式'
+    'Preview Mode': '预览模式',
+    'Collapse Sidebar': '收起侧边栏',
+    'Expand Sidebar': '展开侧边栏'
   }
 };
 
