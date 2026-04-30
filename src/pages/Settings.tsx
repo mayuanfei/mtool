@@ -27,9 +27,11 @@ interface SettingsPageProps {
   setPwdEnabled: (v: boolean) => void;
   sqlInEnabled: boolean;
   setSqlInEnabled: (v: boolean) => void;
+  mdEnabled: boolean;
+  setMdEnabled: (v: boolean) => void;
 }
 
-export function SettingsPage({ jsonEnabled, setJsonEnabled, qrEnabled, setQrEnabled, pwdEnabled, setPwdEnabled, sqlInEnabled, setSqlInEnabled }: SettingsPageProps) {
+export function SettingsPage({ jsonEnabled, setJsonEnabled, qrEnabled, setQrEnabled, pwdEnabled, setPwdEnabled, sqlInEnabled, setSqlInEnabled, mdEnabled, setMdEnabled }: SettingsPageProps) {
   const { t, language, setLanguage } = useI18n();
 
   return (
@@ -78,6 +80,14 @@ export function SettingsPage({ jsonEnabled, setJsonEnabled, qrEnabled, setQrEnab
                 <p className="text-sm text-slate-500">{t('Build SQL IN clause from column values.')}</p>
               </div>
               <Toggle checked={sqlInEnabled} onChange={() => setSqlInEnabled(!sqlInEnabled)} />
+            </div>
+
+            <div className="px-6 py-5 flex items-center justify-between hover:bg-slate-800/50 transition-colors">
+              <div>
+                <p className="text-base font-medium text-slate-200 mb-1">{t('Markdown Editor')}</p>
+                <p className="text-sm text-slate-500">{t('View and edit Markdown files with live preview.')}</p>
+              </div>
+              <Toggle checked={mdEnabled} onChange={() => setMdEnabled(!mdEnabled)} />
             </div>
 
           </div>

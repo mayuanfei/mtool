@@ -100,12 +100,65 @@ fn download_qr(base64_str: &str) -> Result<(), String> {
     Ok(())
 }
 
+#[tauri::command]
+fn open_md_file() -> Result<(String, String), String> {
+    if let Some(path) = rfd::FileDialog::new()
+        .add_filter("Markdown", &["md", "markdown", "txt"])
+        .pick_file()
+    {
+        let content = fs::read_to_string(&path)
+            .map_err(|e| format!("Failed to read file: {}", e))?;
+        let path_str = path.to_string_lossy().to_string();
+        Ok((path_str, content))
+    } else {
+        Err("No file selected".to_string())
+    }
+}
+
+#[tauri::command]
+fn save_md_file(path: &str, content: &str) -> Result<String, String> {
+    if path.is_empty() {
+        // No existing path — show save dialog
+        if let Some(save_path) = rfd::FileDialog::new()
+            .add_filter("Markdown", &["md", "markdown"])
+            .set_file_name("untitled.md")
+            .save_file()
+        {
+            fs::write(&save_path, content)
+                .map_err(|e| format!("Failed to save file: {}", e))?;
+            Ok(save_path.to_string_lossy().to_string())
+        } else {
+            Err("Save cancelled".to_string())
+        }
+    } else {
+        // Existing path — overwrite directly
+        fs::write(path, content)
+            .map_err(|e| format!("Failed to save file: {}", e))?;
+        Ok(path.to_string())
+    }
+}
+
+#[tauri::command]
+fn save_md_file_as(content: &str) -> Result<String, String> {
+    if let Some(save_path) = rfd::FileDialog::new()
+        .add_filter("Markdown", &["md", "markdown"])
+        .set_file_name("untitled.md")
+        .save_file()
+    {
+        fs::write(&save_path, content)
+            .map_err(|e| format!("Failed to save file: {}", e))?;
+        Ok(save_path.to_string_lossy().to_string())
+    } else {
+        Err("Save cancelled".to_string())
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_window_state::Builder::default().build())
         .plugin(tauri_plugin_opener::init())
-        .invoke_handler(tauri::generate_handler![greet, format_json, minify_json, generate_qr, read_text_from_clipboard, copy_qr_to_clipboard, download_qr])
+        .invoke_handler(tauri::generate_handler![greet, format_json, minify_json, generate_qr, read_text_from_clipboard, copy_qr_to_clipboard, download_qr, open_md_file, save_md_file, save_md_file_as])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }

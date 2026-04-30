@@ -91,7 +91,23 @@ const translations = {
     'General Settings': 'General Settings',
     'Language': 'Language',
     'Select application interface language.': 'Select application interface language.',
-    'Select a tool from the sidebar': 'Select a tool from the sidebar'
+    'Select a tool from the sidebar': 'Select a tool from the sidebar',
+
+    // MarkdownEditor
+    'Markdown Editor': 'Markdown Editor',
+    'View and edit Markdown files with live preview.': 'View and edit Markdown files with live preview.',
+    'Editor': 'Editor',
+    'Start writing Markdown...': 'Start writing Markdown...',
+    'Preview will appear here...': 'Preview will appear here...',
+    'Open': 'Open',
+    'Save': 'Save',
+    'Save As': 'Save As',
+    'Untitled': 'Untitled',
+    'Modified': 'Modified',
+    'Words': 'Words',
+    'Edit Mode': 'Edit Mode',
+    'Split View': 'Split View',
+    'Preview Mode': 'Preview Mode'
   },
   zh: {
     // Sidebar
@@ -181,7 +197,23 @@ const translations = {
     'General Settings': '常规设置',
     'Language': '语言',
     'Select application interface language.': '选择应用程序界面语言。',
-    'Select a tool from the sidebar': '请从左侧边栏选择一个工具'
+    'Select a tool from the sidebar': '请从左侧边栏选择一个工具',
+
+    // MarkdownEditor
+    'Markdown Editor': 'Markdown 编辑器',
+    'View and edit Markdown files with live preview.': '查看和编辑 Markdown 文件，支持实时预览。',
+    'Editor': '编辑器',
+    'Start writing Markdown...': '开始编写 Markdown...',
+    'Preview will appear here...': '预览将显示在此处...',
+    'Open': '打开',
+    'Save': '保存',
+    'Save As': '另存为',
+    'Untitled': '未命名',
+    'Modified': '已修改',
+    'Words': '单词',
+    'Edit Mode': '编辑模式',
+    'Split View': '分栏视图',
+    'Preview Mode': '预览模式'
   }
 };
 

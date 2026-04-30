@@ -28,3 +28,220 @@ body {
 ::-webkit-scrollbar-thumb:hover {
   @apply bg-slate-600;
 }
+
+/* ========================================
+   Markdown Preview Styles
+   ======================================== */
+
+.markdown-body {
+  @apply text-slate-300 text-sm leading-relaxed;
+  font-family: "Inter", ui-sans-serif, system-ui, sans-serif;
+}
+
+.markdown-body h1 {
+  @apply text-2xl font-bold text-white mt-0 mb-4 pb-2 border-b border-slate-700/50;
+}
+
+.markdown-body h2 {
+  @apply text-xl font-bold text-white mt-6 mb-3 pb-1.5 border-b border-slate-800/50;
+}
+
+.markdown-body h3 {
+  @apply text-lg font-semibold text-slate-100 mt-5 mb-2;
+}
+
+.markdown-body h4 {
+  @apply text-base font-semibold text-slate-200 mt-4 mb-2;
+}
+
+.markdown-body h5,
+.markdown-body h6 {
+  @apply text-sm font-semibold text-slate-300 mt-3 mb-1;
+}
+
+.markdown-body p {
+  @apply mb-3 leading-relaxed;
+}
+
+.markdown-body a {
+  @apply text-indigo-400 hover:text-indigo-300 underline decoration-indigo-400/30 underline-offset-2 transition-colors;
+}
+
+.markdown-body strong {
+  @apply font-bold text-slate-100;
+}
+
+.markdown-body em {
+  @apply italic text-slate-200;
+}
+
+.markdown-body ul {
+  @apply list-disc pl-6 mb-3 space-y-1;
+}
+
+.markdown-body ol {
+  @apply list-decimal pl-6 mb-3 space-y-1;
+}
+
+.markdown-body li {
+  @apply leading-relaxed;
+}
+
+.markdown-body li > ul,
+.markdown-body li > ol {
+  @apply mt-1 mb-0;
+}
+
+/* Task lists (GFM) */
+.markdown-body ul li input[type="checkbox"] {
+  @apply mr-2 accent-indigo-500;
+}
+
+.markdown-body blockquote {
+  @apply border-l-4 border-indigo-500/40 pl-4 py-1 my-3 text-slate-400 italic bg-slate-800/20 rounded-r;
+}
+
+.markdown-body blockquote p {
+  @apply mb-0;
+}
+
+/* Inline code */
+.markdown-body code:not(pre code) {
+  @apply bg-slate-800 text-indigo-300 px-1.5 py-0.5 rounded text-xs font-mono border border-slate-700/50;
+}
+
+/* Code blocks */
+.markdown-body pre {
+  @apply bg-slate-950 rounded-lg p-4 mb-3 overflow-x-auto border border-slate-800;
+}
+
+.markdown-body pre code {
+  @apply text-xs font-mono leading-relaxed;
+  background: none;
+  border: none;
+  padding: 0;
+}
+
+/* Tables (GFM) */
+.markdown-body table {
+  @apply w-full mb-3 border-collapse text-sm;
+}
+
+.markdown-body thead th {
+  @apply bg-slate-800/60 text-slate-200 font-semibold text-left px-3 py-2 border border-slate-700;
+}
+
+.markdown-body tbody td {
+  @apply px-3 py-2 border border-slate-800 text-slate-300;
+}
+
+.markdown-body tbody tr:hover {
+  @apply bg-slate-800/30;
+}
+
+.markdown-body hr {
+  @apply border-0 border-t border-slate-700/50 my-6;
+}
+
+.markdown-body img {
+  @apply max-w-full rounded-lg my-3;
+}
+
+.markdown-body del {
+  @apply line-through text-slate-500;
+}
+
+/* ========================================
+   Highlight.js GitHub Dark Theme (Compact)
+   ======================================== */
+
+.hljs {
+  color: #c9d1d9;
+}
+
+.hljs-doctag,
+.hljs-keyword,
+.hljs-meta .hljs-keyword,
+.hljs-template-tag,
+.hljs-template-variable,
+.hljs-type,
+.hljs-variable.language_ {
+  color: #ff7b72;
+}
+
+.hljs-title,
+.hljs-title.class_,
+.hljs-title.class_.inherited__,
+.hljs-title.function_ {
+  color: #d2a8ff;
+}
+
+.hljs-attr,
+.hljs-attribute,
+.hljs-literal,
+.hljs-meta,
+.hljs-number,
+.hljs-operator,
+.hljs-selector-attr,
+.hljs-selector-class,
+.hljs-selector-id,
+.hljs-variable {
+  color: #79c0ff;
+}
+
+.hljs-meta .hljs-string,
+.hljs-regexp,
+.hljs-string {
+  color: #a5d6ff;
+}
+
+.hljs-built_in,
+.hljs-symbol {
+  color: #ffa657;
+}
+
+.hljs-code,
+.hljs-comment,
+.hljs-formula {
+  color: #8b949e;
+}
+
+.hljs-name,
+.hljs-quote,
+.hljs-selector-pseudo,
+.hljs-selector-tag {
+  color: #7ee787;
+}
+
+.hljs-subst {
+  color: #c9d1d9;
+}
+
+.hljs-section {
+  color: #1f6feb;
+  font-weight: bold;
+}
+
+.hljs-bullet {
+  color: #f2cc60;
+}
+
+.hljs-emphasis {
+  color: #c9d1d9;
+  font-style: italic;
+}
+
+.hljs-strong {
+  color: #c9d1d9;
+  font-weight: bold;
+}
+
+.hljs-addition {
+  color: #aff5b4;
+  background-color: #033a16;
+}
+
+.hljs-deletion {
+  color: #ffdcd7;
+  background-color: #67060c;
+}

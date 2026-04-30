@@ -1,4 +1,4 @@
-import { Code2, QrCode, Settings, User, Key, Database } from 'lucide-react';
+import { Code2, QrCode, Settings, User, Key, Database, FileText } from 'lucide-react';
 import { useI18n } from '../i18n';
 
 interface SidebarProps {
@@ -8,9 +8,10 @@ interface SidebarProps {
   qrEnabled: boolean;
   pwdEnabled: boolean;
   sqlInEnabled: boolean;
+  mdEnabled: boolean;
 }
 
-export function Sidebar({ activePage, onNavigate, jsonEnabled, qrEnabled, pwdEnabled, sqlInEnabled }: SidebarProps) {
+export function Sidebar({ activePage, onNavigate, jsonEnabled, qrEnabled, pwdEnabled, sqlInEnabled, mdEnabled }: SidebarProps) {
   const { t } = useI18n();
 
   const navItems = [
@@ -18,6 +19,7 @@ export function Sidebar({ activePage, onNavigate, jsonEnabled, qrEnabled, pwdEna
     ...(qrEnabled ? [{ id: 'qr', label: t('Text to QR'), icon: QrCode }] : []),
     ...(pwdEnabled ? [{ id: 'pwd', label: t('Password Generator'), icon: Key }] : []),
     ...(sqlInEnabled ? [{ id: 'sqlIn', label: t('SQL IN Builder'), icon: Database }] : []),
+    ...(mdEnabled ? [{ id: 'md', label: t('Markdown Editor'), icon: FileText }] : []),
   ];
 
   const bottomItems = [
