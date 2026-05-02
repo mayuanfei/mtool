@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Code2, QrCode, Settings, User, Key, Database, FileText, PanelLeftClose, PanelLeftOpen } from 'lucide-react';
+import { Code2, QrCode, Settings, User, Key, Database, FileText, PanelLeftClose, PanelLeftOpen, SearchCode } from 'lucide-react';
 import { useI18n } from '../i18n';
 
 interface SidebarProps {
@@ -10,9 +10,10 @@ interface SidebarProps {
   pwdEnabled: boolean;
   sqlInEnabled: boolean;
   mdEnabled: boolean;
+  fileSearchEnabled: boolean;
 }
 
-export function Sidebar({ activePage, onNavigate, jsonEnabled, qrEnabled, pwdEnabled, sqlInEnabled, mdEnabled }: SidebarProps) {
+export function Sidebar({ activePage, onNavigate, jsonEnabled, qrEnabled, pwdEnabled, sqlInEnabled, mdEnabled, fileSearchEnabled }: SidebarProps) {
   const { t } = useI18n();
 
   const [collapsed, setCollapsed] = useState(() => {
@@ -25,6 +26,7 @@ export function Sidebar({ activePage, onNavigate, jsonEnabled, qrEnabled, pwdEna
   }, [collapsed]);
 
   const navItems = [
+    ...(fileSearchEnabled ? [{ id: 'fileSearch', label: t('File Search'), icon: SearchCode }] : []),
     ...(mdEnabled ? [{ id: 'md', label: t('Markdown Editor'), icon: FileText }] : []),
     ...(jsonEnabled ? [{ id: 'json', label: t('JSON Formatter'), icon: Code2 }] : []),
     ...(qrEnabled ? [{ id: 'qr', label: t('Text to QR'), icon: QrCode }] : []),

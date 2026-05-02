@@ -6,6 +6,7 @@ import { TextToQr } from './pages/TextToQr';
 import { PasswordGenerator } from './pages/PasswordGenerator';
 import { SqlInBuilder } from './pages/SqlInBuilder';
 import { MarkdownEditor } from './pages/MarkdownEditor';
+import { FileSearch } from './pages/FileSearch';
 import { useI18n } from './i18n';
 
 export default function App() {
@@ -37,6 +38,11 @@ export default function App() {
     return saved !== null ? saved === 'true' : true;
   });
 
+  const [fileSearchEnabled, setFileSearchEnabled] = useState(() => {
+    const saved = localStorage.getItem('mtool_filesearch_enabled');
+    return saved !== null ? saved === 'true' : true;
+  });
+
   useEffect(() => {
     localStorage.setItem('mtool_json_enabled', jsonEnabled.toString());
   }, [jsonEnabled]);
@@ -57,6 +63,10 @@ export default function App() {
     localStorage.setItem('mtool_md_enabled', mdEnabled.toString());
   }, [mdEnabled]);
 
+  useEffect(() => {
+    localStorage.setItem('mtool_filesearch_enabled', fileSearchEnabled.toString());
+  }, [fileSearchEnabled]);
+
   return (
     <div className="flex h-screen overflow-hidden font-sans text-slate-300 antialiased" style={{ backgroundColor: '#0f1115' }}>
       <Sidebar 
@@ -67,6 +77,7 @@ export default function App() {
         pwdEnabled={pwdEnabled}
         sqlInEnabled={sqlInEnabled}
         mdEnabled={mdEnabled}
+        fileSearchEnabled={fileSearchEnabled}
       />
       
       <div className="flex-1 flex flex-col min-w-0 bg-slate-950">
@@ -77,6 +88,7 @@ export default function App() {
           {activePage === 'pwd' && pwdEnabled && <PasswordGenerator />}
           {activePage === 'sqlIn' && sqlInEnabled && <SqlInBuilder />}
           {activePage === 'md' && mdEnabled && <MarkdownEditor />}
+          {activePage === 'fileSearch' && fileSearchEnabled && <FileSearch />}
           {activePage === 'settings' && (
             <SettingsPage 
               jsonEnabled={jsonEnabled} 
@@ -89,6 +101,8 @@ export default function App() {
               setSqlInEnabled={setSqlInEnabled}
               mdEnabled={mdEnabled}
               setMdEnabled={setMdEnabled}
+              fileSearchEnabled={fileSearchEnabled}
+              setFileSearchEnabled={setFileSearchEnabled}
             />
           )}
           {activePage !== 'settings' && 
@@ -96,7 +110,8 @@ export default function App() {
            !(activePage === 'qr' && qrEnabled) && 
            !(activePage === 'pwd' && pwdEnabled) && 
            !(activePage === 'sqlIn' && sqlInEnabled) && 
-           !(activePage === 'md' && mdEnabled) && (
+           !(activePage === 'md' && mdEnabled) && 
+           !(activePage === 'fileSearch' && fileSearchEnabled) && (
              <div className="text-white flex items-center justify-center h-full text-slate-500 font-medium">{t('Select a tool from the sidebar')}</div>
           )}
         </main>

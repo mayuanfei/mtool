@@ -109,7 +109,30 @@ const translations = {
     'Split View': 'Split View',
     'Preview Mode': 'Preview Mode',
     'Collapse Sidebar': 'Collapse Sidebar',
-    'Expand Sidebar': 'Expand Sidebar'
+    'Expand Sidebar': 'Expand Sidebar',
+
+    // FileSearch
+    'File Search': 'File Search',
+    'Search files by name, size, or content across indexed directories.': 'Search files by name, size, or content across indexed directories.',
+    'Try: *.yaml   report draft   size:>10MB   content:"api_key"': 'Try: *.yaml   report draft   size:>10MB   content:"api_key"',
+    'glob': 'glob',
+    'AND': 'AND',
+    'size': 'size',
+    'content': 'content',
+    'Index': 'Index',
+    'Indexing...': 'Indexing...',
+    'files indexed': 'files indexed',
+    'Re-index': 'Re-index',
+    'Add Directory': 'Add Directory',
+    'No directories indexed. Click "Add Directory" to get started.': 'No directories indexed. Click "Add Directory" to get started.',
+    'Remove': 'Remove',
+    'Results': 'Results',
+    'Searching...': 'Searching...',
+    'No results': 'No results',
+    'matches': 'matches',
+    'Index a directory first, then search.': 'Index a directory first, then search.',
+    'No files match your query.': 'No files match your query.',
+    'Search and find files by name, size, or content.': 'Search and find files by name, size, or content.'
   },
   zh: {
     // Sidebar
@@ -217,7 +240,30 @@ const translations = {
     'Split View': '分栏视图',
     'Preview Mode': '预览模式',
     'Collapse Sidebar': '收起侧边栏',
-    'Expand Sidebar': '展开侧边栏'
+    'Expand Sidebar': '展开侧边栏',
+
+    // FileSearch
+    'File Search': '文件搜索',
+    'Search files by name, size, or content across indexed directories.': '在已索引的目录中按文件名、大小或内容搜索文件。',
+    'Try: *.yaml   report draft   size:>10MB   content:"api_key"': '试试: *.yaml   报告 草稿   size:>10MB   content:"密钥"',
+    'glob': '通配符',
+    'AND': '且',
+    'size': '大小',
+    'content': '内容',
+    'Index': '索引',
+    'Indexing...': '正在建立索引...',
+    'files indexed': '个文件已索引',
+    'Re-index': '重新索引',
+    'Add Directory': '添加目录',
+    'No directories indexed. Click "Add Directory" to get started.': '未添加目录，点击"添加目录"开始建立索引。',
+    'Remove': '移除',
+    'Results': '搜索结果',
+    'Searching...': '搜索中...',
+    'No results': '无结果',
+    'matches': '个匹配',
+    'Index a directory first, then search.': '请先添加目录建立索引，然后再搜索。',
+    'No files match your query.': '没有文件匹配您的查询。',
+    'Search and find files by name, size, or content.': '按文件名、大小或内容搜索文件。'
   }
 };
 

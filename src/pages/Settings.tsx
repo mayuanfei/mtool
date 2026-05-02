@@ -29,9 +29,11 @@ interface SettingsPageProps {
   setSqlInEnabled: (v: boolean) => void;
   mdEnabled: boolean;
   setMdEnabled: (v: boolean) => void;
+  fileSearchEnabled: boolean;
+  setFileSearchEnabled: (v: boolean) => void;
 }
 
-export function SettingsPage({ jsonEnabled, setJsonEnabled, qrEnabled, setQrEnabled, pwdEnabled, setPwdEnabled, sqlInEnabled, setSqlInEnabled, mdEnabled, setMdEnabled }: SettingsPageProps) {
+export function SettingsPage({ jsonEnabled, setJsonEnabled, qrEnabled, setQrEnabled, pwdEnabled, setPwdEnabled, sqlInEnabled, setSqlInEnabled, mdEnabled, setMdEnabled, fileSearchEnabled, setFileSearchEnabled }: SettingsPageProps) {
   const { t, language, setLanguage } = useI18n();
 
   return (
@@ -50,6 +52,14 @@ export function SettingsPage({ jsonEnabled, setJsonEnabled, qrEnabled, setQrEnab
           </div>
           
           <div className="divide-y divide-slate-800">
+            <div className="px-6 py-5 flex items-center justify-between hover:bg-slate-800/50 transition-colors">
+              <div>
+                <p className="text-base font-medium text-slate-200 mb-1">{t('File Search')}</p>
+                <p className="text-sm text-slate-500">{t('Search and find files by name, size, or content.')}</p>
+              </div>
+              <Toggle checked={fileSearchEnabled} onChange={() => setFileSearchEnabled(!fileSearchEnabled)} />
+            </div>
+
             <div className="px-6 py-5 flex items-center justify-between hover:bg-slate-800/50 transition-colors">
               <div>
                 <p className="text-base font-medium text-slate-200 mb-1">{t('Markdown Editor')}</p>
