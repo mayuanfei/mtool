@@ -74,31 +74,48 @@ pub fn init_db(db_path: &str) {
     let conn = Connection::open(db_path).expect("open db");
     conn.execute_batch(
         "PRAGMA journal_mode=WAL;
-         PRAGMA cache_size=-65536;
-         CREATE TABLE IF NOT EXISTS file_index (
-            id       INTEGER PRIMARY KEY,
-            name     TEXT NOT NULL,
-            path     TEXT NOT NULL UNIQUE,
-            size     INTEGER NOT NULL,
-            created  INTEGER NOT NULL,
-            modified INTEGER NOT NULL,
-            is_dir   INTEGER NOT NULL,
-            ext      TEXT NOT NULL,
-            name_lower TEXT NOT NULL
-        );
-        CREATE INDEX IF NOT EXISTS idx_name_lower ON file_index(name_lower);
-        CREATE INDEX IF NOT EXISTS idx_ext ON file_index(ext);
-        CREATE TABLE IF NOT EXISTS index_meta (
-            key   TEXT PRIMARY KEY,
-            value TEXT NOT NULL
-        );
-        CREATE VIRTUAL TABLE IF NOT EXISTS file_fts USING fts5(
-            path UNINDEXED,
-            name_lower,
-            tokenize='trigram'
-        );",
+         PRAGMA cache_size=-65536;",
     )
-    .expect("init db schema");
+    .ok();
+    conn.execute_batch(SCHEMA_SQL).expect("init db schema");
+}
+
+/// 仅 file_index + file_fts 表的 Schema（不含 index_meta，避免 DROP 时误删退出时间戳）
+const SCHEMA_SQL: &str = "
+CREATE TABLE IF NOT EXISTS file_index (
+    id       INTEGER PRIMARY KEY,
+    name     TEXT NOT NULL,
+    path     TEXT NOT NULL UNIQUE,
+    size     INTEGER NOT NULL,
+    created  INTEGER NOT NULL,
+    modified INTEGER NOT NULL,
+    is_dir   INTEGER NOT NULL,
+    ext      TEXT NOT NULL,
+    name_lower TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_name_lower ON file_index(name_lower);
+CREATE INDEX IF NOT EXISTS idx_ext ON file_index(ext);
+CREATE TABLE IF NOT EXISTS index_meta (
+    key   TEXT PRIMARY KEY,
+    value TEXT NOT NULL
+);
+CREATE VIRTUAL TABLE IF NOT EXISTS file_fts USING fts5(
+    path UNINDEXED,
+    name_lower,
+    tokenize='trigram'
+);
+";
+
+/// DROP + 重建 file_index / file_fts 表。
+/// O(1)，比 DELETE FROM file_index（在 WAL 模式下需生成大量 WAL 页）快一到两个数量级。
+/// 保留 index_meta 表，避免丢失 last_built_at / last_exit_at。
+fn reset_index_tables(conn: &Connection) {
+    conn.execute_batch(
+        "DROP TABLE IF EXISTS file_index;
+         DROP TABLE IF EXISTS file_fts;",
+    )
+    .ok();
+    conn.execute_batch(SCHEMA_SQL).ok();
 }
 
 
@@ -382,16 +399,18 @@ fn flush_batch(conn: &mut Connection, batch: &[FileEntry]) {
 
 /// 流式全量建索引：边扫描边写库，每 BATCH_SIZE 条提交一次事务。
 /// 峰值内存 ≈ BATCH_SIZE × ~300 B ≈ 15 MB，消灭全量中间 Vec。
-/// 每 PROGRESS_INTERVAL 条或每次批次提交后调用 on_progress(已写总数)。
+/// 每 PROGRESS_INTERVAL 条或每次批次提交后调用 on_progress(已写总数, 当前扫描路径)。
 pub fn build_index_streaming<F>(db_path: &str, on_progress: F) -> usize
 where
-    F: Fn(usize),
+    F: Fn(usize, Option<&str>),
 {
     const BATCH_SIZE: usize = 50_000;
-    const PROGRESS_INTERVAL: usize = 10_000;
+    const PROGRESS_INTERVAL: usize = 1_000;
+    // 立即发出 0 进度，让前端从"0 个文件"立刻进入"建索引中"状态
+    on_progress(0, None);
     let mut conn = match Connection::open(db_path) { Ok(c) => c, Err(_) => return 0 };
-    conn.execute("DELETE FROM file_index", []).ok();
-    conn.execute("INSERT INTO file_fts(file_fts) VALUES('delete-all')", []).ok();
+    // DROP + 重建代替 DELETE，900K 行清空 <10ms
+    reset_index_tables(&conn);
     let roots = get_system_roots();
     let mut batch: Vec<FileEntry> = Vec::with_capacity(BATCH_SIZE);
     let mut total = 0usize;
@@ -403,14 +422,15 @@ where
         for result in walker {
             let Ok(dir_entry) = result else { continue };
             let Some(entry) = entry_from_dir_entry(&dir_entry) else { continue };
+            let cur_path = entry.path.clone();
             batch.push(entry);
             if batch.len() % PROGRESS_INTERVAL == 0 {
-                on_progress(total + batch.len());
+                on_progress(total + batch.len(), Some(&cur_path));
             }
             if batch.len() >= BATCH_SIZE {
                 flush_batch(&mut conn, &batch);
                 total += batch.len();
-                on_progress(total);
+                on_progress(total, Some(&cur_path));
                 batch.clear();
             }
         }
@@ -418,7 +438,7 @@ where
     if !batch.is_empty() {
         flush_batch(&mut conn, &batch);
         total += batch.len();
-        on_progress(total);
+        on_progress(total, None);
     }
     total
 }

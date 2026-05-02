@@ -91,7 +91,7 @@ export function FileSearch() {
   });
   const [isSearching, setIsSearching] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [indexingProgress, setIndexingProgress] = useState<number>(0);
+  const [currentScanPath, setCurrentScanPath] = useState<string>("");
   const [reconcileProgress, setReconcileProgress] = useState<{ scanned: number; updated: number } | null>(null);
   const [searchElapsed, setSearchElapsed] = useState<number | null>(null);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -101,12 +101,14 @@ export function FileSearch() {
   useEffect(() => {
     invoke<IndexStatus>("get_index_status").then(setStatus).catch(() => {});
 
-    const unlistenProgress = listen<number>("index_progress", (event) => {
-      setIndexingProgress(event.payload);
-      setStatus((prev) => ({ ...prev, is_indexing: true, total: event.payload }));
+    const unlistenProgress = listen<[number, string]>("index_progress", (event) => {
+      const [count, path] = event.payload;
+      setStatus((prev) => ({ ...prev, is_indexing: true, total: count }));
+      setCurrentScanPath(path || "");
     });
 
     const unlistenComplete = listen<number>("index_complete", () => {
+      setCurrentScanPath("");
       invoke<IndexStatus>("get_index_status").then(setStatus).catch(() => {});
     });
 
@@ -175,8 +177,7 @@ export function FileSearch() {
   // 重建索引
   const handleRebuild = async () => {
     setError(null);
-    setIndexingProgress(0);
-    setStatus((prev) => ({ ...prev, is_indexing: true }));
+    setStatus((prev) => ({ ...prev, is_indexing: true, total: 0 }));
     try {
       await invoke<number>("build_index");
       const s = await invoke<IndexStatus>("get_index_status");
@@ -234,7 +235,7 @@ export function FileSearch() {
         <span className="text-indigo-300">
           正在建立索引...&nbsp;
           <span className="font-mono tabular-nums text-indigo-400">
-            {indexingProgress.toLocaleString()}
+            {status.total.toLocaleString()}
           </span>
           &nbsp;个文件
         </span>
@@ -375,8 +376,13 @@ export function FileSearch() {
               <RefreshCw className="w-10 h-10 mb-3 opacity-30 animate-spin" />
               <p className="text-sm text-indigo-400">正在后台建立索引...</p>
               <p className="text-xs mt-1 font-mono tabular-nums">
-                已建立 {indexingProgress.toLocaleString()} 条，完成后可搜索
+                已建立 {status.total.toLocaleString()} 条，完成后可搜索
               </p>
+              {currentScanPath && (
+                <p className="text-[10px] mt-2 text-slate-600 font-mono max-w-[70%] truncate" title={currentScanPath}>
+                  当前：{currentScanPath}
+                </p>
+              )}
             </div>
           )}
 

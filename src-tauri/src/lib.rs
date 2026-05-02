@@ -183,9 +183,15 @@ async fn build_index(
     }
 
     let app_clone = app.clone();
+    let status_ref_clone = status_ref.clone();
     let total = tauri::async_runtime::spawn_blocking(move || {
-        let total = build_index_streaming(&db_path, |count| {
-            app_clone.emit("index_progress", count).ok();
+        let total = build_index_streaming(&db_path, |count, path| {
+            if let Ok(mut s) = status_ref_clone.write() {
+                s.total = count;
+            }
+            app_clone
+                .emit("index_progress", (count, path.unwrap_or("")))
+                .ok();
         });
         let now_ts = SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -204,7 +210,7 @@ async fn build_index(
         s.last_built_at = file_search::get_last_built_at(&state.db_path);
     }
 
-    app.emit("index_progress", total).ok();
+    app.emit("index_progress", (total, "")).ok();
     Ok(total)
 }
 
@@ -443,9 +449,15 @@ pub fn run() {
                     }
 
                     let app_clone = app_handle.clone();
+                    let status_ref_clone = status_ref.clone();
                     let result = tauri::async_runtime::spawn_blocking(move || {
-                        let total = build_index_streaming(&db, |count| {
-                            app_clone.emit("index_progress", count).ok();
+                        let total = build_index_streaming(&db, |count, path| {
+                            if let Ok(mut s) = status_ref_clone.write() {
+                                s.total = count;
+                            }
+                            app_clone
+                                .emit("index_progress", (count, path.unwrap_or("")))
+                                .ok();
                         });
                         let now_ts = SystemTime::now()
                             .duration_since(UNIX_EPOCH)
@@ -461,7 +473,7 @@ pub fn run() {
                         s.is_indexing = false;
                         s.total = total;
                         s.last_built_at = Some(ts);
-                        app_handle.emit("index_progress", total).ok();
+                        app_handle.emit("index_progress", (total, "")).ok();
                         app_handle.emit("index_complete", total).ok();
                     }
                 });
