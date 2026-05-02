@@ -3,9 +3,8 @@ mod file_search;
 use base64::prelude::*;
 use std::fs;
 use std::io::Cursor;
-use std::path::Path;
 use std::sync::mpsc;
-use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use arboard::{Clipboard, ImageData};
 use image::Rgb;
@@ -16,11 +15,11 @@ use tauri::{Emitter, Manager};
 use rayon::prelude::*;
 
 use file_search::{
-    build_index_full_system, content_matches, delete_entry_in_db, entry_from_path,
-    get_db_path, get_last_exit_at, init_db, parse_query, reconcile_changed_since,
-    save_entries_to_db, search_in_db, set_last_built_at, set_last_exit_at,
-    should_skip_path, upsert_entry_in_db, FileEntry, IndexEngine, IndexStatus,
-    get_watch_roots_pub, SizeOp,
+    build_index_streaming, content_matches, count_entries, delete_entry_in_db,
+    entry_from_path, get_db_path, get_last_exit_at, init_db, parse_query,
+    reconcile_changed_since, search_in_db, set_last_built_at,
+    set_last_exit_at, should_skip_path, upsert_entry_in_db, FileEntry, IndexEngine,
+    IndexStatus, get_watch_roots_pub,
 };
 
 // ---------------------------------------------------------------------------
@@ -174,7 +173,6 @@ async fn build_index(
     app: tauri::AppHandle,
     state: tauri::State<'_, IndexEngine>,
 ) -> Result<usize, String> {
-    let entries_ref = state.entries.clone();
     let status_ref = state.status.clone();
     let db_path = state.db_path.clone();
 
@@ -185,28 +183,16 @@ async fn build_index(
     }
 
     let app_clone = app.clone();
-    let (total, _elapsed) = tauri::async_runtime::spawn_blocking(move || {
-        let t0 = Instant::now();
-        let new_entries = build_index_full_system(|count| {
+    let total = tauri::async_runtime::spawn_blocking(move || {
+        let total = build_index_streaming(&db_path, |count| {
             app_clone.emit("index_progress", count).ok();
         });
-        let total = new_entries.len();
-
-        // 通知前端进入"写库"阶段
-        app_clone.emit("index_saving", (0usize, total)).ok();
-
-        save_entries_to_db(&db_path, &new_entries, |saved| {
-            app_clone.emit("index_saving", (saved, total)).ok();
-        });
-
         let now_ts = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .map(|d| d.as_secs())
             .unwrap_or(0);
         set_last_built_at(&db_path, now_ts);
-
-        *entries_ref.write().unwrap() = new_entries;
-        (total, t0.elapsed().as_millis())
+        total
     })
     .await
     .map_err(|e| e.to_string())?;
@@ -240,55 +226,7 @@ async fn search_files(
     let parsed = parse_query(&query);
     let db_path = state.db_path.clone();
 
-    // ── 路径 1：纯名称 / 名称+大小，无 glob 无 content ──────────────────────
-    // SQLite LIKE '%term%' 前置通配符无法走索引，460 万行全表扫 → 15s
-    // 改走内存 Vec + rayon 并行过滤，预计 < 200ms
-    let is_mem_path = parsed.content_filter.is_none()
-        && parsed.glob_pattern.is_none()
-        && (!parsed.name_terms.is_empty() || parsed.size_filter.is_some());
-
-    if is_mem_path {
-        let entries_ref = state.entries.clone();
-        let terms = parsed.name_terms.clone();
-        let size_filter = parsed.size_filter.clone();
-        return tauri::async_runtime::spawn_blocking(move || {
-            let entries = entries_ref.read().unwrap();
-            let mut results: Vec<FileEntry> = entries
-                .par_iter()
-                .filter(|e| {
-                    // 名称关键词：每个词都必须在 name_lower 中出现
-                    if !terms.iter().all(|t| e.name_lower.contains(t.as_str())) {
-                        return false;
-                    }
-                    // 大小过滤
-                    if let Some(ref sf) = size_filter {
-                        if e.is_dir {
-                            return false;
-                        }
-                        let ok = match sf.op {
-                            SizeOp::Gt  => e.size >  sf.bytes,
-                            SizeOp::Gte => e.size >= sf.bytes,
-                            SizeOp::Lt  => e.size <  sf.bytes,
-                            SizeOp::Lte => e.size <= sf.bytes,
-                            SizeOp::Eq  => e.size == sf.bytes,
-                        };
-                        if !ok {
-                            return false;
-                        }
-                    }
-                    true
-                })
-                .take_any(limit)
-                .cloned()
-                .collect();
-            results.truncate(limit);
-            results
-        })
-        .await
-        .map_err(|e| e.to_string());
-    }
-
-    // ── 路径 2：glob 模式（*.ext → idx_ext 索引，极快）────────────────────────
+    // ── 非 content 查询：直接走 search_in_db（内部路由 FTS5 / LIKE）────────────
     if parsed.content_filter.is_none() {
         return tauri::async_runtime::spawn_blocking(move || {
             search_in_db(&db_path, &parsed, limit)
@@ -297,7 +235,7 @@ async fn search_files(
         .map_err(|e| e.to_string());
     }
 
-    // ── 路径 3：content 过滤 → SQLite 取候选，rayon 并行扫文件内容 ─────────────
+    // ── content 过滤 → SQLite 取候选，rayon 并行扫文件内容 ─────────────────────
     let content_needle = parsed.content_filter.as_ref().unwrap().as_bytes().to_vec();
     let results = tauri::async_runtime::spawn_blocking(move || {
         let candidates = search_in_db(&db_path, &parsed, 100_000);
@@ -376,10 +314,7 @@ fn open_file(path: String) -> Result<(), String> {
 // 文件系统监听器（增量更新索引）
 // ---------------------------------------------------------------------------
 
-fn start_fs_watcher(
-    entries_ref: std::sync::Arc<std::sync::RwLock<Vec<FileEntry>>>,
-    db_path: String,
-) {
+fn start_fs_watcher(db_path: String) {
     std::thread::spawn(move || {
         let (tx, rx) = mpsc::channel();
 
@@ -417,59 +352,30 @@ fn start_fs_watcher(
             }
 
             for event in events {
-                handle_fs_event(&event, &entries_ref, &db_path);
+                handle_fs_event(&event, &db_path);
             }
         }
     });
 }
 
-fn handle_fs_event(
-    event: &notify::Event,
-    entries_ref: &std::sync::Arc<std::sync::RwLock<Vec<FileEntry>>>,
-    db_path: &str,
-) {
+fn handle_fs_event(event: &notify::Event, db_path: &str) {
     for path in &event.paths {
         if should_skip_path(path) {
             continue;
         }
         let path_str = path.to_string_lossy().to_string();
-
         match &event.kind {
             EventKind::Create(_) | EventKind::Modify(_) => {
-                upsert_in_memory_and_db(path, &path_str, entries_ref, db_path);
+                if let Some(entry) = entry_from_path(path) {
+                    upsert_entry_in_db(db_path, &entry);
+                }
             }
             EventKind::Remove(_) => {
-                remove_from_memory_and_db(&path_str, entries_ref, db_path);
+                delete_entry_in_db(db_path, &path_str);
             }
             _ => {}
         }
     }
-}
-
-fn upsert_in_memory_and_db(
-    path: &Path,
-    path_str: &str,
-    entries_ref: &std::sync::Arc<std::sync::RwLock<Vec<FileEntry>>>,
-    db_path: &str,
-) {
-    let Some(new_entry) = entry_from_path(path) else { return };
-    upsert_entry_in_db(db_path, &new_entry);
-    let mut entries = entries_ref.write().unwrap();
-    if let Some(pos) = entries.iter().position(|e| e.path == path_str) {
-        entries[pos] = new_entry;
-    } else {
-        entries.push(new_entry);
-    }
-}
-
-fn remove_from_memory_and_db(
-    path_str: &str,
-    entries_ref: &std::sync::Arc<std::sync::RwLock<Vec<FileEntry>>>,
-    db_path: &str,
-) {
-    delete_entry_in_db(db_path, path_str);
-    let mut entries = entries_ref.write().unwrap();
-    entries.retain(|e| e.path != path_str);
 }
 
 // ---------------------------------------------------------------------------
@@ -488,13 +394,10 @@ pub fn run() {
             let engine = IndexEngine::new_with_db(db_path.clone());
             engine.load_from_db();
 
-            let has_data = {
-                let entries = engine.entries.read().unwrap();
-                !entries.is_empty()
-            };
+            let has_data = count_entries(&db_path) > 0;
 
             // 启动文件系统监听器（增量更新）
-            start_fs_watcher(engine.entries.clone(), db_path.clone());
+            start_fs_watcher(db_path.clone());
 
             app.manage(engine);
 
@@ -504,15 +407,12 @@ pub fn run() {
                 let last_exit = get_last_exit_at(&db_path);
                 if let Some(since_ts) = last_exit {
                     let app_handle = app.handle().clone();
-                    let state: tauri::State<IndexEngine> = app.state();
-                    let entries_ref = state.entries.clone();
                     let db = db_path.clone();
                     tauri::async_runtime::spawn(async move {
                         let app_clone = app_handle.clone();
                         tauri::async_runtime::spawn_blocking(move || {
                             let updated = reconcile_changed_since(
                                 &db,
-                                entries_ref,
                                 since_ts,
                                 |scanned, updated| {
                                     app_clone
@@ -534,7 +434,6 @@ pub fn run() {
                 let app_handle = app.handle().clone();
                 tauri::async_runtime::spawn(async move {
                     let state: tauri::State<IndexEngine> = app_handle.state();
-                    let entries_ref = state.entries.clone();
                     let status_ref = state.status.clone();
                     let db = state.db_path.clone();
 
@@ -545,24 +444,14 @@ pub fn run() {
 
                     let app_clone = app_handle.clone();
                     let result = tauri::async_runtime::spawn_blocking(move || {
-                        let new_entries = build_index_full_system(|count| {
+                        let total = build_index_streaming(&db, |count| {
                             app_clone.emit("index_progress", count).ok();
                         });
-                        let total = new_entries.len();
-
-                        // 通知前端进入"写库"阶段
-                        app_clone.emit("index_saving", (0usize, total)).ok();
-
-                        save_entries_to_db(&db, &new_entries, |saved| {
-                            app_clone.emit("index_saving", (saved, total)).ok();
-                        });
-
                         let now_ts = SystemTime::now()
                             .duration_since(UNIX_EPOCH)
                             .map(|d| d.as_secs())
                             .unwrap_or(0);
                         set_last_built_at(&db, now_ts);
-                        *entries_ref.write().unwrap() = new_entries;
                         (total, now_ts)
                     })
                     .await;

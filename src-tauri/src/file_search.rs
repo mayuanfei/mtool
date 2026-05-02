@@ -5,7 +5,7 @@ use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, RwLock};
 use std::time::UNIX_EPOCH;
-use walkdir::WalkDir;
+use walkdir::{DirEntry, WalkDir};
 
 const CONTENT_BUFFER_BYTES: usize = 64 * 1024;
 
@@ -33,7 +33,6 @@ pub struct IndexStatus {
 }
 
 pub struct IndexEngine {
-    pub entries: Arc<RwLock<Vec<FileEntry>>>,
     pub status: Arc<RwLock<IndexStatus>>,
     pub db_path: String,
 }
@@ -41,17 +40,14 @@ pub struct IndexEngine {
 impl IndexEngine {
     pub fn new_with_db(db_path: String) -> Self {
         Self {
-            entries: Arc::new(RwLock::new(Vec::new())),
             status: Arc::new(RwLock::new(IndexStatus::default())),
             db_path,
         }
     }
 
     pub fn load_from_db(&self) {
-        let entries = load_entries_from_db(&self.db_path);
-        let total = entries.len();
+        let total = count_entries(&self.db_path);
         let last_built_at = get_last_built_at(&self.db_path);
-        *self.entries.write().unwrap() = entries;
         let mut s = self.status.write().unwrap();
         s.total = total;
         s.last_built_at = last_built_at;
@@ -95,88 +91,26 @@ pub fn init_db(db_path: &str) {
         CREATE TABLE IF NOT EXISTS index_meta (
             key   TEXT PRIMARY KEY,
             value TEXT NOT NULL
+        );
+        CREATE VIRTUAL TABLE IF NOT EXISTS file_fts USING fts5(
+            path UNINDEXED,
+            name_lower,
+            tokenize='trigram'
         );",
     )
     .expect("init db schema");
 }
 
-/// 将全量条目批量写入 SQLite。
-/// 每 BATCH_SIZE 条提交一次事务，降低 WAL 峰值压力；
-/// 每批提交后调用 on_progress(已写条数) 供上层向前端推送进度。
-pub fn save_entries_to_db<F>(db_path: &str, entries: &[FileEntry], on_progress: F)
-where
-    F: Fn(usize),
-{
-    const BATCH_SIZE: usize = 50_000;
 
-    let mut conn = match Connection::open(db_path) {
-        Ok(c) => c,
-        Err(_) => return,
-    };
-
-    // 清空旧数据（单独语句，不纳入后续事务）
-    conn.execute("DELETE FROM file_index", []).ok();
-
-    let mut saved = 0usize;
-    for chunk in entries.chunks(BATCH_SIZE) {
-        let tx = match conn.transaction() {
-            Ok(t) => t,
-            Err(_) => continue,
-        };
-        {
-            let mut stmt = match tx.prepare(
-                "INSERT OR REPLACE INTO file_index
-                 (name, path, size, created, modified, is_dir, ext, name_lower)
-                 VALUES (?1,?2,?3,?4,?5,?6,?7,?8)",
-            ) {
-                Ok(s) => s,
-                Err(_) => continue,
-            };
-            for e in chunk {
-                stmt.execute(params![
-                    e.name,
-                    e.path,
-                    e.size as i64,
-                    e.created as i64,
-                    e.modified as i64,
-                    e.is_dir as i32,
-                    e.ext,
-                    e.name_lower,
-                ])
-                .ok();
-            }
-        }
-        tx.commit().ok();
-        saved += chunk.len();
-        on_progress(saved);
-    }
-}
-
-pub fn load_entries_from_db(db_path: &str) -> Vec<FileEntry> {
+pub fn count_entries(db_path: &str) -> usize {
     let conn = match Connection::open(db_path) {
         Ok(c) => c,
-        Err(_) => return Vec::new(),
+        Err(_) => return 0,
     };
-    let mut stmt = match conn.prepare(
-        "SELECT name,path,size,created,modified,is_dir,ext,name_lower FROM file_index",
-    ) {
-        Ok(s) => s,
-        Err(_) => return Vec::new(),
-    };
-    stmt.query_map([], |row| {
-        Ok(FileEntry {
-            name: row.get(0)?,
-            path: row.get(1)?,
-            size: row.get::<_, i64>(2)? as u64,
-            created: row.get::<_, i64>(3)? as u64,
-            modified: row.get::<_, i64>(4)? as u64,
-            is_dir: row.get::<_, i32>(5)? != 0,
-            ext: row.get(6)?,
-            name_lower: row.get(7)?,
-        })
+    conn.query_row("SELECT COUNT(*) FROM file_index", [], |row| {
+        row.get::<_, i64>(0)
     })
-    .map(|rows| rows.filter_map(|r| r.ok()).collect())
-    .unwrap_or_default()
+    .unwrap_or(0) as usize
 }
 
 pub fn get_last_built_at(db_path: &str) -> Option<u64> {
@@ -393,87 +327,102 @@ fn get_system_roots() -> Vec<PathBuf> {
 }
 
 // ---------------------------------------------------------------------------
-// 索引构建（带进度回调）
+// 索引构建（流式写入，无中间 Vec，峰值内存 ≈ BATCH_SIZE × entry_size ≈ 15 MB）
 // ---------------------------------------------------------------------------
 
-pub fn build_index_full_system<F>(progress_callback: F) -> Vec<FileEntry>
+/// 从 walkdir::DirEntry 构建 FileEntry；失败返回 None
+fn entry_from_dir_entry(dir_entry: &DirEntry) -> Option<FileEntry> {
+    let path = dir_entry.path();
+    let metadata = dir_entry.metadata().ok()?;
+    let name = path.file_name()?.to_string_lossy().to_string();
+    if name.is_empty() { return None; }
+    let size = if metadata.is_file() { metadata.len() } else { 0 };
+    let modified = metadata.modified().ok()
+        .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
+        .map(|d| d.as_secs()).unwrap_or(0);
+    let created = metadata.created().ok()
+        .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
+        .map(|d| d.as_secs()).unwrap_or(0);
+    let ext = path.extension()
+        .map(|e| e.to_string_lossy().to_ascii_lowercase())
+        .unwrap_or_default();
+    let name_lower = name.to_ascii_lowercase();
+    Some(FileEntry {
+        name, name_lower,
+        path: path.to_string_lossy().to_string(),
+        size, created, modified,
+        is_dir: metadata.is_dir(),
+        ext,
+    })
+}
+
+/// 将一批 FileEntry 写入 SQLite（file_index + file_fts），包裹在单次事务中。
+fn flush_batch(conn: &mut Connection, batch: &[FileEntry]) {
+    if batch.is_empty() { return; }
+    let tx = match conn.transaction() { Ok(t) => t, Err(_) => return };
+    {
+        let mut stmt = match tx.prepare(
+            "INSERT OR REPLACE INTO file_index \
+             (name,path,size,created,modified,is_dir,ext,name_lower) \
+             VALUES (?1,?2,?3,?4,?5,?6,?7,?8)",
+        ) { Ok(s) => s, Err(_) => return };
+        let mut fts_stmt = match tx.prepare(
+            "INSERT INTO file_fts(path, name_lower) VALUES (?1, ?2)",
+        ) { Ok(s) => s, Err(_) => return };
+        for e in batch {
+            stmt.execute(params![
+                e.name, e.path, e.size as i64, e.created as i64,
+                e.modified as i64, e.is_dir as i32, e.ext, e.name_lower,
+            ]).ok();
+            fts_stmt.execute(params![e.path, e.name_lower]).ok();
+        }
+    }
+    tx.commit().ok();
+}
+
+/// 流式全量建索引：边扫描边写库，每 BATCH_SIZE 条提交一次事务。
+/// 峰值内存 ≈ BATCH_SIZE × ~300 B ≈ 15 MB，消灭全量中间 Vec。
+/// 每 PROGRESS_INTERVAL 条或每次批次提交后调用 on_progress(已写总数)。
+pub fn build_index_streaming<F>(db_path: &str, on_progress: F) -> usize
 where
     F: Fn(usize),
 {
-    let mut entries = Vec::new();
+    const BATCH_SIZE: usize = 50_000;
+    const PROGRESS_INTERVAL: usize = 10_000;
+    let mut conn = match Connection::open(db_path) { Ok(c) => c, Err(_) => return 0 };
+    conn.execute("DELETE FROM file_index", []).ok();
+    conn.execute("INSERT INTO file_fts(file_fts) VALUES('delete-all')", []).ok();
     let roots = get_system_roots();
-
+    let mut batch: Vec<FileEntry> = Vec::with_capacity(BATCH_SIZE);
+    let mut total = 0usize;
     for root in &roots {
         let walker = WalkDir::new(root)
             .follow_links(false)
             .into_iter()
             .filter_entry(|e| !should_skip_path(e.path()));
-
         for result in walker {
-            let dir_entry = match result {
-                Ok(e) => e,
-                Err(_) => continue,
-            };
-
-            let path = dir_entry.path();
-
-            let metadata = match dir_entry.metadata() {
-                Ok(m) => m,
-                Err(_) => continue,
-            };
-
-            let name = match path.file_name() {
-                Some(n) => n.to_string_lossy().to_string(),
-                None => continue,
-            };
-
-            if name.is_empty() {
-                continue;
+            let Ok(dir_entry) = result else { continue };
+            let Some(entry) = entry_from_dir_entry(&dir_entry) else { continue };
+            batch.push(entry);
+            if batch.len() % PROGRESS_INTERVAL == 0 {
+                on_progress(total + batch.len());
             }
-
-            let size = if metadata.is_file() { metadata.len() } else { 0 };
-
-            let modified = metadata
-                .modified()
-                .ok()
-                .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
-                .map(|d| d.as_secs())
-                .unwrap_or(0);
-
-            let created = metadata
-                .created()
-                .ok()
-                .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
-                .map(|d| d.as_secs())
-                .unwrap_or(0);
-
-            let ext = path
-                .extension()
-                .map(|e| e.to_string_lossy().to_ascii_lowercase())
-                .unwrap_or_default();
-
-            let name_lower = name.to_ascii_lowercase();
-
-            entries.push(FileEntry {
-                name,
-                name_lower,
-                path: path.to_string_lossy().to_string(),
-                size,
-                created,
-                modified,
-                is_dir: metadata.is_dir(),
-                ext,
-            });
-
-            if entries.len() % 1000 == 0 {
-                progress_callback(entries.len());
+            if batch.len() >= BATCH_SIZE {
+                flush_batch(&mut conn, &batch);
+                total += batch.len();
+                on_progress(total);
+                batch.clear();
             }
         }
     }
-
-    progress_callback(entries.len());
-    entries
+    if !batch.is_empty() {
+        flush_batch(&mut conn, &batch);
+        total += batch.len();
+        on_progress(total);
+    }
+    total
 }
+
 
 // ---------------------------------------------------------------------------
 // 查询解析
@@ -699,6 +648,12 @@ pub fn upsert_entry_in_db(db_path: &str, entry: &FileEntry) {
         ],
     )
     .ok();
+    conn.execute("DELETE FROM file_fts WHERE path=?1", params![entry.path]).ok();
+    conn.execute(
+        "INSERT INTO file_fts(path, name_lower) VALUES (?1, ?2)",
+        params![entry.path, entry.name_lower],
+    )
+    .ok();
 }
 
 /// 在 SQLite 中删除单条记录（按路径）
@@ -707,8 +662,8 @@ pub fn delete_entry_in_db(db_path: &str, path: &str) {
         Ok(c) => c,
         Err(_) => return,
     };
-    conn.execute("DELETE FROM file_index WHERE path=?1", params![path])
-        .ok();
+    conn.execute("DELETE FROM file_index WHERE path=?1", params![path]).ok();
+    conn.execute("DELETE FROM file_fts WHERE path=?1", params![path]).ok();
 }
 
 // ---------------------------------------------------------------------------
@@ -741,14 +696,62 @@ fn extract_ext_from_glob(pattern: &str) -> Option<String> {
     None
 }
 
-/// 直接在 SQLite 中搜索，避免将百万条目全量克隆到内存
-/// content_filter 由调用方单独处理，此函数不涉及文件 IO
-pub fn search_in_db(db_path: &str, parsed: &ParsedQuery, limit: usize) -> Vec<FileEntry> {
-    let conn = match Connection::open(db_path) {
-        Ok(c) => c,
+/// FTS5 trigram 路径：所有 name_terms >= 3 字符时使用。
+/// MATCH 表达式：`"term1" AND "term2"` → trigram 索引，毫秒级 substring 搜索。
+fn search_via_fts5(
+    conn: &Connection,
+    terms: &[String],
+    size_filter: Option<&SizeFilter>,
+    limit: usize,
+) -> Vec<FileEntry> {
+    let match_expr = terms
+        .iter()
+        .map(|t| format!("\"{}\"", t.replace('"', "")))
+        .collect::<Vec<_>>()
+        .join(" AND ");
+
+    let mut extra = String::new();
+    if let Some(sf) = size_filter {
+        let op = match sf.op {
+            SizeOp::Gt => ">", SizeOp::Gte => ">=",
+            SizeOp::Lt => "<", SizeOp::Lte => "<=", SizeOp::Eq => "=",
+        };
+        extra = format!(" AND fi.is_dir = 0 AND fi.size {} {}", op, sf.bytes);
+    }
+
+    let sql = format!(
+        "SELECT fi.name, fi.path, fi.size, fi.created, fi.modified, \
+                fi.is_dir, fi.ext, fi.name_lower \
+         FROM file_fts \
+         JOIN file_index fi ON fi.path = file_fts.path \
+         WHERE file_fts MATCH ?1{} \
+         LIMIT {}",
+        extra, limit
+    );
+
+    let mut stmt = match conn.prepare(&sql) {
+        Ok(s) => s,
         Err(_) => return Vec::new(),
     };
 
+    stmt.query_map(params![match_expr], |row| {
+        Ok(FileEntry {
+            name:       row.get(0)?,
+            path:       row.get(1)?,
+            size:       row.get::<_, i64>(2)? as u64,
+            created:    row.get::<_, i64>(3)? as u64,
+            modified:   row.get::<_, i64>(4)? as u64,
+            is_dir:     row.get::<_, i32>(5)? != 0,
+            ext:        row.get(6)?,
+            name_lower: row.get(7)?,
+        })
+    })
+    .map(|rows| rows.filter_map(|r| r.ok()).collect())
+    .unwrap_or_default()
+}
+
+/// SQLite LIKE 路径：short terms (< 3 字符) 或 glob / size-only 查询
+fn search_via_sqlite(conn: &Connection, parsed: &ParsedQuery, limit: usize) -> Vec<FileEntry> {
     let mut conditions: Vec<String> = Vec::new();
     let mut str_params: Vec<String> = Vec::new();
 
@@ -815,17 +818,34 @@ pub fn search_in_db(db_path: &str, parsed: &ParsedQuery, limit: usize) -> Vec<Fi
     .unwrap_or_default()
 }
 
+/// 搜索路由：name_terms 全部 >= 3 字符 → FTS5 trigram（毫秒级）；否则 → SQLite LIKE
+pub fn search_in_db(db_path: &str, parsed: &ParsedQuery, limit: usize) -> Vec<FileEntry> {
+    let conn = match Connection::open(db_path) {
+        Ok(c) => c,
+        Err(_) => return Vec::new(),
+    };
+
+    let use_fts5 = !parsed.name_terms.is_empty()
+        && parsed.glob_pattern.is_none()
+        && parsed.name_terms.iter().all(|t| t.chars().count() >= 3);
+
+    if use_fts5 {
+        return search_via_fts5(&conn, &parsed.name_terms, parsed.size_filter.as_ref(), limit);
+    }
+
+    search_via_sqlite(&conn, parsed, limit)
+}
+
 // ---------------------------------------------------------------------------
 // 启动增量对账
 // ---------------------------------------------------------------------------
 
-/// 扫描 watch roots，将 mtime > since_ts 的文件 upsert 到内存和 DB。
+/// 扫描 watch roots，将 mtime > since_ts 的文件 upsert 到 DB。
 /// 适用于 MTOOL 关闭期间文件被修改/新增的场景。
 /// on_progress(scanned, updated) 每 2000 条调一次。
 /// 返回本次更新的条目数。
 pub fn reconcile_changed_since<F>(
     db_path: &str,
-    entries_ref: Arc<RwLock<Vec<FileEntry>>>,
     since_ts: u64,
     on_progress: F,
 ) -> usize
@@ -873,16 +893,9 @@ where
                 continue;
             }
 
-            // mtime > since_ts → 需要 upsert
+            // mtime > since_ts → 需要 upsert（仅更新 DB，无内存 Vec）
             if let Some(entry) = entry_from_path(path) {
-                let path_str = entry.path.clone();
                 upsert_entry_in_db(db_path, &entry);
-                let mut entries = entries_ref.write().unwrap();
-                if let Some(pos) = entries.iter().position(|e| e.path == path_str) {
-                    entries[pos] = entry;
-                } else {
-                    entries.push(entry);
-                }
                 updated += 1;
             }
         }
