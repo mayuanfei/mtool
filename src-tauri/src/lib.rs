@@ -17,7 +17,8 @@ use rayon::prelude::*;
 
 use file_search::{
     build_index_full_system, content_matches, delete_entry_in_db, entry_from_path,
-    get_db_path, init_db, parse_query, save_entries_to_db, search_in_db, set_last_built_at,
+    get_db_path, get_last_exit_at, init_db, parse_query, reconcile_changed_since,
+    save_entries_to_db, search_in_db, set_last_built_at, set_last_exit_at,
     should_skip_path, upsert_entry_in_db, FileEntry, IndexEngine, IndexStatus,
     get_watch_roots_pub, SizeOp,
 };
@@ -191,7 +192,12 @@ async fn build_index(
         });
         let total = new_entries.len();
 
-        save_entries_to_db(&db_path, &new_entries);
+        // 通知前端进入"写库"阶段
+        app_clone.emit("index_saving", (0usize, total)).ok();
+
+        save_entries_to_db(&db_path, &new_entries, |saved| {
+            app_clone.emit("index_saving", (saved, total)).ok();
+        });
 
         let now_ts = SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -492,6 +498,38 @@ pub fn run() {
 
             app.manage(engine);
 
+            // ── 启动时增量对账（关机期间修改的文件）──────────────────────────
+            // 仅在索引已存在且记录了上次退出时间时触发；首次运行走全量重建分支
+            if has_data {
+                let last_exit = get_last_exit_at(&db_path);
+                if let Some(since_ts) = last_exit {
+                    let app_handle = app.handle().clone();
+                    let state: tauri::State<IndexEngine> = app.state();
+                    let entries_ref = state.entries.clone();
+                    let db = db_path.clone();
+                    tauri::async_runtime::spawn(async move {
+                        let app_clone = app_handle.clone();
+                        tauri::async_runtime::spawn_blocking(move || {
+                            let updated = reconcile_changed_since(
+                                &db,
+                                entries_ref,
+                                since_ts,
+                                |scanned, updated| {
+                                    app_clone
+                                        .emit("index_reconciling", (scanned, updated))
+                                        .ok();
+                                },
+                            );
+                            app_clone
+                                .emit("index_reconcile_done", updated)
+                                .ok();
+                        })
+                        .await
+                        .ok();
+                    });
+                }
+            }
+
             if !has_data {
                 let app_handle = app.handle().clone();
                 tauri::async_runtime::spawn(async move {
@@ -511,7 +549,14 @@ pub fn run() {
                             app_clone.emit("index_progress", count).ok();
                         });
                         let total = new_entries.len();
-                        save_entries_to_db(&db, &new_entries);
+
+                        // 通知前端进入"写库"阶段
+                        app_clone.emit("index_saving", (0usize, total)).ok();
+
+                        save_entries_to_db(&db, &new_entries, |saved| {
+                            app_clone.emit("index_saving", (saved, total)).ok();
+                        });
+
                         let now_ts = SystemTime::now()
                             .duration_since(UNIX_EPOCH)
                             .map(|d| d.as_secs())
@@ -551,6 +596,17 @@ pub fn run() {
             reveal_in_explorer,
             open_file,
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application")
+        .run(|_app_handle, event| {
+            if let tauri::RunEvent::Exit = event {
+                // 记录退出时间，供下次启动时增量对账使用
+                let db_path = get_db_path();
+                let now_ts = SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .map(|d| d.as_secs())
+                    .unwrap_or(0);
+                set_last_exit_at(&db_path, now_ts);
+            }
+        });
 }

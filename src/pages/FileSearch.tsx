@@ -92,6 +92,11 @@ export function FileSearch() {
   const [isSearching, setIsSearching] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [indexingProgress, setIndexingProgress] = useState<number>(0);
+  // "scanning" = 扫描阶段，"saving" = 写库阶段，"idle" = 完成
+  const [indexPhase, setIndexPhase] = useState<"scanning" | "saving" | "idle">("idle");
+  const [savingProgress, setSavingProgress] = useState<{ saved: number; total: number } | null>(null);
+  // 启动对账状态
+  const [reconcileProgress, setReconcileProgress] = useState<{ scanned: number; updated: number } | null>(null);
   const [searchElapsed, setSearchElapsed] = useState<number | null>(null);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const searchIdRef = useRef(0);
@@ -102,16 +107,45 @@ export function FileSearch() {
 
     const unlistenProgress = listen<number>("index_progress", (event) => {
       setIndexingProgress(event.payload);
+      setIndexPhase("scanning");
       setStatus((prev) => ({ ...prev, is_indexing: true, total: event.payload }));
     });
 
+    // payload: [saved, total]
+    const unlistenSaving = listen<[number, number]>("index_saving", (event) => {
+      const [saved, total] = event.payload;
+      setIndexPhase("saving");
+      setSavingProgress({ saved, total });
+      setStatus((prev) => ({ ...prev, is_indexing: true }));
+    });
+
     const unlistenComplete = listen<number>("index_complete", () => {
+      setIndexPhase("idle");
+      setSavingProgress(null);
       invoke<IndexStatus>("get_index_status").then(setStatus).catch(() => {});
+    });
+
+    // 启动增量对账事件：payload [scanned, updated]
+    const unlistenReconciling = listen<[number, number]>("index_reconciling", (event) => {
+      const [scanned, updated] = event.payload;
+      setReconcileProgress({ scanned, updated });
+    });
+
+    // 对账完成：updated 条记录被更新
+    const unlistenReconcileDone = listen<number>("index_reconcile_done", (event) => {
+      setReconcileProgress(null);
+      // 若有更新，刷新 total
+      if (event.payload > 0) {
+        invoke<IndexStatus>("get_index_status").then(setStatus).catch(() => {});
+      }
     });
 
     return () => {
       unlistenProgress.then((fn) => fn());
+      unlistenSaving.then((fn) => fn());
       unlistenComplete.then((fn) => fn());
+      unlistenReconciling.then((fn) => fn());
+      unlistenReconcileDone.then((fn) => fn());
     };
   }, []);
 
@@ -158,14 +192,19 @@ export function FileSearch() {
   const handleRebuild = async () => {
     setError(null);
     setIndexingProgress(0);
+    setIndexPhase("scanning");
+    setSavingProgress(null);
     setStatus((prev) => ({ ...prev, is_indexing: true }));
     try {
       await invoke<number>("build_index");
       const s = await invoke<IndexStatus>("get_index_status");
       setStatus(s);
+      setIndexPhase("idle");
+      setSavingProgress(null);
     } catch (e) {
       setError(String(e));
       setStatus((prev) => ({ ...prev, is_indexing: false }));
+      setIndexPhase("idle");
     }
   };
 
@@ -189,6 +228,58 @@ export function FileSearch() {
 
   const isIndexing = status.is_indexing;
 
+  // 标题栏状态文案
+  const renderIndexingBadge = () => {
+    if (!isIndexing) {
+      return (
+        <>
+          <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+          <span>
+            已索引&nbsp;
+            <span className="text-slate-300 font-medium">
+              {status.total.toLocaleString()}
+            </span>
+            &nbsp;个文件
+          </span>
+          {status.last_built_at && (
+            <span className="text-slate-600">
+              · 上次建立 {formatDate(status.last_built_at)}
+            </span>
+          )}
+        </>
+      );
+    }
+    if (indexPhase === "saving" && savingProgress) {
+      const pct = savingProgress.total > 0
+        ? Math.round((savingProgress.saved / savingProgress.total) * 100)
+        : 0;
+      return (
+        <>
+          <RefreshCw className="w-3 h-3 animate-spin text-amber-400" />
+          <span className="text-amber-300">
+            正在写入数据库&nbsp;
+            <span className="font-mono tabular-nums text-amber-400">
+              {savingProgress.saved.toLocaleString()}&nbsp;/&nbsp;{savingProgress.total.toLocaleString()}
+            </span>
+            &nbsp;({pct}%)
+          </span>
+        </>
+      );
+    }
+    return (
+      <>
+        <RefreshCw className="w-3 h-3 animate-spin text-indigo-400" />
+        <span className="text-indigo-300">
+          正在扫描...&nbsp;
+          <span className="font-mono tabular-nums text-indigo-400">
+            {indexingProgress.toLocaleString()}
+          </span>
+          &nbsp;个文件
+        </span>
+      </>
+    );
+  };
+
   return (
     <div className="w-full h-full flex flex-col">
 
@@ -202,35 +293,21 @@ export function FileSearch() {
         <div className="flex items-center gap-3">
           {/* 索引状态 */}
           <div className="flex items-center gap-2 text-xs text-slate-400">
-            {isIndexing ? (
-              <>
-                <RefreshCw className="w-3 h-3 animate-spin text-indigo-400" />
-                <span className="text-indigo-300">
-                  正在建立索引...&nbsp;
-                  <span className="font-mono tabular-nums text-indigo-400">
-                    {indexingProgress.toLocaleString()}
-                  </span>
-                  &nbsp;个文件
+            {renderIndexingBadge()}
+            {/* 启动对账进度（不影响主索引状态显示） */}
+            {reconcileProgress && !isIndexing && (
+              <span className="flex items-center gap-1 text-teal-400/80 ml-1">
+                <RefreshCw className="w-3 h-3 animate-spin" />
+                对账中&nbsp;
+                <span className="font-mono tabular-nums">
+                  {reconcileProgress.scanned.toLocaleString()}
                 </span>
-              </>
-            ) : (
-              <>
-                <span
-                  className="w-1.5 h-1.5 rounded-full bg-emerald-500"
-                />
-                <span>
-                  已索引&nbsp;
-                  <span className="text-slate-300 font-medium">
-                    {status.total.toLocaleString()}
-                  </span>
-                  &nbsp;个文件
-                </span>
-                {status.last_built_at && (
-                  <span className="text-slate-600">
-                    · 上次建立 {formatDate(status.last_built_at)}
+                {reconcileProgress.updated > 0 && (
+                  <span className="text-teal-300">
+                    (+{reconcileProgress.updated})
                   </span>
                 )}
-              </>
+              </span>
             )}
           </div>
 
@@ -330,14 +407,37 @@ export function FileSearch() {
             </div>
           )}
 
-          {/* 空态：建索引中 */}
-          {!query.trim() && isIndexing && (
+          {/* 空态：建索引中（扫描阶段） */}
+          {!query.trim() && isIndexing && indexPhase !== "saving" && (
             <div className="flex flex-col items-center justify-center h-full text-slate-600">
               <RefreshCw className="w-10 h-10 mb-3 opacity-30 animate-spin" />
-              <p className="text-sm text-indigo-400">正在后台建立索引...</p>
+              <p className="text-sm text-indigo-400">正在后台扫描文件系统...</p>
               <p className="text-xs mt-1 font-mono tabular-nums">
                 已扫描 {indexingProgress.toLocaleString()} 个文件，完成后可搜索
               </p>
+            </div>
+          )}
+
+          {/* 空态：建索引中（写库阶段） */}
+          {!query.trim() && isIndexing && indexPhase === "saving" && savingProgress && (
+            <div className="flex flex-col items-center justify-center h-full text-slate-600">
+              <RefreshCw className="w-10 h-10 mb-3 opacity-30 animate-spin text-amber-500" />
+              <p className="text-sm text-amber-400">正在将索引写入数据库...</p>
+              <p className="text-xs mt-1 font-mono tabular-nums">
+                {savingProgress.saved.toLocaleString()}&nbsp;/&nbsp;
+                {savingProgress.total.toLocaleString()}&nbsp;条记录
+              </p>
+              {/* 进度条 */}
+              <div className="mt-3 w-48 h-1.5 bg-slate-700 rounded-full overflow-hidden">
+                <div
+                  className="h-full bg-amber-500 transition-all duration-300 rounded-full"
+                  style={{
+                    width: `${savingProgress.total > 0
+                      ? Math.round((savingProgress.saved / savingProgress.total) * 100)
+                      : 0}%`,
+                  }}
+                />
+              </div>
             </div>
           )}
 

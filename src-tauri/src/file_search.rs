@@ -100,33 +100,56 @@ pub fn init_db(db_path: &str) {
     .expect("init db schema");
 }
 
-pub fn save_entries_to_db(db_path: &str, entries: &[FileEntry]) {
-    let mut conn = Connection::open(db_path).expect("open db");
+/// 将全量条目批量写入 SQLite。
+/// 每 BATCH_SIZE 条提交一次事务，降低 WAL 峰值压力；
+/// 每批提交后调用 on_progress(已写条数) 供上层向前端推送进度。
+pub fn save_entries_to_db<F>(db_path: &str, entries: &[FileEntry], on_progress: F)
+where
+    F: Fn(usize),
+{
+    const BATCH_SIZE: usize = 50_000;
+
+    let mut conn = match Connection::open(db_path) {
+        Ok(c) => c,
+        Err(_) => return,
+    };
+
+    // 清空旧数据（单独语句，不纳入后续事务）
     conn.execute("DELETE FROM file_index", []).ok();
-    let tx = conn.transaction().expect("begin tx");
-    {
-        let mut stmt = tx
-            .prepare(
+
+    let mut saved = 0usize;
+    for chunk in entries.chunks(BATCH_SIZE) {
+        let tx = match conn.transaction() {
+            Ok(t) => t,
+            Err(_) => continue,
+        };
+        {
+            let mut stmt = match tx.prepare(
                 "INSERT OR REPLACE INTO file_index
-                (name, path, size, created, modified, is_dir, ext, name_lower)
-                VALUES (?1,?2,?3,?4,?5,?6,?7,?8)",
-            )
-            .expect("prepare stmt");
-        for e in entries {
-            stmt.execute(params![
-                e.name,
-                e.path,
-                e.size as i64,
-                e.created as i64,
-                e.modified as i64,
-                e.is_dir as i32,
-                e.ext,
-                e.name_lower,
-            ])
-            .ok();
+                 (name, path, size, created, modified, is_dir, ext, name_lower)
+                 VALUES (?1,?2,?3,?4,?5,?6,?7,?8)",
+            ) {
+                Ok(s) => s,
+                Err(_) => continue,
+            };
+            for e in chunk {
+                stmt.execute(params![
+                    e.name,
+                    e.path,
+                    e.size as i64,
+                    e.created as i64,
+                    e.modified as i64,
+                    e.is_dir as i32,
+                    e.ext,
+                    e.name_lower,
+                ])
+                .ok();
+            }
         }
+        tx.commit().ok();
+        saved += chunk.len();
+        on_progress(saved);
     }
-    tx.commit().expect("commit tx");
 }
 
 pub fn load_entries_from_db(db_path: &str) -> Vec<FileEntry> {
@@ -174,6 +197,27 @@ pub fn set_last_built_at(db_path: &str, ts: u64) {
         params![ts.to_string()],
     )
     .ok();
+}
+
+pub fn get_last_exit_at(db_path: &str) -> Option<u64> {
+    let conn = Connection::open(db_path).ok()?;
+    conn.query_row(
+        "SELECT value FROM index_meta WHERE key='last_exit_at'",
+        [],
+        |row| row.get::<_, String>(0),
+    )
+    .ok()
+    .and_then(|v| v.parse::<u64>().ok())
+}
+
+pub fn set_last_exit_at(db_path: &str, ts: u64) {
+    if let Ok(conn) = Connection::open(db_path) {
+        conn.execute(
+            "INSERT OR REPLACE INTO index_meta(key,value) VALUES('last_exit_at',?1)",
+            params![ts.to_string()],
+        )
+        .ok();
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -769,4 +813,81 @@ pub fn search_in_db(db_path: &str, parsed: &ParsedQuery, limit: usize) -> Vec<Fi
     })
     .map(|rows| rows.filter_map(|r| r.ok()).collect())
     .unwrap_or_default()
+}
+
+// ---------------------------------------------------------------------------
+// 启动增量对账
+// ---------------------------------------------------------------------------
+
+/// 扫描 watch roots，将 mtime > since_ts 的文件 upsert 到内存和 DB。
+/// 适用于 MTOOL 关闭期间文件被修改/新增的场景。
+/// on_progress(scanned, updated) 每 2000 条调一次。
+/// 返回本次更新的条目数。
+pub fn reconcile_changed_since<F>(
+    db_path: &str,
+    entries_ref: Arc<RwLock<Vec<FileEntry>>>,
+    since_ts: u64,
+    on_progress: F,
+) -> usize
+where
+    F: Fn(usize, usize),
+{
+    let roots = get_watch_roots();
+    let mut scanned = 0usize;
+    let mut updated = 0usize;
+
+    for root in &roots {
+        if !root.exists() {
+            continue;
+        }
+        let walker = WalkDir::new(root)
+            .follow_links(false)
+            .into_iter()
+            .filter_entry(|e| !should_skip_path(e.path()));
+
+        for result in walker {
+            let dir_entry = match result {
+                Ok(e) => e,
+                Err(_) => continue,
+            };
+            scanned += 1;
+
+            let path = dir_entry.path();
+            let meta = match dir_entry.metadata() {
+                Ok(m) => m,
+                Err(_) => continue,
+            };
+
+            let mtime = meta
+                .modified()
+                .ok()
+                .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
+                .map(|d| d.as_secs())
+                .unwrap_or(0);
+
+            if scanned % 2000 == 0 {
+                on_progress(scanned, updated);
+            }
+
+            if mtime <= since_ts {
+                continue;
+            }
+
+            // mtime > since_ts → 需要 upsert
+            if let Some(entry) = entry_from_path(path) {
+                let path_str = entry.path.clone();
+                upsert_entry_in_db(db_path, &entry);
+                let mut entries = entries_ref.write().unwrap();
+                if let Some(pos) = entries.iter().position(|e| e.path == path_str) {
+                    entries[pos] = entry;
+                } else {
+                    entries.push(entry);
+                }
+                updated += 1;
+            }
+        }
+    }
+
+    on_progress(scanned, updated);
+    updated
 }
