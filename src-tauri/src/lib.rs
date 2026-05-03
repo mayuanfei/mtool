@@ -16,9 +16,9 @@ use rayon::prelude::*;
 
 use file_search::{
     build_index_streaming, content_matches, count_entries, delete_entry_in_db,
-    entry_from_path, get_db_path, get_last_exit_at, init_db, parse_query,
-    rebuild_fts5_background, reconcile_changed_since, search_in_db, set_last_built_at,
-    set_last_exit_at, should_skip_path, upsert_entry_in_db, FileEntry, IndexEngine,
+    entry_from_path, get_db_path, init_db, parse_query,
+    rebuild_fts5_background, search_in_db, set_last_built_at,
+    should_skip_path, upsert_entry_in_db, FileEntry, IndexEngine,
     IndexStatus, get_watch_roots_pub,
 };
 
@@ -408,40 +408,11 @@ pub fn run() {
 
             let has_data = count_entries(&db_path) > 0;
 
-            // 启动文件系统监听器（增量更新）
             start_fs_watcher(db_path.clone());
 
             app.manage(engine);
 
-            // ── 启动时增量对账（关机期间修改的文件）──────────────────────────
-            // 仅在索引已存在且记录了上次退出时间时触发；首次运行走全量重建分支
-            if has_data {
-                let last_exit = get_last_exit_at(&db_path);
-                if let Some(since_ts) = last_exit {
-                    let app_handle = app.handle().clone();
-                    let db = db_path.clone();
-                    tauri::async_runtime::spawn(async move {
-                        let app_clone = app_handle.clone();
-                        tauri::async_runtime::spawn_blocking(move || {
-                            let updated = reconcile_changed_since(
-                                &db,
-                                since_ts,
-                                |scanned, updated| {
-                                    app_clone
-                                        .emit("index_reconciling", (scanned, updated))
-                                        .ok();
-                                },
-                            );
-                            app_clone
-                                .emit("index_reconcile_done", updated)
-                                .ok();
-                        })
-                        .await
-                        .ok();
-                    });
-                }
-            }
-
+            // 首次运行才自动建索引；非首次直接用上次的索引
             if !has_data {
                 let app_handle = app.handle().clone();
                 tauri::async_runtime::spawn(async move {
@@ -482,7 +453,6 @@ pub fn run() {
                         app_handle.emit("index_complete", total).ok();
                     }
 
-                    // FTS5 重建在后台进行，不阻塞用户
                     std::thread::spawn(move || {
                         rebuild_fts5_background(&db_fts);
                     });
@@ -509,15 +479,5 @@ pub fn run() {
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
-        .run(|_app_handle, event| {
-            if let tauri::RunEvent::Exit = event {
-                // 记录退出时间，供下次启动时增量对账使用
-                let db_path = get_db_path();
-                let now_ts = SystemTime::now()
-                    .duration_since(UNIX_EPOCH)
-                    .map(|d| d.as_secs())
-                    .unwrap_or(0);
-                set_last_exit_at(&db_path, now_ts);
-            }
-        });
+        .run(|_app_handle, _event| {});
 }

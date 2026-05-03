@@ -91,7 +91,6 @@ export function FileSearch() {
   });
   const [isSearching, setIsSearching] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [reconcileProgress, setReconcileProgress] = useState<{ scanned: number; updated: number } | null>(null);
   const [searchElapsed, setSearchElapsed] = useState<number | null>(null);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const searchIdRef = useRef(0);
@@ -108,26 +107,9 @@ export function FileSearch() {
       invoke<IndexStatus>("get_index_status").then(setStatus).catch(() => {});
     });
 
-    // 启动增量对账事件：payload [scanned, updated]
-    const unlistenReconciling = listen<[number, number]>("index_reconciling", (event) => {
-      const [scanned, updated] = event.payload;
-      setReconcileProgress({ scanned, updated });
-    });
-
-    // 对账完成：updated 条记录被更新
-    const unlistenReconcileDone = listen<number>("index_reconcile_done", (event) => {
-      setReconcileProgress(null);
-      // 若有更新，刷新 total
-      if (event.payload > 0) {
-        invoke<IndexStatus>("get_index_status").then(setStatus).catch(() => {});
-      }
-    });
-
     return () => {
       unlistenProgress.then((fn) => fn());
       unlistenComplete.then((fn) => fn());
-      unlistenReconciling.then((fn) => fn());
-      unlistenReconcileDone.then((fn) => fn());
     };
   }, []);
 
@@ -253,21 +235,6 @@ export function FileSearch() {
           {/* 索引状态 */}
           <div className="flex items-center gap-2 text-xs text-slate-400">
             {renderIndexingBadge()}
-            {/* 启动对账进度（不影响主索引状态显示） */}
-            {reconcileProgress && !isIndexing && (
-              <span className="flex items-center gap-1 text-teal-400/80 ml-1">
-                <RefreshCw className="w-3 h-3 animate-spin" />
-                对账中&nbsp;
-                <span className="font-mono tabular-nums">
-                  {reconcileProgress.scanned.toLocaleString()}
-                </span>
-                {reconcileProgress.updated > 0 && (
-                  <span className="text-teal-300">
-                    (+{reconcileProgress.updated})
-                  </span>
-                )}
-              </span>
-            )}
           </div>
 
           <button

@@ -8,7 +8,6 @@ use std::sync::mpsc;
 use std::sync::{Arc, RwLock};
 use std::time::{Duration, UNIX_EPOCH};
 use rayon::prelude::*;
-use walkdir::WalkDir;
 
 const CONTENT_BUFFER_BYTES: usize = 64 * 1024;
 
@@ -111,7 +110,7 @@ CREATE VIRTUAL TABLE IF NOT EXISTS file_fts USING fts5(
 
 /// DROP + 重建 file_index / file_fts 表。
 /// O(1)，比 DELETE FROM file_index（在 WAL 模式下需生成大量 WAL 页）快一到两个数量级。
-/// 保留 index_meta 表，避免丢失 last_built_at / last_exit_at。
+/// 保留 index_meta 表，避免丢失 last_built_at。
 fn reset_index_tables(conn: &Connection) {
     conn.execute_batch(
         "DROP TABLE IF EXISTS file_index;
@@ -151,27 +150,6 @@ pub fn set_last_built_at(db_path: &str, ts: u64) {
         params![ts.to_string()],
     )
     .ok();
-}
-
-pub fn get_last_exit_at(db_path: &str) -> Option<u64> {
-    let conn = Connection::open(db_path).ok()?;
-    conn.query_row(
-        "SELECT value FROM index_meta WHERE key='last_exit_at'",
-        [],
-        |row| row.get::<_, String>(0),
-    )
-    .ok()
-    .and_then(|v| v.parse::<u64>().ok())
-}
-
-pub fn set_last_exit_at(db_path: &str, ts: u64) {
-    if let Ok(conn) = Connection::open(db_path) {
-        conn.execute(
-            "INSERT OR REPLACE INTO index_meta(key,value) VALUES('last_exit_at',?1)",
-            params![ts.to_string()],
-        )
-        .ok();
-    }
 }
 
 // ---------------------------------------------------------------------------
@@ -1052,71 +1030,4 @@ pub fn search_in_db(db_path: &str, parsed: &ParsedQuery, limit: usize) -> Vec<Fi
     search_via_sqlite(&conn, parsed, limit)
 }
 
-// ---------------------------------------------------------------------------
-// 启动增量对账
-// ---------------------------------------------------------------------------
 
-/// 扫描 watch roots，将 mtime > since_ts 的文件 upsert 到 DB。
-/// 适用于 MTOOL 关闭期间文件被修改/新增的场景。
-/// on_progress(scanned, updated) 每 2000 条调一次。
-/// 返回本次更新的条目数。
-pub fn reconcile_changed_since<F>(
-    db_path: &str,
-    since_ts: u64,
-    on_progress: F,
-) -> usize
-where
-    F: Fn(usize, usize),
-{
-    let roots = get_watch_roots();
-    let mut scanned = 0usize;
-    let mut updated = 0usize;
-
-    for root in &roots {
-        if !root.exists() {
-            continue;
-        }
-        let walker = WalkDir::new(root)
-            .follow_links(false)
-            .into_iter()
-            .filter_entry(|e| !should_skip_path(e.path()));
-
-        for result in walker {
-            let dir_entry = match result {
-                Ok(e) => e,
-                Err(_) => continue,
-            };
-            scanned += 1;
-
-            let path = dir_entry.path();
-            let meta = match dir_entry.metadata() {
-                Ok(m) => m,
-                Err(_) => continue,
-            };
-
-            let mtime = meta
-                .modified()
-                .ok()
-                .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
-                .map(|d| d.as_secs())
-                .unwrap_or(0);
-
-            if scanned % 2000 == 0 {
-                on_progress(scanned, updated);
-            }
-
-            if mtime <= since_ts {
-                continue;
-            }
-
-            // mtime > since_ts → 需要 upsert（仅更新 DB，无内存 Vec）
-            if let Some(entry) = entry_from_path(path) {
-                upsert_entry_in_db(db_path, &entry);
-                updated += 1;
-            }
-        }
-    }
-
-    on_progress(scanned, updated);
-    updated
-}
