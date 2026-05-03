@@ -15,7 +15,7 @@ use tauri::{Emitter, Manager};
 use rayon::prelude::*;
 
 use file_search::{
-    build_index_streaming, content_matches, count_entries, delete_entry_in_db,
+    build_index_streaming, content_matches, delete_entry_in_db,
     entry_from_path, get_db_path, init_db, parse_query,
     rebuild_fts5_background, search_in_db, set_last_built_at,
     should_skip_path, upsert_entry_in_db, FileEntry, IndexEngine,
@@ -421,61 +421,9 @@ pub fn run() {
             let engine = IndexEngine::new_with_db(db_path.clone());
             engine.load_from_db();
 
-            let has_data = count_entries(&db_path) > 0;
-
             start_fs_watcher(db_path.clone());
 
             app.manage(engine);
-
-            // 首次运行才自动建索引；非首次直接用上次的索引
-            if !has_data {
-                let app_handle = app.handle().clone();
-                tauri::async_runtime::spawn(async move {
-                    let state: tauri::State<IndexEngine> = app_handle.state();
-                    let status_ref = state.status.clone();
-                    let db = state.db_path.clone();
-
-                    {
-                        let mut s = status_ref.write().unwrap();
-                        s.is_indexing = true;
-                    }
-
-                    let app_clone = app_handle.clone();
-                    let status_ref_clone = status_ref.clone();
-                    let db_fts = db.clone();
-                    let result = tauri::async_runtime::spawn_blocking(move || {
-                        let total = build_index_streaming(&db, move |count, _path| {
-                            if let Ok(mut s) = status_ref_clone.write() {
-                                s.total = count;
-                            }
-                            app_clone.emit("index_progress", count).ok();
-                        });
-                        let now_ts = SystemTime::now()
-                            .duration_since(UNIX_EPOCH)
-                            .map(|d| d.as_secs())
-                            .unwrap_or(0);
-                        set_last_built_at(&db, now_ts);
-                        (total, now_ts)
-                    })
-                    .await;
-
-                    if let Ok((total, ts)) = result {
-                        let mut s = status_ref.write().unwrap();
-                        s.is_indexing = false;
-                        s.total = total;
-                        s.last_built_at = Some(ts);
-                        // 释放 write lock 后刷新内存缓存
-                        drop(s);
-                        state.load_from_db();
-                        app_handle.emit("index_progress", total).ok();
-                        app_handle.emit("index_complete", total).ok();
-                    }
-
-                    std::thread::spawn(move || {
-                        rebuild_fts5_background(&db_fts);
-                    });
-                });
-            }
 
             Ok(())
         })

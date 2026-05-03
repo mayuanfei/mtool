@@ -58,22 +58,6 @@ impl IndexEngine {
             s.total = total;
             s.last_built_at = last_built_at;
         }
-        // 加载内存缓存
-        let conn = match Connection::open(&self.db_path) {
-            Ok(c) => c,
-            Err(_) => return,
-        };
-        let mut cache: Vec<(String, String)> = Vec::new();
-        if let Ok(mut stmt) = conn.prepare("SELECT name_lower, path FROM file_index") {
-            if let Ok(rows) = stmt.query_map([], |row| {
-                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
-            }) {
-                for row in rows.flatten() {
-                    cache.push(row);
-                }
-            }
-        }
-        *self.name_cache.write().unwrap() = cache;
     }
 }
 
@@ -97,7 +81,7 @@ pub fn init_db(db_path: &str) {
     let conn = Connection::open(db_path).expect("open db");
     conn.execute_batch(
         "PRAGMA journal_mode=WAL;
-         PRAGMA cache_size=-65536;",
+         PRAGMA cache_size=-8192;",
     )
     .ok();
     conn.execute_batch(SCHEMA_SQL).expect("init db schema");
@@ -589,7 +573,7 @@ where
         }
         conn.execute_batch(
             "PRAGMA synchronous=NORMAL;
-             PRAGMA cache_size=-65536;",
+             PRAGMA cache_size=-8192;",
         ).ok();
         total
     });
