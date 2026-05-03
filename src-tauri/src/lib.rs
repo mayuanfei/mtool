@@ -16,11 +16,12 @@ use tauri::{Emitter, Manager};
 use rayon::prelude::*;
 
 use file_search::{
-    build_index_streaming, content_matches, delete_entry_in_db,
-    entry_from_path, get_db_path, init_db,
-    parse_query, rebuild_fts5_background, search_in_db,
-    set_last_built_at, should_skip_path, upsert_entry_in_db,
-    FileEntry, IndexEngine, IndexStatus, get_watch_roots_pub,
+    build_index_streaming, clear_index_tables, content_matches,
+    count_entries, delete_entry_in_db, entry_from_path,
+    get_db_path, init_db, is_index_disabled, parse_query,
+    rebuild_fts5_background, search_in_db, set_last_built_at,
+    should_skip_path, upsert_entry_in_db, FileEntry, IndexEngine,
+    IndexStatus, get_watch_roots_pub,
 };
 
 // ---------------------------------------------------------------------------
@@ -187,6 +188,11 @@ async fn build_index(
     // 重置禁用标志
     state.disabled.store(false, Ordering::Relaxed);
     let was_shutdown = state.shutdown.swap(false, Ordering::Relaxed);
+    // 清除持久化的禁用标记，防止重启后又被识别为禁用
+    if let Ok(conn) = rusqlite::Connection::open(&db_path) {
+        conn.execute("DELETE FROM index_meta WHERE key='disabled'", [])
+            .ok();
+    }
     {
         let mut s = status_ref.write().unwrap();
         s.is_indexing = true;
@@ -300,11 +306,17 @@ async fn disable_file_search(
 
     let db_path = state.db_path.clone();
     tauri::async_runtime::spawn_blocking(move || {
-        // 等 watcher 线程退出（500ms 轮询周期 + 缓冲），避免 watcher 访问已删除的 DB
+        // 等 watcher 线程退出（500ms 轮询周期 + 缓冲），避免 watcher 访问正在被清空的表
         std::thread::sleep(Duration::from_millis(600));
-        let _ = std::fs::remove_file(&db_path);
-        let _ = std::fs::remove_file(format!("{}-wal", db_path));
-        let _ = std::fs::remove_file(format!("{}-shm", db_path));
+        clear_index_tables(&db_path);
+        // 持久化禁用状态，下次启动时跳过自动建索引和 watcher
+        if let Ok(conn) = rusqlite::Connection::open(&db_path) {
+            conn.execute(
+                "INSERT OR REPLACE INTO index_meta(key,value) VALUES('disabled','1')",
+                [],
+            )
+            .ok();
+        }
     })
     .await
     .map_err(|e| e.to_string())?;
@@ -461,11 +473,67 @@ pub fn run() {
             let engine = IndexEngine::new_with_db(db_path.clone());
             engine.load_from_db();
 
-            let disabled = engine.disabled.clone();
-            let shutdown = engine.shutdown.clone();
-            start_fs_watcher(db_path.clone(), disabled, shutdown);
+            let index_disabled = is_index_disabled(&db_path);
+            if index_disabled {
+                engine.disabled.store(true, Ordering::Relaxed);
+                engine.shutdown.store(true, Ordering::Relaxed);
+            } else {
+                let disabled = engine.disabled.clone();
+                let shutdown = engine.shutdown.clone();
+                start_fs_watcher(db_path.clone(), disabled, shutdown);
+            }
+
+            let has_data = count_entries(&db_path) > 0;
 
             app.manage(engine);
+
+            // 首次运行（无数据且未禁用）自动建索引
+            if !index_disabled && !has_data {
+                let app_handle = app.handle().clone();
+                tauri::async_runtime::spawn(async move {
+                    let state: tauri::State<IndexEngine> = app_handle.state();
+                    let status_ref = state.status.clone();
+                    let db = state.db_path.clone();
+
+                    {
+                        let mut s = status_ref.write().unwrap();
+                        s.is_indexing = true;
+                    }
+
+                    let app_clone = app_handle.clone();
+                    let status_ref_clone = status_ref.clone();
+                    let db_fts = db.clone();
+                    let result = tauri::async_runtime::spawn_blocking(move || {
+                        let total = build_index_streaming(&db, move |count, _path| {
+                            if let Ok(mut s) = status_ref_clone.write() {
+                                s.total = count;
+                            }
+                            app_clone.emit("index_progress", count).ok();
+                        });
+                        let now_ts = SystemTime::now()
+                            .duration_since(UNIX_EPOCH)
+                            .map(|d| d.as_secs())
+                            .unwrap_or(0);
+                        set_last_built_at(&db, now_ts);
+                        (total, now_ts)
+                    })
+                    .await;
+
+                    if let Ok((total, ts)) = result {
+                        let mut s = status_ref.write().unwrap();
+                        s.is_indexing = false;
+                        s.total = total;
+                        s.last_built_at = Some(ts);
+                        state.load_from_db();
+                        app_handle.emit("index_progress", total).ok();
+                        app_handle.emit("index_complete", total).ok();
+                    }
+
+                    std::thread::spawn(move || {
+                        rebuild_fts5_background(&db_fts);
+                    });
+                });
+            }
 
             Ok(())
         })

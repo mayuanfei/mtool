@@ -273,7 +273,10 @@ pub fn should_skip_path(path: &Path) -> bool {
             "\\windows\\temp",
         ];
         for prefix in &win_skip {
-            if without_drive.starts_with(prefix) {
+            if without_drive.as_bytes().starts_with(prefix.as_bytes())
+                && (without_drive.len() == prefix.len()
+                    || without_drive.as_bytes().get(prefix.len()) == Some(&b'\\'))
+            {
                 return true;
             }
         }
@@ -820,12 +823,47 @@ pub fn upsert_entry_in_db(db_path: &str, entry: &FileEntry) {
 
 /// 在 SQLite 中删除单条记录（按路径）
 pub fn delete_entry_in_db(db_path: &str, path: &str) {
+    let mut conn = match Connection::open(db_path) {
+        Ok(c) => c,
+        Err(_) => return,
+    };
+    let tx = match conn.transaction() {
+        Ok(t) => t,
+        Err(_) => return,
+    };
+    tx.execute("DELETE FROM file_index WHERE path=?1", params![path]).ok();
+    tx.execute("DELETE FROM file_fts WHERE path=?1", params![path]).ok();
+    tx.commit().ok();
+}
+
+/// 清空索引数据表（保留 index_meta），用于禁用文件搜索时释放磁盘空间
+pub fn clear_index_tables(db_path: &str) {
     let conn = match Connection::open(db_path) {
         Ok(c) => c,
         Err(_) => return,
     };
-    conn.execute("DELETE FROM file_index WHERE path=?1", params![path]).ok();
-    conn.execute("DELETE FROM file_fts WHERE path=?1", params![path]).ok();
+    conn.execute_batch(
+        "DROP TABLE IF EXISTS file_index;
+         DROP TABLE IF EXISTS file_fts;",
+    )
+    .ok();
+    conn.execute_batch(SCHEMA_SQL).ok();
+}
+
+/// 查询 index_meta 中是否标记为已禁用
+pub fn is_index_disabled(db_path: &str) -> bool {
+    let conn = match Connection::open(db_path) {
+        Ok(c) => c,
+        Err(_) => return false,
+    };
+    conn.query_row(
+        "SELECT value FROM index_meta WHERE key='disabled'",
+        [],
+        |row| row.get::<_, String>(0),
+    )
+    .ok()
+    .map(|v| v == "1")
+    .unwrap_or(false)
 }
 
 // ---------------------------------------------------------------------------
