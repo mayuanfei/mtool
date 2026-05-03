@@ -164,6 +164,13 @@ fn save_md_file_as(content: &str) -> Result<String, String> {
     }
 }
 
+#[tauri::command]
+fn open_md_file_by_path(path: &str) -> Result<(String, String), String> {
+    let content =
+        fs::read_to_string(path).map_err(|e| format!("Failed to read file: {}", e))?;
+    Ok((path.to_string(), content))
+}
+
 // ---------------------------------------------------------------------------
 // 文件搜索命令
 // ---------------------------------------------------------------------------
@@ -480,6 +487,7 @@ pub fn run() {
             copy_qr_to_clipboard,
             download_qr,
             open_md_file,
+            open_md_file_by_path,
             save_md_file,
             save_md_file_as,
             build_index,

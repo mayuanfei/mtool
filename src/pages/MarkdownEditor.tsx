@@ -1,6 +1,7 @@
 import { useState, useCallback, useEffect, useRef, useMemo } from 'react';
-import { Trash2, FolderOpen, Save, Copy, Check, Eye, Edit3, FileText, Download } from 'lucide-react';
+import { Trash2, FolderOpen, Save, Copy, Check, Eye, Edit3, FileText, Download, Upload } from 'lucide-react';
 import { invoke } from '@tauri-apps/api/core';
+import { getCurrentWebview } from '@tauri-apps/api/webview';
 import { Marked } from 'marked';
 import { markedHighlight } from 'marked-highlight';
 import hljs from 'highlight.js';
@@ -12,6 +13,7 @@ export function MarkdownEditor() {
   const [filePath, setFilePath] = useState('');
   const [isDirty, setIsDirty] = useState(false);
   const [isCopied, setIsCopied] = useState(false);
+  const [isDragOver, setIsDragOver] = useState(false);
   const [viewMode, setViewMode] = useState<'split' | 'edit' | 'preview'>('preview');
   const previewRef = useRef<HTMLDivElement>(null);
   const editorRef = useRef<HTMLTextAreaElement>(null);
@@ -95,6 +97,25 @@ export function MarkdownEditor() {
     setIsDirty(false);
   }, []);
 
+  // Drag-drop visual feedback
+  const handleDragOver = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragOver(true);
+  }, []);
+
+  const handleDragLeave = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragOver(false);
+  }, []);
+
+  const handleDrop = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragOver(false);
+  }, []);
+
   // Copy rendered HTML
   const handleCopy = useCallback(async () => {
     if (!content) return;
@@ -106,6 +127,32 @@ export function MarkdownEditor() {
       // fallback
     }
   }, [content]);
+
+  // Drag-drop file open
+  useEffect(() => {
+    const setup = async () => {
+      const unlisten = await getCurrentWebview().onDragDropEvent(async (event) => {
+        if (event.payload.type === 'drop') {
+          const paths = event.payload.paths;
+          if (!paths || paths.length === 0) return;
+          const droppedPath = paths[0];
+          const ext = droppedPath.split('.').pop()?.toLowerCase();
+          if (!ext || !['md', 'markdown', 'txt'].includes(ext)) return;
+          try {
+            const result = await invoke<[string, string]>('open_md_file_by_path', { path: droppedPath });
+            setFilePath(result[0]);
+            setContent(result[1]);
+            setIsDirty(false);
+          } catch {
+            // read error
+          }
+        }
+      });
+      return unlisten;
+    };
+    const cleanup = setup();
+    return () => { cleanup.then(fn => fn()); };
+  }, []);
 
   // Keyboard shortcuts
   useEffect(() => {
@@ -176,7 +223,13 @@ export function MarkdownEditor() {
   const fileName = filePath ? filePath.split('/').pop() || filePath.split('\\').pop() || 'Untitled' : t('Untitled');
 
   return (
-    <div className="w-full h-full flex flex-col">
+    <div
+      className="w-full h-full flex flex-col relative"
+      onDragOver={handleDragOver}
+      onDragEnter={handleDragOver}
+      onDragLeave={handleDragLeave}
+      onDrop={handleDrop}
+    >
       {/* Header */}
       <div className="flex justify-between items-center mb-6 border-b border-slate-800 pb-4">
         <div className="flex items-center gap-3">
@@ -333,6 +386,15 @@ export function MarkdownEditor() {
           MTOOL Desktop Tools {new Date().getFullYear()}
         </div>
       </footer>
+
+      {isDragOver && (
+        <div className="absolute inset-0 z-50 flex items-center justify-center bg-indigo-950/80 border-2 border-dashed border-indigo-400 rounded-xl pointer-events-none">
+          <div className="flex flex-col items-center gap-3 text-indigo-300">
+            <Upload className="w-12 h-12" />
+            <span className="text-lg font-semibold">{t('Release to open file')}</span>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

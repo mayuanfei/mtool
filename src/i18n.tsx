@@ -110,6 +110,7 @@ const translations = {
     'Preview Mode': 'Preview Mode',
     'Collapse Sidebar': 'Collapse Sidebar',
     'Expand Sidebar': 'Expand Sidebar',
+    'Release to open file': 'Release to open file',
 
     // FileSearch
     'File Search': 'File Search',
@@ -241,6 +242,7 @@ const translations = {
     'Preview Mode': '预览模式',
     'Collapse Sidebar': '收起侧边栏',
     'Expand Sidebar': '展开侧边栏',
+    'Release to open file': '释放以打开文件',
 
     // FileSearch
     'File Search': '文件搜索',
