@@ -61,6 +61,31 @@ impl IndexEngine {
     }
 }
 
+/// 确保 name_cache 已从 SQLite 加载（无锁检查 + 单次加载）
+pub fn ensure_name_cache_loaded(
+    name_cache: &Arc<RwLock<Vec<(String, String)>>>,
+    db_path: &str,
+) {
+    if !name_cache.read().unwrap().is_empty() {
+        return;
+    }
+    let conn = match Connection::open(db_path) {
+        Ok(c) => c,
+        Err(_) => return,
+    };
+    let mut cache: Vec<(String, String)> = Vec::new();
+    if let Ok(mut stmt) = conn.prepare("SELECT name_lower, path FROM file_index") {
+        if let Ok(rows) = stmt.query_map([], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        }) {
+            for row in rows.flatten() {
+                cache.push(row);
+            }
+        }
+    }
+    *name_cache.write().unwrap() = cache;
+}
+
 // ---------------------------------------------------------------------------
 // 跨平台数据库路径
 // ---------------------------------------------------------------------------
@@ -364,7 +389,7 @@ fn get_system_roots() -> Vec<PathBuf> {
 /// 不对每个条目单独 stat（metadata()），改用 DirEntry 缓存的 file_type + 单次 lstat 批量获取。
 fn scan_dir_parallel(
     dir: &Path,
-    tx: &mpsc::Sender<Vec<FileEntry>>,
+    tx: &mpsc::SyncSender<Vec<FileEntry>>,
     counter: &Arc<AtomicUsize>,
 ) {
     let entries = match std::fs::read_dir(dir) {
@@ -433,7 +458,7 @@ fn scan_dir_parallel(
 /// scan_dir_parallel 的 owned 版本（供 rayon 闭包使用）
 fn scan_dir_parallel_owned(
     dir: PathBuf,
-    tx: mpsc::Sender<Vec<FileEntry>>,
+    tx: mpsc::SyncSender<Vec<FileEntry>>,
     counter: Arc<AtomicUsize>,
 ) {
     let entries = match std::fs::read_dir(&dir) {
@@ -539,8 +564,8 @@ where
         emitter_cb(emitter_counter.load(Ordering::Relaxed), None);
     });
 
-    // ── DB writer 线程：从 channel 接收条目，攒够 FLUSH_SIZE 再写 ────────
-    let (tx, rx): (mpsc::Sender<Vec<FileEntry>>, mpsc::Receiver<Vec<FileEntry>>) = mpsc::channel();
+    // ── DB writer 线程：从有界 channel 接收条目，攒够 FLUSH_SIZE 再写 ────────
+    let (tx, rx) = mpsc::sync_channel::<Vec<FileEntry>>(64);
     let db_path_writer = db_path.to_string();
     let writer_counter = counter.clone();
     let db_thread = std::thread::spawn(move || {
@@ -550,7 +575,6 @@ where
         };
         conn.execute_batch(
             "PRAGMA synchronous=OFF;
-             PRAGMA temp_store=MEMORY;
              PRAGMA cache_size=-131072;",
         ).ok();
         let mut total = 0usize;
@@ -609,7 +633,6 @@ pub fn rebuild_fts5_background(db_path: &str) {
     };
     conn.execute_batch(
         "PRAGMA synchronous=OFF;
-         PRAGMA temp_store=MEMORY;
          PRAGMA cache_size=-131072;",
     ).ok();
     conn.execute_batch(

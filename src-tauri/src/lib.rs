@@ -16,10 +16,10 @@ use rayon::prelude::*;
 
 use file_search::{
     build_index_streaming, content_matches, delete_entry_in_db,
-    entry_from_path, get_db_path, init_db, parse_query,
-    rebuild_fts5_background, search_in_db, set_last_built_at,
-    should_skip_path, upsert_entry_in_db, FileEntry, IndexEngine,
-    IndexStatus, get_watch_roots_pub,
+    ensure_name_cache_loaded, entry_from_path, get_db_path, init_db,
+    parse_query, rebuild_fts5_background, search_in_db,
+    set_last_built_at, should_skip_path, upsert_entry_in_db,
+    FileEntry, IndexEngine, IndexStatus, get_watch_roots_pub,
 };
 
 // ---------------------------------------------------------------------------
@@ -252,6 +252,7 @@ async fn search_files(
     // ── 非 content 查询：直接走 search_in_db（内部路由 FTS5 / 内存 / LIKE）────────────
     if parsed.content_filter.is_none() {
         return tauri::async_runtime::spawn_blocking(move || {
+            ensure_name_cache_loaded(&name_cache, &db_path);
             let cache_guard = name_cache.read().unwrap();
             let cache_slice: &[(String, String)] = &cache_guard;
             search_in_db(&db_path, &parsed, limit, Some(cache_slice))
@@ -263,6 +264,7 @@ async fn search_files(
     // ── content 过滤 → SQLite 取候选，rayon 并行扫文件内容 ─────────────────────
     let content_needle = parsed.content_filter.as_ref().unwrap().as_bytes().to_vec();
     let results = tauri::async_runtime::spawn_blocking(move || {
+        ensure_name_cache_loaded(&name_cache, &db_path);
         let cache_guard = name_cache.read().unwrap();
         let cache_slice: &[(String, String)] = &cache_guard;
         let candidates = search_in_db(&db_path, &parsed, 100_000, Some(cache_slice));
