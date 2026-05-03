@@ -91,7 +91,6 @@ export function FileSearch() {
   });
   const [isSearching, setIsSearching] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [currentScanPath, setCurrentScanPath] = useState<string>("");
   const [reconcileProgress, setReconcileProgress] = useState<{ scanned: number; updated: number } | null>(null);
   const [searchElapsed, setSearchElapsed] = useState<number | null>(null);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -101,14 +100,11 @@ export function FileSearch() {
   useEffect(() => {
     invoke<IndexStatus>("get_index_status").then(setStatus).catch(() => {});
 
-    const unlistenProgress = listen<[number, string]>("index_progress", (event) => {
-      const [count, path] = event.payload;
-      setStatus((prev) => ({ ...prev, is_indexing: true, total: count }));
-      setCurrentScanPath(path || "");
+    const unlistenProgress = listen<number>("index_progress", (event) => {
+      setStatus((prev) => ({ ...prev, is_indexing: true, total: event.payload }));
     });
 
     const unlistenComplete = listen<number>("index_complete", () => {
-      setCurrentScanPath("");
       invoke<IndexStatus>("get_index_status").then(setStatus).catch(() => {});
     });
 
@@ -378,11 +374,6 @@ export function FileSearch() {
               <p className="text-xs mt-1 font-mono tabular-nums">
                 已建立 {status.total.toLocaleString()} 条，完成后可搜索
               </p>
-              {currentScanPath && (
-                <p className="text-[10px] mt-2 text-slate-600 font-mono max-w-[70%] truncate" title={currentScanPath}>
-                  当前：{currentScanPath}
-                </p>
-              )}
             </div>
           )}
 

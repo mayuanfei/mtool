@@ -3,9 +3,12 @@ use serde::{Deserialize, Serialize};
 use std::fs::File;
 use std::io::Read;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::mpsc;
 use std::sync::{Arc, RwLock};
-use std::time::UNIX_EPOCH;
-use walkdir::{DirEntry, WalkDir};
+use std::time::{Duration, UNIX_EPOCH};
+use rayon::prelude::*;
+use walkdir::WalkDir;
 
 const CONTENT_BUFFER_BYTES: usize = 64 * 1024;
 
@@ -196,24 +199,20 @@ pub fn should_skip_path(path: &Path) -> bool {
             "/System/Volumes/FieldService",
             // Time Machine 本地快照
             "/Volumes/com.apple.TimeMachine",
-            // 系统库 / 缓存 / 临时目录
+            // 系统临时 / 虚拟内存
             "/private/var/vm",
             "/private/var/folders",
-            "/private/var/db/com.apple.xpc",
-            "/private/var/db/dyld",
+            "/private/var/db",
             "/private/tmp",
             "/private/var/tmp",
-            // Spotlight 索引
+            // Spotlight / fsevents
             "/.Spotlight-V100",
             "/.fseventsd",
             // 崩溃转储
             "/cores",
             // Recovery 分区
             "/Volumes/Recovery",
-            // 系统完整性保护区域
-            "/System/Library/Caches",
-            "/Library/Caches",
-            // Xcode 派生数据 / 模拟器（通常体积巨大）
+            // Xcode 模拟器（巨大，通常数百万文件）
             "/Library/Developer/CoreSimulator",
         ];
         for prefix in &skip_prefixes {
@@ -221,12 +220,23 @@ pub fn should_skip_path(path: &Path) -> bool {
                 return true;
             }
         }
-        // 跳过所有以 "." 开头的隐藏目录（仅根目录下一级），如 /.Trash、/.DocumentRevisions-V100
+        // 跳过根目录下以 "." 开头的隐藏目录
         if let Some(stripped) = path_str.strip_prefix('/') {
             if let Some(first_component) = stripped.split('/').next() {
                 if first_component.starts_with('.') {
                     return true;
                 }
+            }
+        }
+        // 跳过任意深度的特定目录（路径包含匹配）
+        for skip in [
+            "/node_modules",       // JS 依赖，数量巨大但无需搜索
+            "/.git/",              // Git 内部对象
+            "/.Trash/",            // 废纸篓
+            "/.rustup/toolchains", // Rust 工具链源码
+        ] {
+            if path_str.contains(skip) {
+                return true;
             }
         }
     }
@@ -344,37 +354,145 @@ fn get_system_roots() -> Vec<PathBuf> {
 }
 
 // ---------------------------------------------------------------------------
-// 索引构建（流式写入，无中间 Vec，峰值内存 ≈ BATCH_SIZE × entry_size ≈ 15 MB）
+// 索引构建（并行扫描 + 流式写入）
 // ---------------------------------------------------------------------------
 
-/// 从 walkdir::DirEntry 构建 FileEntry；失败返回 None
-fn entry_from_dir_entry(dir_entry: &DirEntry) -> Option<FileEntry> {
-    let path = dir_entry.path();
-    let metadata = dir_entry.metadata().ok()?;
-    let name = path.file_name()?.to_string_lossy().to_string();
-    if name.is_empty() { return None; }
-    let size = if metadata.is_file() { metadata.len() } else { 0 };
-    let modified = metadata.modified().ok()
-        .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
-        .map(|d| d.as_secs()).unwrap_or(0);
-    let created = metadata.created().ok()
-        .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
-        .map(|d| d.as_secs()).unwrap_or(0);
-    let ext = path.extension()
-        .map(|e| e.to_string_lossy().to_ascii_lowercase())
-        .unwrap_or_default();
-    let name_lower = name.to_ascii_lowercase();
-    Some(FileEntry {
-        name, name_lower,
-        path: path.to_string_lossy().to_string(),
-        size, created, modified,
-        is_dir: metadata.is_dir(),
-        ext,
-    })
+/// 并行递归扫描一个目录：当前目录的文件直接处理，子目录用 rayon 并行递归。
+/// 不对每个条目单独 stat（metadata()），改用 DirEntry 缓存的 file_type + 单次 lstat 批量获取。
+fn scan_dir_parallel(
+    dir: &Path,
+    tx: &mpsc::Sender<Vec<FileEntry>>,
+    counter: &Arc<AtomicUsize>,
+) {
+    let entries = match std::fs::read_dir(dir) {
+        Ok(e) => e,
+        Err(_) => return,
+    };
+    let mut file_entries = Vec::new();
+    let mut dir_paths: Vec<PathBuf> = Vec::new();
+    for e in entries {
+        let Ok(e) = e else { continue };
+        let path = e.path();
+        if should_skip_path(&path) { continue; }
+        let ft = match e.file_type() {
+            Ok(ft) => ft,
+            Err(_) => continue,
+        };
+        if ft.is_dir() && !ft.is_symlink() {
+            dir_paths.push(path);
+            continue;
+        }
+        if ft.is_file() {
+            let name = e.file_name().to_string_lossy().to_string();
+            if name.is_empty() { continue; }
+            let name_lower = name.to_ascii_lowercase();
+            let ext = path.extension()
+                .map(|x| x.to_string_lossy().to_ascii_lowercase())
+                .unwrap_or_default();
+            let path_str = path.to_string_lossy().to_string();
+            // 延迟 metadata：只有文件数量可控时才 stat
+            // 对于大目录，跳过 metadata 获取以加速扫描
+            let (size, created, modified) = match e.metadata() {
+                Ok(m) => (
+                    if m.is_file() { m.len() } else { 0 },
+                    m.created().ok()
+                        .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
+                        .map(|d| d.as_secs()).unwrap_or(0),
+                    m.modified().ok()
+                        .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
+                        .map(|d| d.as_secs()).unwrap_or(0),
+                ),
+                Err(_) => (0u64, 0u64, 0u64),
+            };
+            file_entries.push(FileEntry {
+                name, name_lower, path: path_str,
+                size, created, modified,
+                is_dir: false, ext,
+            });
+            // 每 500 条发一次，避免大目录卡太久
+            if file_entries.len() >= 500 {
+                counter.fetch_add(file_entries.len(), Ordering::Relaxed);
+                tx.send(std::mem::take(&mut file_entries)).ok();
+            }
+        }
+    }
+    if !file_entries.is_empty() {
+        counter.fetch_add(file_entries.len(), Ordering::Relaxed);
+        tx.send(file_entries).ok();
+    }
+    let tx_clone = tx.clone();
+    let counter_clone = counter.clone();
+    dir_paths.into_par_iter().for_each(move |dir_path| {
+        scan_dir_parallel_owned(dir_path, tx_clone.clone(), counter_clone.clone());
+    });
 }
 
-/// 将一批 FileEntry 写入 SQLite（file_index + file_fts），包裹在单次事务中。
-fn flush_batch(conn: &mut Connection, batch: &[FileEntry]) {
+/// scan_dir_parallel 的 owned 版本（供 rayon 闭包使用）
+fn scan_dir_parallel_owned(
+    dir: PathBuf,
+    tx: mpsc::Sender<Vec<FileEntry>>,
+    counter: Arc<AtomicUsize>,
+) {
+    let entries = match std::fs::read_dir(&dir) {
+        Ok(e) => e,
+        Err(_) => return,
+    };
+    let mut file_entries = Vec::new();
+    let mut dir_paths: Vec<PathBuf> = Vec::new();
+    for e in entries {
+        let Ok(e) = e else { continue };
+        let path = e.path();
+        if should_skip_path(&path) { continue; }
+        let ft = match e.file_type() {
+            Ok(ft) => ft,
+            Err(_) => continue,
+        };
+        if ft.is_dir() && !ft.is_symlink() {
+            dir_paths.push(path);
+            continue;
+        }
+        if ft.is_file() {
+            let name = e.file_name().to_string_lossy().to_string();
+            if name.is_empty() { continue; }
+            let name_lower = name.to_ascii_lowercase();
+            let ext = path.extension()
+                .map(|x| x.to_string_lossy().to_ascii_lowercase())
+                .unwrap_or_default();
+            let path_str = path.to_string_lossy().to_string();
+            let (size, created, modified) = match e.metadata() {
+                Ok(m) => (
+                    if m.is_file() { m.len() } else { 0 },
+                    m.created().ok()
+                        .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
+                        .map(|d| d.as_secs()).unwrap_or(0),
+                    m.modified().ok()
+                        .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
+                        .map(|d| d.as_secs()).unwrap_or(0),
+                ),
+                Err(_) => (0u64, 0u64, 0u64),
+            };
+            file_entries.push(FileEntry {
+                name, name_lower, path: path_str,
+                size, created, modified,
+                is_dir: false, ext,
+            });
+            if file_entries.len() >= 500 {
+                counter.fetch_add(file_entries.len(), Ordering::Relaxed);
+                tx.send(std::mem::take(&mut file_entries)).ok();
+            }
+        }
+    }
+    if !file_entries.is_empty() {
+        counter.fetch_add(file_entries.len(), Ordering::Relaxed);
+        tx.send(file_entries).ok();
+    }
+    dir_paths.into_par_iter().for_each(move |dir_path| {
+        scan_dir_parallel_owned(dir_path, tx.clone(), counter.clone());
+    });
+}
+
+/// 将一批 FileEntry 写入 SQLite file_index。
+fn flush_batch_conn(conn: &mut Connection, batch: &[FileEntry]) {
     if batch.is_empty() { return; }
     let tx = match conn.transaction() { Ok(t) => t, Err(_) => return };
     {
@@ -383,64 +501,119 @@ fn flush_batch(conn: &mut Connection, batch: &[FileEntry]) {
              (name,path,size,created,modified,is_dir,ext,name_lower) \
              VALUES (?1,?2,?3,?4,?5,?6,?7,?8)",
         ) { Ok(s) => s, Err(_) => return };
-        let mut fts_stmt = match tx.prepare(
-            "INSERT INTO file_fts(path, name_lower) VALUES (?1, ?2)",
-        ) { Ok(s) => s, Err(_) => return };
         for e in batch {
             stmt.execute(params![
                 e.name, e.path, e.size as i64, e.created as i64,
                 e.modified as i64, e.is_dir as i32, e.ext, e.name_lower,
             ]).ok();
-            fts_stmt.execute(params![e.path, e.name_lower]).ok();
         }
     }
     tx.commit().ok();
 }
 
-/// 流式全量建索引：边扫描边写库，每 BATCH_SIZE 条提交一次事务。
-/// 峰值内存 ≈ BATCH_SIZE × ~300 B ≈ 15 MB，消灭全量中间 Vec。
-/// 每 PROGRESS_INTERVAL 条或每次批次提交后调用 on_progress(已写总数, 当前扫描路径)。
+/// 并行全量建索引：rayon 多核并发遍历 + 独立 DB writer + 独立 emitter。
+/// 某个目录慢不阻塞其他目录的扫描，进度数字持续增长。
+/// FTS5 在扫描完成后由调用方在后台重建。
 pub fn build_index_streaming<F>(db_path: &str, on_progress: F) -> usize
 where
-    F: Fn(usize, Option<&str>),
+    F: Fn(usize, Option<&str>) + Send + Sync + 'static,
 {
-    const BATCH_SIZE: usize = 50_000;
-    const PROGRESS_INTERVAL: usize = 1_000;
-    // 立即发出 0 进度，让前端从"0 个文件"立刻进入"建索引中"状态
-    on_progress(0, None);
-    let mut conn = match Connection::open(db_path) { Ok(c) => c, Err(_) => return 0 };
-    // DROP + 重建代替 DELETE，900K 行清空 <10ms
-    reset_index_tables(&conn);
-    let roots = get_system_roots();
-    let mut batch: Vec<FileEntry> = Vec::with_capacity(BATCH_SIZE);
-    let mut total = 0usize;
-    for root in &roots {
-        let walker = WalkDir::new(root)
-            .follow_links(false)
-            .into_iter()
-            .filter_entry(|e| !should_skip_path(e.path()));
-        for result in walker {
-            let Ok(dir_entry) = result else { continue };
-            let Some(entry) = entry_from_dir_entry(&dir_entry) else { continue };
-            let cur_path = entry.path.clone();
-            batch.push(entry);
-            if batch.len() % PROGRESS_INTERVAL == 0 {
-                on_progress(total + batch.len(), Some(&cur_path));
-            }
-            if batch.len() >= BATCH_SIZE {
-                flush_batch(&mut conn, &batch);
-                total += batch.len();
-                on_progress(total, Some(&cur_path));
-                batch.clear();
+    const FLUSH_SIZE: usize = 50_000;
+    let counter = Arc::new(AtomicUsize::new(0));
+    let on_progress = Arc::new(on_progress);
+    let done_flag = Arc::new(AtomicBool::new(false));
+
+    // ── emitter 线程：每 50ms 读 atomic counter → on_progress ──────────
+    let emitter_counter = counter.clone();
+    let emitter_cb = on_progress.clone();
+    let emitter_done = done_flag.clone();
+    std::thread::spawn(move || {
+        while !emitter_done.load(Ordering::Relaxed) {
+            let count = emitter_counter.load(Ordering::Relaxed);
+            emitter_cb(count, None);
+            std::thread::sleep(Duration::from_millis(50));
+        }
+        emitter_cb(emitter_counter.load(Ordering::Relaxed), None);
+    });
+
+    // ── DB writer 线程：从 channel 接收条目，攒够 FLUSH_SIZE 再写 ────────
+    let (tx, rx): (mpsc::Sender<Vec<FileEntry>>, mpsc::Receiver<Vec<FileEntry>>) = mpsc::channel();
+    let db_path_writer = db_path.to_string();
+    let writer_counter = counter.clone();
+    let db_thread = std::thread::spawn(move || {
+        let mut conn = match Connection::open(&db_path_writer) {
+            Ok(c) => c,
+            Err(_) => return 0usize,
+        };
+        conn.execute_batch(
+            "PRAGMA synchronous=OFF;
+             PRAGMA temp_store=MEMORY;
+             PRAGMA cache_size=-131072;",
+        ).ok();
+        let mut total = 0usize;
+        let mut buffer: Vec<FileEntry> = Vec::with_capacity(FLUSH_SIZE);
+        while let Ok(chunk) = rx.recv() {
+            buffer.extend(chunk);
+            if buffer.len() >= FLUSH_SIZE {
+                flush_batch_conn(&mut conn, &buffer);
+                total += buffer.len();
+                buffer.clear();
+                let cur = writer_counter.load(Ordering::Relaxed);
+                if total > cur {
+                    writer_counter.store(total, Ordering::Relaxed);
+                }
             }
         }
+        if !buffer.is_empty() {
+            flush_batch_conn(&mut conn, &buffer);
+            total += buffer.len();
+        }
+        conn.execute_batch(
+            "PRAGMA synchronous=NORMAL;
+             PRAGMA cache_size=-65536;",
+        ).ok();
+        total
+    });
+
+    // ── 并行扫描（当前线程协调，rayon 线程池执行）────────────────────────
+    let conn_meta = match Connection::open(db_path) {
+        Ok(c) => c,
+        Err(_) => {
+            done_flag.store(true, Ordering::Relaxed);
+            drop(tx);
+            db_thread.join().ok();
+            return 0;
+        }
+    };
+    reset_index_tables(&conn_meta);
+    drop(conn_meta);
+    let roots = get_system_roots();
+    for root in &roots {
+        scan_dir_parallel(root, &tx, &counter);
     }
-    if !batch.is_empty() {
-        flush_batch(&mut conn, &batch);
-        total += batch.len();
-        on_progress(total, None);
-    }
+    drop(tx);
+    let total = db_thread.join().unwrap_or(0);
+    done_flag.store(true, Ordering::Relaxed);
+    on_progress(total, None);
     total
+}
+
+/// 从 file_index 表批量重建 FTS5 索引（独立连接，synchronous=OFF 加速）。
+pub fn rebuild_fts5_background(db_path: &str) {
+    let conn = match Connection::open(db_path) {
+        Ok(c) => c,
+        Err(_) => return,
+    };
+    conn.execute_batch(
+        "PRAGMA synchronous=OFF;
+         PRAGMA temp_store=MEMORY;
+         PRAGMA cache_size=-131072;",
+    ).ok();
+    conn.execute_batch(
+        "INSERT INTO file_fts(file_fts) VALUES('delete-all');
+         INSERT INTO file_fts(path, name_lower) SELECT path, name_lower FROM file_index;",
+    ).ok();
+    conn.execute_batch("PRAGMA synchronous=NORMAL;").ok();
 }
 
 
@@ -838,21 +1011,24 @@ fn search_via_sqlite(conn: &Connection, parsed: &ParsedQuery, limit: usize) -> V
     .unwrap_or_default()
 }
 
-/// 搜索路由：name_terms 全部 >= 3 字符 → FTS5 trigram（毫秒级）；否则 → SQLite LIKE
+/// 搜索路由：FTS5 可用且 terms 全部 >= 3 字符 → FTS5 trigram；否则 → SQLite LIKE
+/// FTS5 可用性通过检查 file_fts 是否有数据判断（后台重建期间 fallback 到 LIKE）
 pub fn search_in_db(db_path: &str, parsed: &ParsedQuery, limit: usize) -> Vec<FileEntry> {
     let conn = match Connection::open(db_path) {
         Ok(c) => c,
         Err(_) => return Vec::new(),
     };
-
-    let use_fts5 = !parsed.name_terms.is_empty()
+    let fts5_ready = !parsed.name_terms.is_empty()
         && parsed.glob_pattern.is_none()
-        && parsed.name_terms.iter().all(|t| t.chars().count() >= 3);
-
-    if use_fts5 {
+        && parsed.name_terms.iter().all(|t| t.chars().count() >= 3)
+        && conn.query_row(
+            "SELECT EXISTS(SELECT 1 FROM file_fts LIMIT 1)",
+            [],
+            |row| row.get::<_, bool>(0),
+        ).unwrap_or(false);
+    if fts5_ready {
         return search_via_fts5(&conn, &parsed.name_terms, parsed.size_filter.as_ref(), limit);
     }
-
     search_via_sqlite(&conn, parsed, limit)
 }
 

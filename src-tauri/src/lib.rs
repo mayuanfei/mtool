@@ -17,7 +17,7 @@ use rayon::prelude::*;
 use file_search::{
     build_index_streaming, content_matches, count_entries, delete_entry_in_db,
     entry_from_path, get_db_path, get_last_exit_at, init_db, parse_query,
-    reconcile_changed_since, search_in_db, set_last_built_at,
+    rebuild_fts5_background, reconcile_changed_since, search_in_db, set_last_built_at,
     set_last_exit_at, should_skip_path, upsert_entry_in_db, FileEntry, IndexEngine,
     IndexStatus, get_watch_roots_pub,
 };
@@ -184,14 +184,13 @@ async fn build_index(
 
     let app_clone = app.clone();
     let status_ref_clone = status_ref.clone();
+    let db_fts = db_path.clone();
     let total = tauri::async_runtime::spawn_blocking(move || {
-        let total = build_index_streaming(&db_path, |count, path| {
+        let total = build_index_streaming(&db_path, move |count, _path| {
             if let Ok(mut s) = status_ref_clone.write() {
                 s.total = count;
             }
-            app_clone
-                .emit("index_progress", (count, path.unwrap_or("")))
-                .ok();
+            app_clone.emit("index_progress", count).ok();
         });
         let now_ts = SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -210,7 +209,14 @@ async fn build_index(
         s.last_built_at = file_search::get_last_built_at(&state.db_path);
     }
 
-    app.emit("index_progress", (total, "")).ok();
+    app.emit("index_progress", total).ok();
+    app.emit("index_complete", total).ok();
+
+    // FTS5 重建在后台进行，不阻塞用户
+    std::thread::spawn(move || {
+        rebuild_fts5_background(&db_fts);
+    });
+
     Ok(total)
 }
 
@@ -450,14 +456,13 @@ pub fn run() {
 
                     let app_clone = app_handle.clone();
                     let status_ref_clone = status_ref.clone();
+                    let db_fts = db.clone();
                     let result = tauri::async_runtime::spawn_blocking(move || {
-                        let total = build_index_streaming(&db, |count, path| {
+                        let total = build_index_streaming(&db, move |count, _path| {
                             if let Ok(mut s) = status_ref_clone.write() {
                                 s.total = count;
                             }
-                            app_clone
-                                .emit("index_progress", (count, path.unwrap_or("")))
-                                .ok();
+                            app_clone.emit("index_progress", count).ok();
                         });
                         let now_ts = SystemTime::now()
                             .duration_since(UNIX_EPOCH)
@@ -473,9 +478,14 @@ pub fn run() {
                         s.is_indexing = false;
                         s.total = total;
                         s.last_built_at = Some(ts);
-                        app_handle.emit("index_progress", (total, "")).ok();
+                        app_handle.emit("index_progress", total).ok();
                         app_handle.emit("index_complete", total).ok();
                     }
+
+                    // FTS5 重建在后台进行，不阻塞用户
+                    std::thread::spawn(move || {
+                        rebuild_fts5_background(&db_fts);
+                    });
                 });
             }
 
