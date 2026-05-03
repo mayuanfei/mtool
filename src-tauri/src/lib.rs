@@ -184,10 +184,20 @@ async fn build_index(
     let status_ref = state.status.clone();
     let db_path = state.db_path.clone();
 
+    // 重置禁用标志
+    state.disabled.store(false, Ordering::Relaxed);
     {
         let mut s = status_ref.write().unwrap();
         s.is_indexing = true;
         s.total = 0;
+    }
+
+    // 如果 watcher 已经被 shutdown，重新启动
+    if state.shutdown.swap(false, Ordering::Relaxed) {
+        let disabled = state.disabled.clone();
+        let shutdown = state.shutdown.clone();
+        let db_path_w = state.db_path.clone();
+        start_fs_watcher(db_path_w, disabled, shutdown);
     }
 
     let app_clone = app.clone();
@@ -284,13 +294,14 @@ async fn disable_file_search(
         s.is_indexing = false;
         s.total = 0;
         s.last_built_at = None;
-        s.disabled = true;
     }
     state.disabled.store(true, Ordering::Relaxed);
     state.shutdown.store(true, Ordering::Relaxed);
 
     let db_path = state.db_path.clone();
     tauri::async_runtime::spawn_blocking(move || {
+        // 等 watcher 线程退出（500ms 轮询周期 + 缓冲），避免 watcher 访问已删除的 DB
+        std::thread::sleep(Duration::from_millis(600));
         let _ = std::fs::remove_file(&db_path);
         let _ = std::fs::remove_file(format!("{}-wal", db_path));
         let _ = std::fs::remove_file(format!("{}-shm", db_path));

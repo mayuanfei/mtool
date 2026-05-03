@@ -32,7 +32,6 @@ pub struct IndexStatus {
     pub total: usize,
     pub is_indexing: bool,
     pub last_built_at: Option<u64>,
-    pub disabled: bool,
 }
 
 pub struct IndexEngine {
