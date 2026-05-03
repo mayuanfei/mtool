@@ -1,4 +1,5 @@
 import { Globe, Wrench } from 'lucide-react';
+import { invoke } from '@tauri-apps/api/core';
 import { useI18n } from '../i18n';
 
 const Toggle = ({ checked, onChange }: { checked: boolean; onChange: () => void }) => {
@@ -57,7 +58,16 @@ export function SettingsPage({ jsonEnabled, setJsonEnabled, qrEnabled, setQrEnab
                 <p className="text-base font-medium text-slate-200 mb-1">{t('File Search')}</p>
                 <p className="text-sm text-slate-500">{t('Search and find files by name, size, or content.')}</p>
               </div>
-              <Toggle checked={fileSearchEnabled} onChange={() => setFileSearchEnabled(!fileSearchEnabled)} />
+              <Toggle
+                checked={fileSearchEnabled}
+                onChange={async () => {
+                  const next = !fileSearchEnabled;
+                  setFileSearchEnabled(next);
+                  if (!next) {
+                    await invoke('disable_file_search').catch(console.error);
+                  }
+                }}
+              />
             </div>
 
             <div className="px-6 py-5 flex items-center justify-between hover:bg-slate-800/50 transition-colors">

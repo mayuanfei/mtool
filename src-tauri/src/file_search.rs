@@ -32,11 +32,14 @@ pub struct IndexStatus {
     pub total: usize,
     pub is_indexing: bool,
     pub last_built_at: Option<u64>,
+    pub disabled: bool,
 }
 
 pub struct IndexEngine {
     pub status: Arc<RwLock<IndexStatus>>,
     pub db_path: String,
+    pub disabled: Arc<AtomicBool>,
+    pub shutdown: Arc<AtomicBool>,
 }
 
 impl IndexEngine {
@@ -44,6 +47,8 @@ impl IndexEngine {
         Self {
             status: Arc::new(RwLock::new(IndexStatus::default())),
             db_path,
+            disabled: Arc::new(AtomicBool::new(false)),
+            shutdown: Arc::new(AtomicBool::new(false)),
         }
     }
 

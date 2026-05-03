@@ -3,7 +3,8 @@ mod file_search;
 use base64::prelude::*;
 use std::fs;
 use std::io::Cursor;
-use std::sync::mpsc;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{mpsc, Arc};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use arboard::{Clipboard, ImageData};
@@ -275,6 +276,32 @@ async fn search_files(
 }
 
 #[tauri::command]
+async fn disable_file_search(
+    state: tauri::State<'_, IndexEngine>,
+) -> Result<(), String> {
+    {
+        let mut s = state.status.write().unwrap();
+        s.is_indexing = false;
+        s.total = 0;
+        s.last_built_at = None;
+        s.disabled = true;
+    }
+    state.disabled.store(true, Ordering::Relaxed);
+    state.shutdown.store(true, Ordering::Relaxed);
+
+    let db_path = state.db_path.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let _ = std::fs::remove_file(&db_path);
+        let _ = std::fs::remove_file(format!("{}-wal", db_path));
+        let _ = std::fs::remove_file(format!("{}-shm", db_path));
+    })
+    .await
+    .map_err(|e| e.to_string())?;
+
+    Ok(())
+}
+
+#[tauri::command]
 fn reveal_in_explorer(path: String) -> Result<(), String> {
     #[cfg(target_os = "windows")]
     {
@@ -336,13 +363,13 @@ fn open_file(path: String) -> Result<(), String> {
 // 文件系统监听器（增量更新索引）
 // ---------------------------------------------------------------------------
 
-fn start_fs_watcher(db_path: String) {
+fn start_fs_watcher(db_path: String, disabled: Arc<AtomicBool>, shutdown: Arc<AtomicBool>) {
     std::thread::spawn(move || {
-        let (tx, rx) = mpsc::channel();
+        let (tx, rx) = mpsc::sync_channel::<notify::Event>(64);
 
         let mut watcher = match notify::recommended_watcher(move |res| {
             if let Ok(event) = res {
-                tx.send(event).ok();
+                tx.try_send(event).ok();
             }
         }) {
             Ok(w) => w,
@@ -358,19 +385,26 @@ fn start_fs_watcher(db_path: String) {
             }
         }
 
-        // 批量处理，每 500ms 聚合一次避免频繁写库
         loop {
             let mut events = Vec::new();
             match rx.recv_timeout(Duration::from_millis(500)) {
                 Ok(ev) => {
                     events.push(ev);
-                    // 尽量排空 channel 内剩余事件
                     while let Ok(e) = rx.try_recv() {
                         events.push(e);
                     }
                 }
                 Err(mpsc::RecvTimeoutError::Disconnected) => break,
-                Err(mpsc::RecvTimeoutError::Timeout) => continue,
+                Err(mpsc::RecvTimeoutError::Timeout) => {}
+            }
+
+            if shutdown.load(Ordering::Relaxed) {
+                drop(watcher);
+                break;
+            }
+
+            if disabled.load(Ordering::Relaxed) {
+                continue;
             }
 
             for event in events {
@@ -416,7 +450,9 @@ pub fn run() {
             let engine = IndexEngine::new_with_db(db_path.clone());
             engine.load_from_db();
 
-            start_fs_watcher(db_path.clone());
+            let disabled = engine.disabled.clone();
+            let shutdown = engine.shutdown.clone();
+            start_fs_watcher(db_path.clone(), disabled, shutdown);
 
             app.manage(engine);
 
@@ -436,6 +472,7 @@ pub fn run() {
             build_index,
             get_index_status,
             search_files,
+            disable_file_search,
             reveal_in_explorer,
             open_file,
         ])
