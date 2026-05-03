@@ -209,6 +209,9 @@ async fn build_index(
         s.last_built_at = file_search::get_last_built_at(&state.db_path);
     }
 
+    // 刷新内存缓存
+    state.load_from_db();
+
     app.emit("index_progress", total).ok();
     app.emit("index_complete", total).ok();
 
@@ -237,11 +240,14 @@ async fn search_files(
 
     let parsed = parse_query(&query);
     let db_path = state.db_path.clone();
+    let name_cache = state.name_cache.clone(); // Arc clone，O(1)
 
-    // ── 非 content 查询：直接走 search_in_db（内部路由 FTS5 / LIKE）────────────
+    // ── 非 content 查询：直接走 search_in_db（内部路由 FTS5 / 内存 / LIKE）────────────
     if parsed.content_filter.is_none() {
         return tauri::async_runtime::spawn_blocking(move || {
-            search_in_db(&db_path, &parsed, limit)
+            let cache_guard = name_cache.read().unwrap();
+            let cache_slice: &[(String, String)] = &cache_guard;
+            search_in_db(&db_path, &parsed, limit, Some(cache_slice))
         })
         .await
         .map_err(|e| e.to_string());
@@ -250,7 +256,9 @@ async fn search_files(
     // ── content 过滤 → SQLite 取候选，rayon 并行扫文件内容 ─────────────────────
     let content_needle = parsed.content_filter.as_ref().unwrap().as_bytes().to_vec();
     let results = tauri::async_runtime::spawn_blocking(move || {
-        let candidates = search_in_db(&db_path, &parsed, 100_000);
+        let cache_guard = name_cache.read().unwrap();
+        let cache_slice: &[(String, String)] = &cache_guard;
+        let candidates = search_in_db(&db_path, &parsed, 100_000, Some(cache_slice));
         let mut matched: Vec<FileEntry> = candidates
             .into_par_iter()
             .filter(|e| !e.is_dir && content_matches(&e.path, &content_needle))
@@ -449,6 +457,9 @@ pub fn run() {
                         s.is_indexing = false;
                         s.total = total;
                         s.last_built_at = Some(ts);
+                        // 释放 write lock 后刷新内存缓存
+                        drop(s);
+                        state.load_from_db();
                         app_handle.emit("index_progress", total).ok();
                         app_handle.emit("index_complete", total).ok();
                     }

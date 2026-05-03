@@ -37,12 +37,15 @@ pub struct IndexStatus {
 pub struct IndexEngine {
     pub status: Arc<RwLock<IndexStatus>>,
     pub db_path: String,
+    /// (name_lower, path) 内存缓存，用于短词子串搜索（< 3 字符时 fallback，避免 SQLite LIKE 全表扫描）
+    pub name_cache: Arc<RwLock<Vec<(String, String)>>>,
 }
 
 impl IndexEngine {
     pub fn new_with_db(db_path: String) -> Self {
         Self {
             status: Arc::new(RwLock::new(IndexStatus::default())),
+            name_cache: Arc::new(RwLock::new(Vec::new())),
             db_path,
         }
     }
@@ -50,9 +53,27 @@ impl IndexEngine {
     pub fn load_from_db(&self) {
         let total = count_entries(&self.db_path);
         let last_built_at = get_last_built_at(&self.db_path);
-        let mut s = self.status.write().unwrap();
-        s.total = total;
-        s.last_built_at = last_built_at;
+        {
+            let mut s = self.status.write().unwrap();
+            s.total = total;
+            s.last_built_at = last_built_at;
+        }
+        // 加载内存缓存
+        let conn = match Connection::open(&self.db_path) {
+            Ok(c) => c,
+            Err(_) => return,
+        };
+        let mut cache: Vec<(String, String)> = Vec::new();
+        if let Ok(mut stmt) = conn.prepare("SELECT name_lower, path FROM file_index") {
+            if let Ok(rows) = stmt.query_map([], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+            }) {
+                for row in rows.flatten() {
+                    cache.push(row);
+                }
+            }
+        }
+        *self.name_cache.write().unwrap() = cache;
     }
 }
 
@@ -887,6 +908,91 @@ fn extract_ext_from_glob(pattern: &str) -> Option<String> {
     None
 }
 
+/// 内存并行子串搜索：对 name_cache 做 rayon 并行扫描。
+/// 仅用于短词（< 3 字符）或 FTS5 未就绪时，避免 SQL LIKE 全表扫描。
+/// 返回匹配的 FileEntry（从 file_index 按 path 批量获取）。
+fn search_via_memory(
+    cache: &[(String, String)],
+    db_path: &str,
+    terms: &[String],
+    size_filter: Option<&SizeFilter>,
+    limit: usize,
+) -> Vec<FileEntry> {
+    let mut matching_paths: Vec<&str> = cache
+        .par_iter()
+        .filter_map(|(name_lower, path): &(String, String)| {
+            if terms.iter().all(|t| {
+                let needle_bytes = t.as_bytes();
+                name_lower
+                    .as_bytes()
+                    .windows(needle_bytes.len())
+                    .any(|w| w == needle_bytes)
+            }) {
+                Some(path.as_str())
+            } else {
+                None
+            }
+        })
+        .collect();
+
+    matching_paths.truncate(limit * 4);
+
+    if matching_paths.is_empty() {
+        return Vec::new();
+    }
+
+    let conn = match Connection::open(db_path) {
+        Ok(c) => c,
+        Err(_) => return Vec::new(),
+    };
+
+    let mut conditions = vec![format!(
+        "path IN ({})",
+        matching_paths.iter().map(|_| "?").collect::<Vec<_>>().join(",")
+    )];
+
+    if let Some(sf) = size_filter {
+        let op = match sf.op {
+            SizeOp::Gt => ">", SizeOp::Gte => ">=",
+            SizeOp::Lt => "<", SizeOp::Lte => "<=", SizeOp::Eq => "=",
+        };
+        conditions.push(format!("is_dir = 0 AND size {} {}", op, sf.bytes));
+    }
+
+    let sql = format!(
+        "SELECT name,path,size,created,modified,is_dir,ext,name_lower \
+         FROM file_index WHERE {} LIMIT {}",
+        conditions.join(" AND "),
+        limit
+    );
+
+    let mut stmt = match conn.prepare(&sql) {
+        Ok(s) => s,
+        Err(_) => return Vec::new(),
+    };
+
+    let params: Vec<Box<dyn rusqlite::types::ToSql>> = matching_paths
+        .iter()
+        .map(|p: &&str| Box::new(p.to_string()) as Box<dyn rusqlite::types::ToSql>)
+        .collect();
+    let param_refs: Vec<&dyn rusqlite::types::ToSql> = params.iter().map(|p: &Box<dyn rusqlite::types::ToSql>| p.as_ref()).collect();
+
+    stmt.query_map(param_refs.as_slice(), |row| {
+        Ok(FileEntry {
+            name:       row.get(0)?,
+            path:       row.get(1)?,
+            size:       row.get::<_, i64>(2)? as u64,
+            created:    row.get::<_, i64>(3)? as u64,
+            modified:   row.get::<_, i64>(4)? as u64,
+            is_dir:     row.get::<_, i32>(5)? != 0,
+            ext:        row.get(6)?,
+            name_lower: row.get(7)?,
+        })
+    })
+    .map(|rows| rows.filter_map(|r| r.ok()).collect())
+    .unwrap_or_default()
+}
+
 /// FTS5 trigram 路径：所有 name_terms >= 3 字符时使用。
 /// MATCH 表达式：`"term1" AND "term2"` → trigram 索引，毫秒级 substring 搜索。
 fn search_via_fts5(
@@ -1009,24 +1115,69 @@ fn search_via_sqlite(conn: &Connection, parsed: &ParsedQuery, limit: usize) -> V
     .unwrap_or_default()
 }
 
-/// 搜索路由：FTS5 可用且 terms 全部 >= 3 字符 → FTS5 trigram；否则 → SQLite LIKE
-/// FTS5 可用性通过检查 file_fts 是否有数据判断（后台重建期间 fallback 到 LIKE）
-pub fn search_in_db(db_path: &str, parsed: &ParsedQuery, limit: usize) -> Vec<FileEntry> {
+/// 搜索路由：
+///   1. 非 content 查询 → 直接内存（有缓存时）或 FTS5 / LIKE
+///   2. name_terms 全 >= 3 字符 且 FTS5 有数据 → FTS5 trigram
+///   3. 有内存缓存 → 内存并行扫描（rayon SIMD，毫秒级）
+///   4. 否则 → SQLite LIKE（慢，全表扫描）
+pub fn search_in_db(
+    db_path: &str,
+    parsed: &ParsedQuery,
+    limit: usize,
+    name_cache: Option<&[(String, String)]>,
+) -> Vec<FileEntry> {
+    // 纯 glob 或 size-only 查询仍需走 SQL LIKE（不涉及 name_terms）
+    if parsed.name_terms.is_empty() && parsed.glob_pattern.is_some() {
+        let conn = match Connection::open(db_path) {
+            Ok(c) => c,
+            Err(_) => return Vec::new(),
+        };
+        return search_via_sqlite(&conn, parsed, limit);
+    }
+
+    if parsed.name_terms.is_empty() && parsed.size_filter.is_some() {
+        let conn = match Connection::open(db_path) {
+            Ok(c) => c,
+            Err(_) => return Vec::new(),
+        };
+        return search_via_sqlite(&conn, parsed, limit);
+    }
+
+    // 非 name 查询，直接走 LIKE
+    if parsed.name_terms.is_empty() {
+        let conn = match Connection::open(db_path) {
+            Ok(c) => c,
+            Err(_) => return Vec::new(),
+        };
+        return search_via_sqlite(&conn, parsed, limit);
+    }
+
+    // 有 name_terms：先判断能否用 FTS5 trigram（长词，3+ 字符）
     let conn = match Connection::open(db_path) {
         Ok(c) => c,
         Err(_) => return Vec::new(),
     };
-    let fts5_ready = !parsed.name_terms.is_empty()
-        && parsed.glob_pattern.is_none()
+    let fts5_ready = parsed.glob_pattern.is_none()
         && parsed.name_terms.iter().all(|t| t.chars().count() >= 3)
-        && conn.query_row(
-            "SELECT EXISTS(SELECT 1 FROM file_fts LIMIT 1)",
-            [],
-            |row| row.get::<_, bool>(0),
-        ).unwrap_or(false);
+        && conn
+            .query_row(
+                "SELECT EXISTS(SELECT 1 FROM file_fts LIMIT 1)",
+                [],
+                |row| row.get::<_, bool>(0),
+            )
+            .unwrap_or(false);
+
     if fts5_ready {
         return search_via_fts5(&conn, &parsed.name_terms, parsed.size_filter.as_ref(), limit);
     }
+
+    // FTS5 不可用：先用内存缓存（rayon 并行，毫秒级），无缓存则 fallback LIKE
+    if let Some(cache) = name_cache {
+        if !cache.is_empty() {
+            return search_via_memory(cache, db_path, &parsed.name_terms, parsed.size_filter.as_ref(), limit);
+        }
+    }
+
     search_via_sqlite(&conn, parsed, limit)
 }
 
