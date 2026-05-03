@@ -186,18 +186,11 @@ async fn build_index(
 
     // 重置禁用标志
     state.disabled.store(false, Ordering::Relaxed);
+    let was_shutdown = state.shutdown.swap(false, Ordering::Relaxed);
     {
         let mut s = status_ref.write().unwrap();
         s.is_indexing = true;
         s.total = 0;
-    }
-
-    // 如果 watcher 已经被 shutdown，重新启动
-    if state.shutdown.swap(false, Ordering::Relaxed) {
-        let disabled = state.disabled.clone();
-        let shutdown = state.shutdown.clone();
-        let db_path_w = state.db_path.clone();
-        start_fs_watcher(db_path_w, disabled, shutdown);
     }
 
     let app_clone = app.clone();
@@ -227,16 +220,23 @@ async fn build_index(
         s.last_built_at = file_search::get_last_built_at(&state.db_path);
     }
 
-    // 刷新内存缓存
     state.load_from_db();
 
     app.emit("index_progress", total).ok();
     app.emit("index_complete", total).ok();
 
-    // FTS5 重建在后台进行，不阻塞用户
+    // FTS5 后台重建
     std::thread::spawn(move || {
         rebuild_fts5_background(&db_fts);
     });
+
+    // 索引完成、DB 就绪后，再启动 watcher
+    if was_shutdown {
+        let disabled = state.disabled.clone();
+        let shutdown = state.shutdown.clone();
+        let db_path_w = state.db_path.clone();
+        start_fs_watcher(db_path_w, disabled, shutdown);
+    }
 
     Ok(total)
 }

@@ -201,7 +201,10 @@ pub fn should_skip_path(path: &Path) -> bool {
             "/Library/Developer/CoreSimulator",
         ];
         for prefix in &skip_prefixes {
-            if path_str.starts_with(prefix) {
+            if path_str.as_bytes().starts_with(prefix.as_bytes())
+                && (path_str.len() == prefix.len()
+                    || path_str.as_bytes().get(prefix.len()) == Some(&b'/'))
+            {
                 return true;
             }
         }
@@ -232,7 +235,10 @@ pub fn should_skip_path(path: &Path) -> bool {
             "/dev", "/proc", "/sys", "/run", "/tmp", "/var/run", "/var/lock",
         ];
         for prefix in &skip_prefixes {
-            if path_str.starts_with(prefix) {
+            if path_str.as_bytes().starts_with(prefix.as_bytes())
+                && (path_str.len() == prefix.len()
+                    || path_str.as_bytes().get(prefix.len()) == Some(&b'/'))
+            {
                 return true;
             }
         }
@@ -362,77 +368,14 @@ fn get_system_roots() -> Vec<PathBuf> {
 // 索引构建（并行扫描 + 流式写入）
 // ---------------------------------------------------------------------------
 
-/// 并行递归扫描一个目录：当前目录的文件直接处理，子目录用 rayon 并行递归。
-/// 不对每个条目单独 stat（metadata()），改用 DirEntry 缓存的 file_type + 单次 lstat 批量获取。
 fn scan_dir_parallel(
     dir: &Path,
     tx: &mpsc::SyncSender<Vec<FileEntry>>,
     counter: &Arc<AtomicUsize>,
 ) {
-    let entries = match std::fs::read_dir(dir) {
-        Ok(e) => e,
-        Err(_) => return,
-    };
-    let mut file_entries = Vec::new();
-    let mut dir_paths: Vec<PathBuf> = Vec::new();
-    for e in entries {
-        let Ok(e) = e else { continue };
-        let path = e.path();
-        if should_skip_path(&path) { continue; }
-        let ft = match e.file_type() {
-            Ok(ft) => ft,
-            Err(_) => continue,
-        };
-        if ft.is_dir() && !ft.is_symlink() {
-            dir_paths.push(path);
-            continue;
-        }
-        if ft.is_file() {
-            let name = e.file_name().to_string_lossy().to_string();
-            if name.is_empty() { continue; }
-            let name_lower = name.to_ascii_lowercase();
-            let ext = path.extension()
-                .map(|x| x.to_string_lossy().to_ascii_lowercase())
-                .unwrap_or_default();
-            let path_str = path.to_string_lossy().to_string();
-            // 延迟 metadata：只有文件数量可控时才 stat
-            // 对于大目录，跳过 metadata 获取以加速扫描
-            let (size, created, modified) = match e.metadata() {
-                Ok(m) => (
-                    if m.is_file() { m.len() } else { 0 },
-                    m.created().ok()
-                        .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
-                        .map(|d| d.as_secs()).unwrap_or(0),
-                    m.modified().ok()
-                        .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
-                        .map(|d| d.as_secs()).unwrap_or(0),
-                ),
-                Err(_) => (0u64, 0u64, 0u64),
-            };
-            file_entries.push(FileEntry {
-                name, name_lower, path: path_str,
-                size, created, modified,
-                is_dir: false, ext,
-            });
-            // 每 500 条发一次，避免大目录卡太久
-            if file_entries.len() >= 500 {
-                counter.fetch_add(file_entries.len(), Ordering::Relaxed);
-                tx.send(std::mem::take(&mut file_entries)).ok();
-            }
-        }
-    }
-    if !file_entries.is_empty() {
-        counter.fetch_add(file_entries.len(), Ordering::Relaxed);
-        tx.send(file_entries).ok();
-    }
-    let tx_clone = tx.clone();
-    let counter_clone = counter.clone();
-    dir_paths.into_par_iter().for_each(move |dir_path| {
-        scan_dir_parallel_owned(dir_path, tx_clone.clone(), counter_clone.clone());
-    });
+    scan_dir_parallel_owned(dir.to_path_buf(), tx.clone(), counter.clone());
 }
 
-/// scan_dir_parallel 的 owned 版本（供 rayon 闭包使用）
 fn scan_dir_parallel_owned(
     dir: PathBuf,
     tx: mpsc::SyncSender<Vec<FileEntry>>,
@@ -453,6 +396,24 @@ fn scan_dir_parallel_owned(
             Err(_) => continue,
         };
         if ft.is_dir() && !ft.is_symlink() {
+            let name = e.file_name().to_string_lossy().to_string();
+            if !name.is_empty() {
+                let path_str = path.to_string_lossy().to_string();
+                file_entries.push(FileEntry {
+                    name: name.clone(),
+                    name_lower: name.to_ascii_lowercase(),
+                    path: path_str,
+                    size: 0,
+                    created: 0,
+                    modified: 0,
+                    is_dir: true,
+                    ext: String::new(),
+                });
+                if file_entries.len() >= 500 {
+                    counter.fetch_add(file_entries.len(), Ordering::Relaxed);
+                    tx.send(std::mem::take(&mut file_entries)).ok();
+                }
+            }
             dir_paths.push(path);
             continue;
         }
@@ -824,11 +785,15 @@ pub fn entry_from_path(path: &Path) -> Option<FileEntry> {
 
 /// 在 SQLite 中 upsert 单条记录
 pub fn upsert_entry_in_db(db_path: &str, entry: &FileEntry) {
-    let conn = match Connection::open(db_path) {
+    let mut conn = match Connection::open(db_path) {
         Ok(c) => c,
         Err(_) => return,
     };
-    conn.execute(
+    let tx = match conn.transaction() {
+        Ok(t) => t,
+        Err(_) => return,
+    };
+    tx.execute(
         "INSERT OR REPLACE INTO file_index
          (name, path, size, created, modified, is_dir, ext, name_lower)
          VALUES (?1,?2,?3,?4,?5,?6,?7,?8)",
@@ -844,12 +809,13 @@ pub fn upsert_entry_in_db(db_path: &str, entry: &FileEntry) {
         ],
     )
     .ok();
-    conn.execute("DELETE FROM file_fts WHERE path=?1", params![entry.path]).ok();
-    conn.execute(
+    tx.execute("DELETE FROM file_fts WHERE path=?1", params![entry.path]).ok();
+    tx.execute(
         "INSERT INTO file_fts(path, name_lower) VALUES (?1, ?2)",
         params![entry.path, entry.name_lower],
     )
     .ok();
+    tx.commit().ok();
 }
 
 /// 在 SQLite 中删除单条记录（按路径）
