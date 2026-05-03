@@ -256,25 +256,45 @@ pub fn should_skip_path(path: &Path) -> bool {
     #[cfg(target_os = "windows")]
     {
         let lower = path_str.to_ascii_lowercase();
-        // 跳过以这些路径开头的目录（含其本身和所有子项）
-        let skip_prefixes = [
-            "\\windows",
-            "\\$recycle.bin",
-            "\\system volume information",
-            "\\programdata\\microsoft\\windows",
-        ];
-        // 去掉盘符前缀后匹配（如 c:\windows -> \windows）
         let without_drive = if lower.len() >= 2 && lower.as_bytes()[1] == b':' {
             &lower[2..]
         } else {
             lower.as_ref()
         };
+        // 前缀匹配：跳过回收站、系统卷
+        let skip_prefixes = [
+            "\\$recycle.bin",
+            "\\system volume information",
+        ];
         for prefix in &skip_prefixes {
             if without_drive == *prefix
                 || without_drive.starts_with(&format!("{}\\", prefix))
             {
                 return true;
             }
+        }
+        // Windows 子目录：只跳过 winsxs、installer 等黑洞，不跳过整个 \Windows
+        let win_skip = [
+            "\\windows\\winsxs",
+            "\\windows\\installer",
+            "\\windows\\softwaredistribution",
+            "\\windows\\servicing",
+            "\\windows\\temp",
+        ];
+        for prefix in &win_skip {
+            if without_drive.starts_with(prefix) {
+                return true;
+            }
+        }
+        // 用户临时目录
+        if without_drive.contains("\\appdata\\local\\temp") {
+            return true;
+        }
+        // node_modules / .git（与 macOS 对齐）
+        if without_drive.contains("\\node_modules")
+            || without_drive.contains("\\.git\\")
+        {
+            return true;
         }
         // 跳过根目录下的系统文件
         let skip_files = ["pagefile.sys", "swapfile.sys", "hiberfil.sys"];
