@@ -11,6 +11,7 @@ import {
   Clock,
   X,
 } from "lucide-react";
+import { useI18n } from "../i18n";
 
 // ---------------------------------------------------------------------------
 // 类型定义
@@ -85,6 +86,7 @@ function HighlightedName({ name, query }: { name: string; query: string }) {
 // ---------------------------------------------------------------------------
 
 export function FileSearch() {
+  const { t } = useI18n();
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<FileEntry[]>([]);
   const [status, setStatus] = useState<IndexStatus>({
@@ -277,7 +279,7 @@ export function FileSearch() {
       <div className="flex justify-between items-center mb-6 border-b border-slate-800 pb-4">
         <h2 className="text-white font-semibold text-lg flex items-center gap-2">
           <Search className="w-5 h-5 text-indigo-400" />
-          File Search
+          {t('File Search')}
         </h2>
 
         <div className="flex items-center gap-3">
