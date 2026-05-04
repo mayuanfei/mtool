@@ -218,10 +218,10 @@ pub fn should_skip_path(path: &Path) -> bool {
         }
         // 跳过任意深度的特定目录（路径包含匹配）
         for skip in [
-            "/node_modules",       // JS 依赖，数量巨大但无需搜索
+            "/node_modules/",      // JS 依赖，数量巨大但无需搜索
             "/.git/",              // Git 内部对象
             "/.Trash/",            // 废纸篓
-            "/.rustup/toolchains", // Rust 工具链源码
+            "/.rustup/toolchains/", // Rust 工具链源码
         ] {
             if path_str.contains(skip) {
                 return true;
@@ -1026,24 +1026,6 @@ pub fn search_in_db(
     parsed: &ParsedQuery,
     limit: usize,
 ) -> Vec<FileEntry> {
-    // 纯 glob 或 size-only 查询仍需走 SQL LIKE（不涉及 name_terms）
-    if parsed.name_terms.is_empty() && parsed.glob_pattern.is_some() {
-        let conn = match Connection::open(db_path) {
-            Ok(c) => c,
-            Err(_) => return Vec::new(),
-        };
-        return search_via_sqlite(&conn, parsed, limit);
-    }
-
-    if parsed.name_terms.is_empty() && parsed.size_filter.is_some() {
-        let conn = match Connection::open(db_path) {
-            Ok(c) => c,
-            Err(_) => return Vec::new(),
-        };
-        return search_via_sqlite(&conn, parsed, limit);
-    }
-
-    // 非 name 查询，直接走 LIKE
     if parsed.name_terms.is_empty() {
         let conn = match Connection::open(db_path) {
             Ok(c) => c,
