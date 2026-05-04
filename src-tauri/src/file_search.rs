@@ -285,7 +285,7 @@ pub fn should_skip_path(path: &Path) -> bool {
             return true;
         }
         // node_modules / .git（与 macOS 对齐）
-        if without_drive.contains("\\node_modules")
+        if without_drive.contains("\\node_modules\\")
             || without_drive.contains("\\.git\\")
         {
             return true;
