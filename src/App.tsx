@@ -10,7 +10,9 @@ import { FileSearch } from './pages/FileSearch';
 import { useI18n } from './i18n';
 
 export default function App() {
-  const [activePage, setActivePage] = useState('settings');
+  const [activePage, setActivePage] = useState(() => {
+    return localStorage.getItem('mtool_active_page') || 'settings';
+  });
   const { t } = useI18n();
 
   const [jsonEnabled, setJsonEnabled] = useState(() => {
@@ -66,6 +68,10 @@ export default function App() {
   useEffect(() => {
     localStorage.setItem('mtool_filesearch_enabled', fileSearchEnabled.toString());
   }, [fileSearchEnabled]);
+
+  useEffect(() => {
+    localStorage.setItem('mtool_active_page', activePage);
+  }, [activePage]);
 
   return (
     <div className="flex h-screen overflow-hidden font-sans text-slate-300 antialiased" style={{ backgroundColor: '#0f1115' }}>
