@@ -118,16 +118,6 @@ CREATE VIRTUAL TABLE IF NOT EXISTS file_fts USING fts5(
 /// DROP + 重建 file_index / file_fts 表。
 /// O(1)，比 DELETE FROM file_index（在 WAL 模式下需生成大量 WAL 页）快一到两个数量级。
 /// 保留 index_meta 表，避免丢失 last_built_at。
-fn reset_index_tables(conn: &Connection) {
-    conn.execute_batch(
-        "DROP TABLE IF EXISTS file_index;
-         DROP TABLE IF EXISTS file_fts;",
-    )
-    .ok();
-    conn.execute_batch(SCHEMA_SQL).ok();
-}
-
-
 pub fn count_entries(db_path: &str) -> usize {
     let conn = match Connection::open(db_path) {
         Ok(c) => c,
@@ -544,17 +534,6 @@ where
     });
 
     // ── 并行扫描（当前线程协调，rayon 线程池执行）────────────────────────
-    let conn_meta = match Connection::open(db_path) {
-        Ok(c) => c,
-        Err(_) => {
-            done_flag.store(true, Ordering::Relaxed);
-            drop(tx);
-            db_thread.join().ok();
-            return 0;
-        }
-    };
-    reset_index_tables(&conn_meta);
-    drop(conn_meta);
     let roots = get_system_roots();
     for root in &roots {
         scan_dir_parallel(root, &tx, &counter);

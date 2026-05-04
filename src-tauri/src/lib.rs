@@ -188,11 +188,7 @@ async fn build_index(
     // 重置禁用标志
     state.disabled.store(false, Ordering::Relaxed);
     let was_shutdown = state.shutdown.swap(false, Ordering::Relaxed);
-    // 清除持久化的禁用标记，防止重启后又被识别为禁用
-    if let Ok(conn) = rusqlite::Connection::open(&db_path) {
-        conn.execute("DELETE FROM index_meta WHERE key='disabled'", [])
-            .ok();
-    }
+
     {
         let mut s = status_ref.write().unwrap();
         s.is_indexing = true;
@@ -203,6 +199,13 @@ async fn build_index(
     let status_ref_clone = status_ref.clone();
     let db_fts = db_path.clone();
     let total = tauri::async_runtime::spawn_blocking(move || {
+        // 物理删除旧库文件，避免 SQLite DROP TABLE 耗时阻塞
+        let _ = std::fs::remove_file(&db_path);
+        let _ = std::fs::remove_file(format!("{}-wal", db_path));
+        let _ = std::fs::remove_file(format!("{}-shm", db_path));
+        // 重新初始化空库结构
+        file_search::init_db(&db_path);
+
         let total = build_index_streaming(&db_path, move |count, _path| {
             if let Ok(mut s) = status_ref_clone.write() {
                 s.total = count;
