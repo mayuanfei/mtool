@@ -310,6 +310,7 @@ async fn disable_file_search(
     }
     state.disabled.store(true, Ordering::Relaxed);
     state.shutdown.store(true, Ordering::Relaxed);
+    state.fts5_ready.store(false, Ordering::Relaxed);
 
     let db_path = state.db_path.clone();
     tauri::async_runtime::spawn_blocking(move || {
