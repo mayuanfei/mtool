@@ -39,15 +39,26 @@ pub struct IndexEngine {
     pub db_path: String,
     pub disabled: Arc<AtomicBool>,
     pub shutdown: Arc<AtomicBool>,
+    pub fts5_ready: Arc<AtomicBool>,
 }
 
 impl IndexEngine {
     pub fn new_with_db(db_path: String) -> Self {
+        let fts5_ready = match Connection::open(&db_path) {
+            Ok(conn) => conn.query_row(
+                "SELECT EXISTS(SELECT 1 FROM file_fts LIMIT 1)",
+                [],
+                |row| row.get::<_, bool>(0),
+            ).unwrap_or(false),
+            Err(_) => false,
+        };
+
         Self {
             status: Arc::new(RwLock::new(IndexStatus::default())),
             db_path,
             disabled: Arc::new(AtomicBool::new(false)),
             shutdown: Arc::new(AtomicBool::new(false)),
+            fts5_ready: Arc::new(AtomicBool::new(fts5_ready)),
         }
     }
 
@@ -766,11 +777,7 @@ pub fn entry_from_path(path: &Path) -> Option<FileEntry> {
 }
 
 /// 在 SQLite 中 upsert 单条记录
-pub fn upsert_entry_in_db(db_path: &str, entry: &FileEntry) {
-    let mut conn = match Connection::open(db_path) {
-        Ok(c) => c,
-        Err(_) => return,
-    };
+pub fn upsert_entry_in_db(conn: &mut Connection, entry: &FileEntry) {
     let tx = match conn.transaction() {
         Ok(t) => t,
         Err(_) => return,
@@ -801,11 +808,7 @@ pub fn upsert_entry_in_db(db_path: &str, entry: &FileEntry) {
 }
 
 /// 在 SQLite 中删除单条记录（按路径）
-pub fn delete_entry_in_db(db_path: &str, path: &str) {
-    let mut conn = match Connection::open(db_path) {
-        Ok(c) => c,
-        Err(_) => return,
-    };
+pub fn delete_entry_in_db(conn: &mut Connection, path: &str) {
     let tx = match conn.transaction() {
         Ok(t) => t,
         Err(_) => return,
@@ -813,20 +816,6 @@ pub fn delete_entry_in_db(db_path: &str, path: &str) {
     tx.execute("DELETE FROM file_index WHERE path=?1", params![path]).ok();
     tx.execute("DELETE FROM file_fts WHERE path=?1", params![path]).ok();
     tx.commit().ok();
-}
-
-/// 清空索引数据表（保留 index_meta），用于禁用文件搜索时释放磁盘空间
-pub fn clear_index_tables(db_path: &str) {
-    let conn = match Connection::open(db_path) {
-        Ok(c) => c,
-        Err(_) => return,
-    };
-    conn.execute_batch(
-        "DROP TABLE IF EXISTS file_index;
-         DROP TABLE IF EXISTS file_fts;",
-    )
-    .ok();
-    conn.execute_batch(SCHEMA_SQL).ok();
 }
 
 /// 查询 index_meta 中是否标记为已禁用
@@ -1004,6 +993,7 @@ pub fn search_in_db(
     db_path: &str,
     parsed: &ParsedQuery,
     limit: usize,
+    fts5_is_ready: bool,
 ) -> Vec<FileEntry> {
     if parsed.name_terms.is_empty() {
         let conn = match Connection::open(db_path) {
@@ -1018,17 +1008,11 @@ pub fn search_in_db(
         Ok(c) => c,
         Err(_) => return Vec::new(),
     };
-    let fts5_ready = parsed.glob_pattern.is_none()
+    let fts5_usable = parsed.glob_pattern.is_none()
         && parsed.name_terms.iter().all(|t| t.chars().count() >= 3)
-        && conn
-            .query_row(
-                "SELECT EXISTS(SELECT 1 FROM file_fts LIMIT 1)",
-                [],
-                |row| row.get::<_, bool>(0),
-            )
-            .unwrap_or(false);
+        && fts5_is_ready;
 
-    if fts5_ready {
+    if fts5_usable {
         return search_via_fts5(&conn, &parsed.name_terms, parsed.size_filter.as_ref(), limit);
     }
 

@@ -16,7 +16,7 @@ use tauri::{Emitter, Manager};
 use rayon::prelude::*;
 
 use file_search::{
-    build_index_streaming, clear_index_tables, content_matches,
+    build_index_streaming, content_matches,
     count_entries, delete_entry_in_db, entry_from_path,
     get_db_path, init_db, is_index_disabled, parse_query,
     rebuild_fts5_background, search_in_db, set_last_built_at,
@@ -187,6 +187,7 @@ async fn build_index(
 
     // 重置禁用标志
     state.disabled.store(false, Ordering::Relaxed);
+    state.fts5_ready.store(false, Ordering::Relaxed);
     let was_shutdown = state.shutdown.swap(false, Ordering::Relaxed);
 
     {
@@ -235,8 +236,10 @@ async fn build_index(
     app.emit("index_complete", total).ok();
 
     // FTS5 后台重建
+    let fts5_ready_clone = state.fts5_ready.clone();
     std::thread::spawn(move || {
         rebuild_fts5_background(&db_fts);
+        fts5_ready_clone.store(true, Ordering::Relaxed);
     });
 
     // 索引完成、DB 就绪后，再启动 watcher
@@ -267,11 +270,12 @@ async fn search_files(
 
     let parsed = parse_query(&query);
     let db_path = state.db_path.clone();
+    let fts5_ready = state.fts5_ready.load(Ordering::Relaxed);
 
     // ── 非 content 查询：FTS5 trigram 或 SQLite LIKE ────────────────────────────
     if parsed.content_filter.is_none() {
         return tauri::async_runtime::spawn_blocking(move || {
-            search_in_db(&db_path, &parsed, limit)
+            search_in_db(&db_path, &parsed, limit, fts5_ready)
         })
         .await
         .map_err(|e| e.to_string());
@@ -280,7 +284,7 @@ async fn search_files(
     // ── content 过滤 → SQLite 取候选，rayon 并行扫文件内容 ─────────────────────
     let content_needle = parsed.content_filter.as_ref().unwrap().as_bytes().to_vec();
     let results = tauri::async_runtime::spawn_blocking(move || {
-        let candidates = search_in_db(&db_path, &parsed, 100_000);
+        let candidates = search_in_db(&db_path, &parsed, 100_000, fts5_ready);
         let mut matched: Vec<FileEntry> = candidates
             .into_par_iter()
             .filter(|e| !e.is_dir && content_matches(&e.path, &content_needle))
@@ -311,7 +315,10 @@ async fn disable_file_search(
     tauri::async_runtime::spawn_blocking(move || {
         // 等 watcher 线程退出（500ms 轮询周期 + 缓冲），避免 watcher 访问正在被清空的表
         std::thread::sleep(Duration::from_millis(600));
-        clear_index_tables(&db_path);
+        let _ = std::fs::remove_file(&db_path);
+        let _ = std::fs::remove_file(format!("{}-wal", db_path));
+        let _ = std::fs::remove_file(format!("{}-shm", db_path));
+        file_search::init_db(&db_path);
         // 持久化禁用状态，下次启动时跳过自动建索引和 watcher
         if let Ok(conn) = rusqlite::Connection::open(&db_path) {
             conn.execute(
@@ -415,6 +422,8 @@ fn start_fs_watcher(db_path: String, disabled: Arc<AtomicBool>, shutdown: Arc<At
             }
         }
 
+        let mut db_conn = rusqlite::Connection::open(&db_path).ok();
+
         loop {
             let mut events = Vec::new();
             match rx.recv_timeout(Duration::from_millis(500)) {
@@ -438,13 +447,13 @@ fn start_fs_watcher(db_path: String, disabled: Arc<AtomicBool>, shutdown: Arc<At
             }
 
             for event in events {
-                handle_fs_event(&event, &db_path);
+                handle_fs_event(&event, &db_path, &mut db_conn);
             }
         }
     });
 }
 
-fn handle_fs_event(event: &notify::Event, db_path: &str) {
+fn handle_fs_event(event: &notify::Event, db_path: &str, conn: &mut Option<rusqlite::Connection>) {
     for path in &event.paths {
         if should_skip_path(path) {
             continue;
@@ -453,11 +462,21 @@ fn handle_fs_event(event: &notify::Event, db_path: &str) {
         match &event.kind {
             EventKind::Create(_) | EventKind::Modify(_) => {
                 if let Some(entry) = entry_from_path(path) {
-                    upsert_entry_in_db(db_path, &entry);
+                    if conn.is_none() {
+                        *conn = rusqlite::Connection::open(db_path).ok();
+                    }
+                    if let Some(c) = conn.as_mut() {
+                        upsert_entry_in_db(c, &entry);
+                    }
                 }
             }
             EventKind::Remove(_) => {
-                delete_entry_in_db(db_path, &path_str);
+                if conn.is_none() {
+                    *conn = rusqlite::Connection::open(db_path).ok();
+                }
+                if let Some(c) = conn.as_mut() {
+                    delete_entry_in_db(c, &path_str);
+                }
             }
             _ => {}
         }
