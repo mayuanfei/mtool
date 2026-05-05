@@ -223,6 +223,8 @@ pub fn should_skip_path(path: &Path) -> bool {
             "/.git/",              // Git 内部对象
             "/.Trash/",            // 废纸篓
             "/.rustup/toolchains/", // Rust 工具链源码
+            "/Library/Containers/",        // ← 新增：跳过其他 App 沙盒容器
+            "/Library/Group Containers/",  // ← 新增：跳过 Group 容器
         ] {
             if path_str.contains(skip) {
                 return true;
