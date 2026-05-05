@@ -65,6 +65,8 @@ export function SettingsPage({ jsonEnabled, setJsonEnabled, qrEnabled, setQrEnab
                   setFileSearchEnabled(next);
                   if (!next) {
                     await invoke('disable_file_search').catch(console.error);
+                  } else {
+                    await invoke('build_index').catch(console.error);
                   }
                 }}
               />

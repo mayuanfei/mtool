@@ -462,9 +462,9 @@ export function FileSearch() {
           {/* 结果列表 */}
           {results.length > 0 && (
             <div className="space-y-1.5">
-              {results.map((entry, idx) => (
+              {results.map((entry) => (
                 <div
-                  key={idx}
+                  key={entry.path}
                   onClick={() => handleOpen(entry)}
                   className="group bg-slate-800/40 border border-slate-700/50 rounded-lg px-4 py-3
                     hover:bg-slate-800 hover:border-indigo-500/50 cursor-pointer transition-all"
