@@ -349,6 +349,7 @@ fn get_watch_roots() -> Vec<PathBuf> {
     }
 }
 
+#[allow(dead_code)]
 fn get_system_roots() -> Vec<PathBuf> {
     #[cfg(any(target_os = "macos", target_os = "linux"))]
     {
@@ -547,7 +548,7 @@ where
     });
 
     // ── 并行扫描（当前线程协调，rayon 线程池执行）────────────────────────
-    let roots = get_system_roots();
+    let roots = get_watch_roots();
     for root in &roots {
         scan_dir_parallel(root, &tx, &counter);
     }

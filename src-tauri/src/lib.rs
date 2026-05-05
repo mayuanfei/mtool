@@ -407,7 +407,7 @@ fn open_file(path: String) -> Result<(), String> {
 
 fn start_fs_watcher(db_path: String, disabled: Arc<AtomicBool>, shutdown: Arc<AtomicBool>) {
     std::thread::spawn(move || {
-        let (tx, rx) = mpsc::sync_channel::<notify::Event>(64);
+        let (tx, rx) = mpsc::sync_channel::<notify::Event>(1024);
 
         let mut watcher = match notify::recommended_watcher(move |res| {
             if let Ok(event) = res {
@@ -560,8 +560,10 @@ pub fn run() {
                         app_handle.emit("index_complete", total).ok();
                     }
 
+                    let fts5_ready_clone = state.fts5_ready.clone();
                     std::thread::spawn(move || {
                         rebuild_fts5_background(&db_fts);
+                        fts5_ready_clone.store(true, Ordering::Relaxed);
                     });
                 });
             }
