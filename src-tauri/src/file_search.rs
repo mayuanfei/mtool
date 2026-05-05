@@ -418,7 +418,7 @@ fn scan_dir_parallel_owned(
                     is_dir: true,
                     ext: String::new(),
                 });
-                if file_entries.len() >= 500 {
+                if file_entries.len() >= 100 {
                     counter.fetch_add(file_entries.len(), Ordering::Relaxed);
                     tx.send(std::mem::take(&mut file_entries)).ok();
                 }
@@ -451,7 +451,7 @@ fn scan_dir_parallel_owned(
                 size, created, modified,
                 is_dir: false, ext,
             });
-            if file_entries.len() >= 500 {
+            if file_entries.len() >= 100 {
                 counter.fetch_add(file_entries.len(), Ordering::Relaxed);
                 tx.send(std::mem::take(&mut file_entries)).ok();
             }
@@ -493,7 +493,7 @@ pub fn build_index_streaming<F>(db_path: &str, on_progress: F) -> usize
 where
     F: Fn(usize, Option<&str>) + Send + Sync + 'static,
 {
-    const FLUSH_SIZE: usize = 50_000;
+    const FLUSH_SIZE: usize = 5_000;
     let counter = Arc::new(AtomicUsize::new(0));
     let on_progress = Arc::new(on_progress);
     let done_flag = Arc::new(AtomicBool::new(false));
