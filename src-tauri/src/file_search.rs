@@ -572,8 +572,10 @@ pub fn rebuild_fts5_background(db_path: &str) {
          PRAGMA cache_size=-32768;",
     ).ok();
     conn.execute_batch(
-        "INSERT INTO file_fts(file_fts) VALUES('delete-all');
-         INSERT INTO file_fts(path, name_lower) SELECT path, name_lower FROM file_index;",
+        "BEGIN;
+         INSERT INTO file_fts(file_fts) VALUES('delete-all');
+         INSERT INTO file_fts(path, name_lower) SELECT path, name_lower FROM file_index;
+         COMMIT;",
     ).ok();
     conn.execute_batch("PRAGMA synchronous=NORMAL;").ok();
 }
