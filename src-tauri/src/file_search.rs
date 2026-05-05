@@ -40,6 +40,7 @@ pub struct IndexEngine {
     pub disabled: Arc<AtomicBool>,
     pub shutdown: Arc<AtomicBool>,
     pub fts5_ready: Arc<AtomicBool>,
+    pub watcher_stopped: Arc<AtomicBool>,
 }
 
 impl IndexEngine {
@@ -59,6 +60,7 @@ impl IndexEngine {
             disabled: Arc::new(AtomicBool::new(false)),
             shutdown: Arc::new(AtomicBool::new(false)),
             fts5_ready: Arc::new(AtomicBool::new(fts5_ready)),
+            watcher_stopped: Arc::new(AtomicBool::new(true)),
         }
     }
 
@@ -705,6 +707,11 @@ pub fn content_matches(path: &str, needle: &[u8]) -> bool {
     let Ok(mut file) = File::open(path) else {
         return false;
     };
+    if let Ok(meta) = file.metadata() {
+        if meta.len() > 50 * 1024 * 1024 {
+            return false;
+        }
+    }
     let overlap = needle.len().saturating_sub(1);
     let mut buffer = vec![0u8; CONTENT_BUFFER_BYTES + overlap];
     let mut carry_len = 0usize;

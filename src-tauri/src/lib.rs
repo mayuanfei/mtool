@@ -247,7 +247,8 @@ async fn build_index(
         let disabled = state.disabled.clone();
         let shutdown = state.shutdown.clone();
         let db_path_w = state.db_path.clone();
-        start_fs_watcher(db_path_w, disabled, shutdown);
+        let watcher_stopped = state.watcher_stopped.clone();
+        start_fs_watcher(db_path_w, disabled, shutdown, watcher_stopped);
     }
 
     Ok(total)
@@ -293,6 +294,7 @@ async fn search_files(
                 && content_matches(&e.path, &content_needle)
             })
             .collect();
+        matched.sort_unstable_by(|a, b| b.modified.cmp(&a.modified));
         matched.truncate(limit);
         matched
     })
@@ -317,9 +319,12 @@ async fn disable_file_search(
     state.fts5_ready.store(false, Ordering::Relaxed);
 
     let db_path = state.db_path.clone();
+    let watcher_stopped = state.watcher_stopped.clone();
     tauri::async_runtime::spawn_blocking(move || {
-        // 等 watcher 线程退出（500ms 轮询周期 + 缓冲），避免 watcher 访问正在被清空的表
-        std::thread::sleep(Duration::from_millis(600));
+        // 等 watcher 线程退出，避免 watcher 访问正在被清空的表
+        while !watcher_stopped.load(Ordering::Relaxed) {
+            std::thread::sleep(Duration::from_millis(10));
+        }
         let _ = std::fs::remove_file(&db_path);
         let _ = std::fs::remove_file(format!("{}-wal", db_path));
         let _ = std::fs::remove_file(format!("{}-shm", db_path));
@@ -405,7 +410,8 @@ fn open_file(path: String) -> Result<(), String> {
 // 文件系统监听器（增量更新索引）
 // ---------------------------------------------------------------------------
 
-fn start_fs_watcher(db_path: String, disabled: Arc<AtomicBool>, shutdown: Arc<AtomicBool>) {
+fn start_fs_watcher(db_path: String, disabled: Arc<AtomicBool>, shutdown: Arc<AtomicBool>, watcher_stopped: Arc<AtomicBool>) {
+    watcher_stopped.store(false, Ordering::Relaxed);
     std::thread::spawn(move || {
         let (tx, rx) = mpsc::sync_channel::<notify::Event>(1024);
 
@@ -455,6 +461,7 @@ fn start_fs_watcher(db_path: String, disabled: Arc<AtomicBool>, shutdown: Arc<At
                 handle_fs_event(&event, &db_path, &mut db_conn);
             }
         }
+        watcher_stopped.store(true, Ordering::Relaxed);
     });
 }
 
@@ -511,7 +518,8 @@ pub fn run() {
             } else {
                 let disabled = engine.disabled.clone();
                 let shutdown = engine.shutdown.clone();
-                start_fs_watcher(db_path.clone(), disabled, shutdown);
+                let watcher_stopped = engine.watcher_stopped.clone();
+                start_fs_watcher(db_path.clone(), disabled, shutdown, watcher_stopped);
             }
 
             let has_data = count_entries(&db_path) > 0;
