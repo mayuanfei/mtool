@@ -188,7 +188,15 @@ async fn build_index(
     // 重置禁用标志
     state.disabled.store(false, Ordering::Relaxed);
     state.fts5_ready.store(false, Ordering::Relaxed);
-    let was_shutdown = state.shutdown.swap(false, Ordering::Relaxed);
+
+    // 先停掉 watcher，等它真正退出
+    state.shutdown.store(true, Ordering::Relaxed);
+    let watcher_stopped_clone = state.watcher_stopped.clone();
+    let _ = tauri::async_runtime::spawn_blocking(move || {
+        while !watcher_stopped_clone.load(Ordering::Relaxed) {
+            std::thread::sleep(Duration::from_millis(10));
+        }
+    }).await;
 
     {
         let mut s = status_ref.write().unwrap();
@@ -242,14 +250,13 @@ async fn build_index(
         fts5_ready_clone.store(true, Ordering::Relaxed);
     });
 
-    // 索引完成、DB 就绪后，再启动 watcher
-    if was_shutdown {
-        let disabled = state.disabled.clone();
-        let shutdown = state.shutdown.clone();
-        let db_path_w = state.db_path.clone();
-        let watcher_stopped = state.watcher_stopped.clone();
-        start_fs_watcher(db_path_w, disabled, shutdown, watcher_stopped);
-    }
+    // 索引完成、DB 就绪后，始终重新启动 watcher
+    state.shutdown.store(false, Ordering::Relaxed);
+    let disabled = state.disabled.clone();
+    let shutdown = state.shutdown.clone();
+    let db_path_w = state.db_path.clone();
+    let watcher_stopped = state.watcher_stopped.clone();
+    start_fs_watcher(db_path_w, disabled, shutdown, watcher_stopped);
 
     Ok(total)
 }
