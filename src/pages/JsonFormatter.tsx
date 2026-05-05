@@ -49,7 +49,9 @@ export function JsonFormatter() {
   const updateOutput = useCallback((text: string, isMinified: boolean) => {
     setPlainOutput(text);
     if (isMinified) {
-      setFormattedHtml(text);
+      setFormattedHtml(
+        text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+      );
     } else {
       setFormattedHtml(highlightBraces(text));
     }

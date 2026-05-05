@@ -1,14 +1,16 @@
+import { useState } from 'react';
 import { Globe, Wrench } from 'lucide-react';
 import { invoke } from '@tauri-apps/api/core';
 import { useI18n } from '../i18n';
 
-const Toggle = ({ checked, onChange }: { checked: boolean; onChange: () => void }) => {
+const Toggle = ({ checked, onChange, disabled }: { checked: boolean; onChange: () => void; disabled?: boolean }) => {
   return (
     <button
       onClick={onChange}
+      disabled={disabled}
       className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 focus:ring-offset-slate-900 ${
         checked ? 'bg-indigo-500' : 'bg-slate-700'
-      }`}
+      } ${disabled ? 'opacity-50 cursor-not-allowed' : ''}`}
     >
       <span
         className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
@@ -36,6 +38,7 @@ interface SettingsPageProps {
 
 export function SettingsPage({ jsonEnabled, setJsonEnabled, qrEnabled, setQrEnabled, pwdEnabled, setPwdEnabled, sqlInEnabled, setSqlInEnabled, mdEnabled, setMdEnabled, fileSearchEnabled, setFileSearchEnabled }: SettingsPageProps) {
   const { t, language, setLanguage } = useI18n();
+  const [isProcessing, setIsProcessing] = useState(false);
 
   return (
     <div className="max-w-4xl max-w-5xl mx-auto w-full">
@@ -60,13 +63,19 @@ export function SettingsPage({ jsonEnabled, setJsonEnabled, qrEnabled, setQrEnab
               </div>
               <Toggle
                 checked={fileSearchEnabled}
+                disabled={isProcessing}
                 onChange={async () => {
+                  if (isProcessing) return;
+                  setIsProcessing(true);
                   const next = !fileSearchEnabled;
                   setFileSearchEnabled(next);
-                  if (!next) {
-                    await invoke('disable_file_search').catch(console.error);
-                  } else {
-                    await invoke('build_index').catch(console.error);
+                  try {
+                    if (!next) await invoke('disable_file_search');
+                    else await invoke('build_index');
+                  } catch (e) {
+                    console.error(e);
+                  } finally {
+                    setIsProcessing(false);
                   }
                 }}
               />
