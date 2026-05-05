@@ -865,6 +865,20 @@ fn glob_to_like(pattern: &str) -> String {
     result
 }
 
+fn escape_like(value: &str) -> String {
+    let mut result = String::new();
+    for ch in value.chars() {
+        match ch {
+            '%' | '_' | '\\' => {
+                result.push('\\');
+                result.push(ch);
+            }
+            _ => result.push(ch),
+        }
+    }
+    result
+}
+
 /// 检测 *.ext 纯扩展名 glob，返回扩展名字符串（如 "yaml"）
 /// 命中时可直接走 idx_ext 索引，极快
 fn extract_ext_from_glob(pattern: &str) -> Option<String> {
@@ -949,8 +963,8 @@ fn search_via_sqlite(conn: &Connection, parsed: &ParsedQuery, limit: usize) -> V
 
     // name terms（每个词都要包含）
     for term in &parsed.name_terms {
-        conditions.push("name_lower LIKE ?".to_string());
-        str_params.push(format!("%{}%", term));
+        conditions.push("name_lower LIKE ? ESCAPE '\\'".to_string());
+        str_params.push(format!("%{}%", escape_like(term)));
     }
 
     // size filter（直接内联数值，不走参数，避免类型复杂度）
@@ -1032,4 +1046,71 @@ pub fn search_in_db(
     search_via_sqlite(&conn, parsed, limit)
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::{SystemTime, UNIX_EPOCH};
 
+    #[test]
+    fn search_in_db_treats_underscore_as_literal_in_name_terms() {
+        let db_path = temp_db_path("underscore");
+        init_db(&db_path);
+        let conn = Connection::open(&db_path).unwrap();
+
+        insert_entry(&conn, "my_file", "/tmp/my_file");
+        insert_entry(&conn, "myxfile", "/tmp/myxfile");
+
+        let parsed = ParsedQuery {
+            name_terms: vec!["my_file".to_string()],
+            ..Default::default()
+        };
+        let results = search_in_db(&db_path, &parsed, 10, false);
+
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].name, "my_file");
+        cleanup_db_files(&db_path);
+    }
+
+    #[test]
+    fn search_in_db_treats_percent_as_literal_in_name_terms() {
+        let db_path = temp_db_path("percent");
+        init_db(&db_path);
+        let conn = Connection::open(&db_path).unwrap();
+
+        insert_entry(&conn, "100%", "/tmp/100pct");
+        insert_entry(&conn, "1000", "/tmp/1000");
+
+        let parsed = ParsedQuery {
+            name_terms: vec!["100%".to_string()],
+            ..Default::default()
+        };
+        let results = search_in_db(&db_path, &parsed, 10, false);
+
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].name, "100%");
+        cleanup_db_files(&db_path);
+    }
+
+    fn temp_db_path(tag: &str) -> String {
+        let nanos = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
+        std::env::temp_dir()
+            .join(format!("mtool-{tag}-{nanos}.db"))
+            .to_string_lossy()
+            .to_string()
+    }
+
+    fn insert_entry(conn: &Connection, name: &str, path: &str) {
+        conn.execute(
+            "INSERT INTO file_index(name, path, size, created, modified, is_dir, ext, name_lower) \
+             VALUES(?1, ?2, 0, 0, 0, 0, '', ?3)",
+            params![name, path, name.to_ascii_lowercase()],
+        )
+        .unwrap();
+    }
+
+    fn cleanup_db_files(db_path: &str) {
+        let _ = std::fs::remove_file(db_path);
+        let _ = std::fs::remove_file(format!("{}-wal", db_path));
+        let _ = std::fs::remove_file(format!("{}-shm", db_path));
+    }
+}

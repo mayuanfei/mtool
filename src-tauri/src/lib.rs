@@ -24,6 +24,16 @@ use file_search::{
     IndexStatus, get_watch_roots_pub,
 };
 
+fn maybe_start_watcher(engine: &IndexEngine, has_data: bool, index_disabled: bool) {
+    if index_disabled || !has_data {
+        return;
+    }
+    let disabled = engine.disabled.clone();
+    let shutdown = engine.shutdown.clone();
+    let watcher_stopped = engine.watcher_stopped.clone();
+    start_fs_watcher(engine.db_path.clone(), disabled, shutdown, watcher_stopped);
+}
+
 // ---------------------------------------------------------------------------
 // 现有命令
 // ---------------------------------------------------------------------------
@@ -522,17 +532,12 @@ pub fn run() {
             engine.load_from_db();
 
             let index_disabled = is_index_disabled(&db_path);
+            let has_data = count_entries(&db_path) > 0;
             if index_disabled {
                 engine.disabled.store(true, Ordering::Relaxed);
                 engine.shutdown.store(true, Ordering::Relaxed);
-            } else {
-                let disabled = engine.disabled.clone();
-                let shutdown = engine.shutdown.clone();
-                let watcher_stopped = engine.watcher_stopped.clone();
-                start_fs_watcher(db_path.clone(), disabled, shutdown, watcher_stopped);
             }
-
-            let has_data = count_entries(&db_path) > 0;
+            maybe_start_watcher(&engine, has_data, index_disabled);
 
             app.manage(engine);
 
@@ -576,6 +581,7 @@ pub fn run() {
                         state.load_from_db();
                         app_handle.emit("index_progress", total).ok();
                         app_handle.emit("index_complete", total).ok();
+                        maybe_start_watcher(&state, true, false);
                     }
 
                     let fts5_ready_clone = state.fts5_ready.clone();
@@ -609,4 +615,24 @@ pub fn run() {
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
         .run(|_app_handle, _event| {});
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn setup_checks_existing_index_before_starting_watcher() {
+        let source = include_str!("lib.rs");
+        let setup_start = source.find(".setup(|app| {").unwrap();
+        let setup = &source[setup_start..];
+        let count_pos = setup.find("let has_data = count_entries(&db_path) > 0;").unwrap();
+        let watcher_pos = setup.find(
+            "start_fs_watcher(db_path.clone(), disabled, shutdown, watcher_stopped);",
+        )
+        .unwrap();
+
+        assert!(
+            count_pos < watcher_pos,
+            "setup 应先判断是否已有索引，再决定是否启动 watcher"
+        );
+    }
 }
