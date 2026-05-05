@@ -1,4 +1,4 @@
-import { Copy, RefreshCcw, Check } from 'lucide-react';
+import { Copy, RefreshCcw, Check, Key } from 'lucide-react';
 import { useState, useEffect, useCallback } from 'react';
 import { useI18n } from '../i18n';
 
@@ -225,13 +225,16 @@ export function PasswordGenerator() {
   };
 
   return (
-    <div className="max-w-4xl max-w-5xl mx-auto w-full">
-      <div className="mb-10">
-        <h1 className="text-4xl font-bold tracking-tight text-white mb-2">{t('Password Generator')}</h1>
-        <p className="text-slate-400">{t('Generate secure, random passwords for your applications.')}</p>
+    <div className="w-full h-full flex flex-col">
+      <div className="flex justify-between items-center mb-6 border-b border-slate-800 pb-4 shrink-0">
+        <h2 className="text-white font-semibold text-lg flex items-center gap-2">
+          <Key className="w-5 h-5 text-indigo-400" />
+          {t('Password Generator')}
+        </h2>
       </div>
 
-      <div className="space-y-6">
+      <div className="flex-1 overflow-y-auto pr-2">
+        <div className="max-w-5xl mx-auto w-full space-y-6 pb-6">
         
         {/* Main Generator Card */}
         <section className="bg-slate-900 border border-slate-800 rounded-xl p-6 shadow-2xl">
@@ -414,6 +417,7 @@ export function PasswordGenerator() {
           </section>
         )}
 
+        </div>
       </div>
     </div>
   );
