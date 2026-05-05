@@ -609,7 +609,7 @@ fn tokenize(s: &str) -> Vec<String> {
     let mut in_quote = false;
     for ch in s.chars() {
         match ch {
-            '"' => {
+            '"' | '\'' => {
                 in_quote = !in_quote;
                 current.push(ch);
             }

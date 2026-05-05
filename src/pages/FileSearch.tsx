@@ -53,9 +53,41 @@ function formatDate(ts: number): string {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
+function tokenizeQuery(s: string): string[] {
+  const tokens: string[] = [];
+  let current = "";
+  let inQuote = false;
+  for (const ch of s) {
+    if (ch === '"' || ch === "'") {
+      inQuote = !inQuote;
+      current += ch;
+    } else if ((ch === " " || ch === "\t") && !inQuote) {
+      if (current) {
+        tokens.push(current);
+        current = "";
+      }
+    } else {
+      current += ch;
+    }
+  }
+  if (current) tokens.push(current);
+  return tokens;
+}
+
+function stripQuotes(s: string): string {
+  const t = s.trim();
+  if (
+    t.length >= 2 &&
+    ((t.startsWith('"') && t.endsWith('"')) ||
+      (t.startsWith("'") && t.endsWith("'")))
+  ) {
+    return t.slice(1, -1);
+  }
+  return t;
+}
+
 function HighlightedName({ name, query }: { name: string; query: string }) {
-  const term = query
-    .split(/\s+/)
+  const raw = tokenizeQuery(query)
     .find(
       (t) =>
         !t.startsWith("size:") &&
@@ -63,8 +95,8 @@ function HighlightedName({ name, query }: { name: string; query: string }) {
         !t.includes("*") &&
         !t.includes("?") &&
         t.length > 0
-    )
-    ?.toLowerCase();
+    );
+  const term = raw ? stripQuotes(raw).toLowerCase() : undefined;
 
   if (!term) return <span>{name}</span>;
   const idx = name.toLowerCase().indexOf(term);
