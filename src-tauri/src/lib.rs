@@ -287,7 +287,11 @@ async fn search_files(
         let candidates = search_in_db(&db_path, &parsed, 100_000, fts5_ready);
         let mut matched: Vec<FileEntry> = candidates
             .into_par_iter()
-            .filter(|e| !e.is_dir && content_matches(&e.path, &content_needle))
+            .filter(|e| {
+                !e.is_dir 
+                && !should_skip_path(std::path::Path::new(&e.path)) 
+                && content_matches(&e.path, &content_needle)
+            })
             .collect();
         matched.truncate(limit);
         matched
