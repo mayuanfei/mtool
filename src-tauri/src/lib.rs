@@ -299,6 +299,11 @@ async fn search_files(
         .map_err(|e| e.to_string());
     }
 
+    // ── 纯 content: 搜索（无文件名/glob 限定）→ 直接拒绝，避免只扫前 10 万行 ──
+    if parsed.name_terms.is_empty() && parsed.glob_pattern.is_none() {
+        return Err("content: 搜索需要同时指定文件名或扩展名，例如：*.yml content:xxx".to_string());
+    }
+
     // ── content 过滤 → SQLite 取候选，rayon 并行扫文件内容 ─────────────────────
     let content_needle = parsed.content_filter.as_ref().unwrap().as_bytes().to_vec();
     let results = tauri::async_runtime::spawn_blocking(move || {

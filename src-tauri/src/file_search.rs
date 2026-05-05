@@ -514,7 +514,6 @@ where
     // ── DB writer 线程：从有界 channel 接收条目，攒够 FLUSH_SIZE 再写 ────────
     let (tx, rx) = mpsc::sync_channel::<Vec<FileEntry>>(64);
     let db_path_writer = db_path.to_string();
-    let writer_counter = counter.clone();
     let db_thread = std::thread::spawn(move || {
         let mut conn = match Connection::open(&db_path_writer) {
             Ok(c) => c,
@@ -532,10 +531,6 @@ where
                 flush_batch_conn(&mut conn, &buffer);
                 total += buffer.len();
                 buffer.clear();
-                let cur = writer_counter.load(Ordering::Relaxed);
-                if total > cur {
-                    writer_counter.store(total, Ordering::Relaxed);
-                }
             }
         }
         if !buffer.is_empty() {
