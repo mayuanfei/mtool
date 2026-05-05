@@ -625,10 +625,9 @@ mod tests {
         let setup_start = source.find(".setup(|app| {").unwrap();
         let setup = &source[setup_start..];
         let count_pos = setup.find("let has_data = count_entries(&db_path) > 0;").unwrap();
-        let watcher_pos = setup.find(
-            "start_fs_watcher(db_path.clone(), disabled, shutdown, watcher_stopped);",
-        )
-        .unwrap();
+        let watcher_pos = setup
+            .find("maybe_start_watcher(&engine, has_data, index_disabled);")
+            .unwrap();
 
         assert!(
             count_pos < watcher_pos,
