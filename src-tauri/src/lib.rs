@@ -428,7 +428,10 @@ fn start_fs_watcher(db_path: String, disabled: Arc<AtomicBool>, shutdown: Arc<At
             }
         }) {
             Ok(w) => w,
-            Err(_) => return,
+            Err(_) => {
+                watcher_stopped.store(true, Ordering::Relaxed);
+                return;
+            }
         };
 
         let roots = get_watch_roots_pub();
