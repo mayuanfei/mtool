@@ -296,6 +296,10 @@ pub fn should_skip_path(path: &Path) -> bool {
         if without_drive.contains("\\appdata\\local\\temp") {
             return true;
         }
+        // OneDrive 缓存 / 占位符目录（大量云端文件，扫描会触发同步卡死）
+        if without_drive.contains("\\appdata\\local\\microsoft\\onedrive") {
+            return true;
+        }
         // node_modules / .git（与 macOS 对齐）
         if without_drive.contains("\\node_modules\\")
             || without_drive.contains("\\.git\\")
@@ -367,10 +371,19 @@ fn get_system_roots() -> Vec<PathBuf> {
 
     #[cfg(target_os = "windows")]
     {
-        // 枚举 A-Z 盘符
+        use std::sync::mpsc;
+        use std::time::Duration;
+        // 枚举 A-Z 盘符，用超时 read_dir 过滤断线网络盘
         (b'A'..=b'Z')
             .map(|c| PathBuf::from(format!("{}:\\", c as char)))
-            .filter(|p| p.exists())
+            .filter(|p| {
+                let p = p.clone();
+                let (tx, rx) = mpsc::channel();
+                std::thread::spawn(move || {
+                    tx.send(std::fs::read_dir(&p).is_ok()).ok();
+                });
+                rx.recv_timeout(Duration::from_secs(2)).unwrap_or(false)
+            })
             .collect()
     }
 
@@ -441,17 +454,27 @@ fn scan_dir_parallel_owned(
                 .map(|x| x.to_string_lossy().to_ascii_lowercase())
                 .unwrap_or_default();
             let path_str = path.to_string_lossy().to_string();
-            let (size, created, modified) = match e.metadata() {
-                Ok(m) => (
-                    if m.is_file() { m.len() } else { 0 },
-                    m.created().ok()
-                        .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
-                        .map(|d| d.as_secs()).unwrap_or(0),
-                    m.modified().ok()
-                        .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
-                        .map(|d| d.as_secs()).unwrap_or(0),
-                ),
-                Err(_) => (0u64, 0u64, 0u64),
+            // Windows：symlink_metadata 不触发 OneDrive placeholder 文件云下载
+            // macOS/Linux：metadata 正常用
+            // Windows：symlink_metadata 不触发 OneDrive placeholder 文件云下载
+            // macOS/Linux：metadata 正常用
+            let (size, created, modified) = {
+                #[cfg(target_os = "windows")]
+                let meta_result = std::fs::symlink_metadata(&path);
+                #[cfg(not(target_os = "windows"))]
+                let meta_result = e.metadata();
+                match meta_result {
+                    Ok(m) => (
+                        if m.is_file() { m.len() } else { 0 },
+                        m.created().ok()
+                            .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
+                            .map(|d| d.as_secs()).unwrap_or(0),
+                        m.modified().ok()
+                            .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
+                            .map(|d| d.as_secs()).unwrap_or(0),
+                    ),
+                    Err(_) => (0u64, 0u64, 0u64),
+                }
             };
             file_entries.push(FileEntry {
                 name, name_lower, path: path_str,
