@@ -51,7 +51,8 @@ impl IndexEngine {
                     "SELECT COUNT(*) FROM file_index", [], |r| r.get(0),
                 ).unwrap_or(0);
                 let fts5_count: i64 = conn.query_row(
-                    "SELECT COUNT(*) FROM file_fts", [], |r| r.get(0),
+                    "SELECT CAST(value AS INTEGER) FROM index_meta WHERE key='fts5_count'",
+                    [], |r| r.get(0),
                 ).unwrap_or(0);
                 index_count > 0
                     && fts5_count > 0
@@ -586,6 +587,11 @@ pub fn rebuild_fts5_background(db_path: &str) -> bool {
     match result {
         Ok(_) => {
             eprintln!("[mtool fts5] rebuild completed successfully");
+            conn.execute(
+                "INSERT OR REPLACE INTO index_meta(key,value) \
+                 SELECT 'fts5_count', COUNT(*) FROM file_index",
+                [],
+            ).ok();
             true
         }
         Err(e) => {
@@ -1028,6 +1034,13 @@ fn search_via_sqlite(conn: &Connection, parsed: &ParsedQuery, limit: usize) -> V
     .unwrap_or_default()
 }
 
+/// FTS5 trigram 不支持混合脚本（如 "C扫B"），分词后无法匹配子串。
+fn has_mixed_script(term: &str) -> bool {
+    let has_ascii_alpha = term.chars().any(|c| c.is_ascii_alphabetic());
+    let has_non_ascii = term.chars().any(|c| !c.is_ascii());
+    has_ascii_alpha && has_non_ascii
+}
+
 /// 搜索路由：
 ///   1. name_terms 全 >= 3 字符 且 FTS5 有数据 → FTS5 trigram
 ///   2. 否则 → SQLite LIKE（走 idx_name_lower 前缀扫描）
@@ -1053,7 +1066,9 @@ pub fn search_in_db(
         Err(_) => return Vec::new(),
     };
     let fts5_usable = parsed.glob_pattern.is_none()
-        && parsed.name_terms.iter().all(|t| t.chars().count() >= 3)
+        && parsed.name_terms.iter().all(|t| {
+            t.chars().count() >= 3 && !has_mixed_script(t)
+        })
         && fts5_is_ready;
 
     if fts5_usable {
@@ -1085,7 +1100,7 @@ fn prefix_score(name: &str, terms: &[String]) -> u8 {
         if name == t.as_str() { 0 }
         else if name.starts_with(t.as_str()) { 1 }
         else { 2 }
-    }).max().unwrap_or(3)
+    }).min().unwrap_or(3)
 }
 
 #[cfg(test)]
