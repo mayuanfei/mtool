@@ -372,19 +372,31 @@ fn get_system_roots() -> Vec<PathBuf> {
     #[cfg(target_os = "windows")]
     {
         use std::sync::mpsc;
-        use std::time::Duration;
-        // 枚举 A-Z 盘符，用超时 read_dir 过滤断线网络盘
-        (b'A'..=b'Z')
+        use std::time::{Duration, Instant};
+        // 并行检测所有盘符，统一 2 秒超时，避免断线网络盘卡死
+        let candidates: Vec<PathBuf> = (b'A'..=b'Z')
             .map(|c| PathBuf::from(format!("{}:\\", c as char)))
-            .filter(|p| {
-                let p = p.clone();
-                let (tx, rx) = mpsc::channel();
-                std::thread::spawn(move || {
-                    tx.send(std::fs::read_dir(&p).is_ok()).ok();
-                });
-                rx.recv_timeout(Duration::from_secs(2)).unwrap_or(false)
-            })
-            .collect()
+            .collect();
+        let (tx, rx) = mpsc::channel();
+        for p in &candidates {
+            let p = p.clone();
+            let tx = tx.clone();
+            std::thread::spawn(move || {
+                let ok = std::fs::read_dir(&p).is_ok();
+                tx.send((p, ok)).ok();
+            });
+        }
+        drop(tx);
+        let deadline = Instant::now() + Duration::from_secs(2);
+        let mut roots = Vec::new();
+        while let Ok(dur) = deadline.checked_duration_since(Instant::now()) {
+            match rx.recv_timeout(dur) {
+                Ok((p, true)) => roots.push(p),
+                Ok((_, false)) => {}
+                Err(_) => break,
+            }
+        }
+        roots
     }
 
     #[cfg(not(any(target_os = "macos", target_os = "linux", target_os = "windows")))]
@@ -454,8 +466,6 @@ fn scan_dir_parallel_owned(
                 .map(|x| x.to_string_lossy().to_ascii_lowercase())
                 .unwrap_or_default();
             let path_str = path.to_string_lossy().to_string();
-            // Windows：symlink_metadata 不触发 OneDrive placeholder 文件云下载
-            // macOS/Linux：metadata 正常用
             // Windows：symlink_metadata 不触发 OneDrive placeholder 文件云下载
             // macOS/Linux：metadata 正常用
             let (size, created, modified) = {
