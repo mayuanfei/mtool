@@ -11,6 +11,8 @@ const translations = {
     'System': 'System',
     'Settings': 'Settings',
     'User': 'User',
+    'User profile and preferences.': 'User profile and preferences.',
+    'Coming soon': 'Coming soon',
     
     // JsonFormatter
     'Clear': 'Clear',
@@ -144,6 +146,8 @@ const translations = {
     'System': '系统',
     'Settings': '设置',
     'User': '用户',
+    'User profile and preferences.': '用户资料与偏好设置。',
+    'Coming soon': '即将推出',
     
     // JsonFormatter
     'Clear': '清空',

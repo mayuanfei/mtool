@@ -7,6 +7,7 @@ import { PasswordGenerator } from './pages/PasswordGenerator';
 import { SqlInBuilder } from './pages/SqlInBuilder';
 import { MarkdownEditor } from './pages/MarkdownEditor';
 import { FileSearch } from './pages/FileSearch';
+import { UserPage } from './pages/User';
 import { useI18n } from './i18n';
 
 export default function App() {
@@ -95,6 +96,7 @@ export default function App() {
           {activePage === 'sqlIn' && sqlInEnabled && <SqlInBuilder />}
           {activePage === 'md' && mdEnabled && <MarkdownEditor />}
           {activePage === 'fileSearch' && fileSearchEnabled && <FileSearch />}
+          {activePage === 'user' && <UserPage />}
           {activePage === 'settings' && (
             <SettingsPage 
               jsonEnabled={jsonEnabled} 
@@ -111,7 +113,7 @@ export default function App() {
               setFileSearchEnabled={setFileSearchEnabled}
             />
           )}
-          {activePage !== 'settings' && 
+          {activePage !== 'settings' && activePage !== 'user' &&
            !(activePage === 'json' && jsonEnabled) && 
            !(activePage === 'qr' && qrEnabled) && 
            !(activePage === 'pwd' && pwdEnabled) && 
