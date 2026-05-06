@@ -46,11 +46,17 @@ pub struct IndexEngine {
 impl IndexEngine {
     pub fn new_with_db(db_path: String) -> Self {
         let fts5_ready = match Connection::open(&db_path) {
-            Ok(conn) => conn.query_row(
-                "SELECT EXISTS(SELECT 1 FROM file_fts LIMIT 1)",
-                [],
-                |row| row.get::<_, bool>(0),
-            ).unwrap_or(false),
+            Ok(conn) => {
+                let index_count: i64 = conn.query_row(
+                    "SELECT COUNT(*) FROM file_index", [], |r| r.get(0),
+                ).unwrap_or(0);
+                let fts5_count: i64 = conn.query_row(
+                    "SELECT COUNT(*) FROM file_fts", [], |r| r.get(0),
+                ).unwrap_or(0);
+                index_count > 0
+                    && fts5_count > 0
+                    && (fts5_count - index_count).abs() <= index_count / 100
+            }
             Err(_) => false,
         };
 
@@ -928,6 +934,7 @@ fn search_via_fts5(
          FROM file_fts \
          JOIN file_index fi ON fi.path = file_fts.path \
          WHERE file_fts MATCH ?1{} \
+         ORDER BY rank \
          LIMIT {}",
         extra, limit
     );
@@ -1035,7 +1042,9 @@ pub fn search_in_db(
             Ok(c) => c,
             Err(_) => return Vec::new(),
         };
-        return search_via_sqlite(&conn, parsed, limit);
+        let mut results = search_via_sqlite(&conn, parsed, limit);
+        sort_by_prefix_match(&mut results, &parsed.name_terms);
+        return results;
     }
 
     // 有 name_terms：先判断能否用 FTS5 trigram（长词，3+ 字符）
@@ -1048,11 +1057,35 @@ pub fn search_in_db(
         && fts5_is_ready;
 
     if fts5_usable {
-        return search_via_fts5(&conn, &parsed.name_terms, parsed.size_filter.as_ref(), limit);
+        let mut results = search_via_fts5(&conn, &parsed.name_terms, parsed.size_filter.as_ref(), limit);
+        sort_by_prefix_match(&mut results, &parsed.name_terms);
+        return results;
     }
 
     // 短词（< 3 字符）或 FTS5 未就绪 → SQLite LIKE，走 idx_name_lower 前缀扫描
-    search_via_sqlite(&conn, parsed, limit)
+    let mut results = search_via_sqlite(&conn, parsed, limit);
+    sort_by_prefix_match(&mut results, &parsed.name_terms);
+    results
+}
+
+/// 按前缀匹配优先排序：完全匹配(0) > 前缀匹配(1) > 子串匹配(2)
+pub fn sort_by_prefix_match(entries: &mut [FileEntry], terms: &[String]) {
+    if terms.is_empty() {
+        return;
+    }
+    entries.sort_by(|a, b| {
+        let a_score = prefix_score(&a.name_lower, terms);
+        let b_score = prefix_score(&b.name_lower, terms);
+        a_score.cmp(&b_score)
+    });
+}
+
+fn prefix_score(name: &str, terms: &[String]) -> u8 {
+    terms.iter().map(|t| {
+        if name == t.as_str() { 0 }
+        else if name.starts_with(t.as_str()) { 1 }
+        else { 2 }
+    }).max().unwrap_or(3)
 }
 
 #[cfg(test)]
