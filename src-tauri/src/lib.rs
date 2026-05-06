@@ -9,6 +9,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use arboard::{Clipboard, ImageData};
 use image::Rgb;
+use notify::event::{ModifyKind, RenameMode};
 use notify::{EventKind, RecursiveMode, Watcher};
 use qrcode::{EcLevel, QrCode};
 
@@ -496,6 +497,15 @@ fn handle_fs_event(event: &notify::Event, db_path: &str, conn: &mut Option<rusql
         }
         let path_str = path.to_string_lossy().to_string();
         match &event.kind {
+            EventKind::Modify(ModifyKind::Name(RenameMode::From)) => {
+                if conn.is_none() {
+                    *conn = rusqlite::Connection::open(db_path).ok();
+                }
+                if let Some(c) = conn.as_mut() {
+                    delete_entry_in_db(c, &path_str);
+                }
+            }
+            EventKind::Modify(ModifyKind::Name(_)) |
             EventKind::Create(_) | EventKind::Modify(_) => {
                 if let Some(entry) = entry_from_path(path) {
                     if conn.is_none() {

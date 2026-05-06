@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Code2, QrCode, Settings, User, Key, Database, FileText, PanelLeftClose, PanelLeftOpen, SearchCode } from 'lucide-react';
+import { Code2, QrCode, Settings, Key, Database, FileText, PanelLeftClose, PanelLeftOpen, SearchCode } from 'lucide-react';
 import { useI18n } from '../i18n';
 
 interface SidebarProps {
@@ -36,7 +36,6 @@ export function Sidebar({ activePage, onNavigate, jsonEnabled, qrEnabled, pwdEna
 
   const bottomItems = [
     { id: 'settings', label: t('Settings'), icon: Settings },
-    { id: 'user', label: t('User'), icon: User },
   ];
 
   const NavItem = ({ item }: { item: { id: string; label: string; icon: React.ComponentType<{ className?: string; strokeWidth?: number }> } }) => {
