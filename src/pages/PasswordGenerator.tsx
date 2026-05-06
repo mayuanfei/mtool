@@ -30,6 +30,17 @@ const UPPERCASE = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
 const LOWERCASE = 'abcdefghijklmnopqrstuvwxyz';
 const NUMBERS = '0123456789';
 
+function unbiasedRandom(max: number): number {
+  const limit = Math.floor(0x100000000 / max) * max;
+  const arr = new Uint32Array(1);
+  let val: number;
+  do {
+    window.crypto.getRandomValues(arr);
+    val = arr[0];
+  } while (val >= limit);
+  return val % max;
+}
+
 export function PasswordGenerator() {
   const { t } = useI18n();
   const [passwords, setPasswords] = useState<string[]>([]);
@@ -81,17 +92,6 @@ export function PasswordGenerator() {
     return 'WEAK';
   }, [useUpper, useLower, useNumbers, useSymbols]);
 
-  const unbiasedRandom = (max: number): number => {
-    const limit = Math.floor(0x100000000 / max) * max;
-    const arr = new Uint32Array(1);
-    let val: number;
-    do {
-      window.crypto.getRandomValues(arr);
-      val = arr[0];
-    } while (val >= limit);
-    return val % max;
-  };
-
   const generatePassword = useCallback((addToHistory = true) => {
     let charset = '';
     if (useUpper) charset += UPPERCASE;
@@ -125,7 +125,7 @@ export function PasswordGenerator() {
       
       if (addToHistory && generated) {
         historyAdditions.push({
-          id: Math.random().toString(36).substring(7) + c,
+          id: crypto.randomUUID(),
           timestamp: timeStr,
           password: generated,
           strength: calculateStrength()
