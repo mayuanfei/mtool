@@ -586,8 +586,16 @@ where
 
     // ── 并行扫描（当前线程协调，rayon 线程池执行）────────────────────────
     let roots = get_watch_roots();
-    for root in &roots {
-        scan_dir_parallel(root, &tx, &counter);
+    if roots.is_empty() {
+        // 所有盘符都无法访问（如断线网络盘），fallback 到用户目录
+        let fallback = dirs::home_dir()
+            .unwrap_or_else(|| PathBuf::from("C:\\Users"));
+        eprintln!("[mtool] no accessible drives found, fallback to {:?}", fallback);
+        scan_dir_parallel(&fallback, &tx, &counter);
+    } else {
+        for root in &roots {
+            scan_dir_parallel(root, &tx, &counter);
+        }
     }
     drop(tx);
     let total = db_thread.join().unwrap_or(0);

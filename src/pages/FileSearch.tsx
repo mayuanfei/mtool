@@ -189,7 +189,10 @@ export function FileSearch() {
         });
       } catch (e) {
         if (searchIdRef.current !== id) return;
-        setError(String(e));
+        const errStr = String(e);
+        setError(errStr === 'ERR_CONTENT_REQUIRES_FILENAME'
+          ? t('Content search requires a filename or glob pattern, e.g. *.yml content:xxx')
+          : errStr);
         setResults([]);
       } finally {
         if (searchIdRef.current === id) setIsSearching(false);
@@ -456,8 +459,8 @@ export function FileSearch() {
           {!query.trim() && !isIndexing && status.total === 0 && (
             <div className="flex flex-col items-center justify-center h-full text-slate-600">
               <Search className="w-10 h-10 mb-3 opacity-30" />
-              <p className="text-sm">暂无索引数据</p>
-              <p className="text-xs mt-1">点击「重建索引」开始扫描全系统文件</p>
+              <p className="text-sm">{t('No index data')}</p>
+              <p className="text-xs mt-1">{t('Click "Re-index" to scan all system files')}</p>
             </div>
           )}
 
@@ -465,9 +468,9 @@ export function FileSearch() {
           {!query.trim() && isIndexing && (
             <div className="flex flex-col items-center justify-center h-full text-slate-600">
               <RefreshCw className="w-10 h-10 mb-3 opacity-30 animate-spin" />
-              <p className="text-sm text-indigo-400">正在后台建立索引...</p>
+              <p className="text-sm text-indigo-400">{t('Building index in background...')}</p>
               <p className="text-xs mt-1 font-mono tabular-nums">
-                已建立 {status.total.toLocaleString()} 条，完成后可搜索
+                {status.total.toLocaleString()} {t('indexed so far, searchable when done')}
               </p>
             </div>
           )}
@@ -476,9 +479,9 @@ export function FileSearch() {
           {!query.trim() && status.total > 0 && !isIndexing && (
             <div className="flex flex-col items-center justify-center h-full text-slate-600">
               <Search className="w-10 h-10 mb-3 opacity-30" />
-              <p className="text-sm">输入关键词搜索文件</p>
+              <p className="text-sm">{t('Enter keyword to search files')}</p>
               <p className="text-xs mt-1">
-                已索引 {status.total.toLocaleString()} 个文件
+                {status.total.toLocaleString()} {t('files indexed')}
               </p>
             </div>
           )}
@@ -487,7 +490,7 @@ export function FileSearch() {
           {query.trim() && !isSearching && results.length === 0 && !error && (
             <div className="flex flex-col items-center justify-center h-full text-slate-600">
               <Search className="w-10 h-10 mb-3 opacity-30" />
-              <p className="text-sm">未找到匹配的文件</p>
+              <p className="text-sm">{t('No matching files found')}</p>
             </div>
           )}
 

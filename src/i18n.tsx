@@ -136,7 +136,14 @@ const translations = {
     'matches': 'matches',
     'Index a directory first, then search.': 'Index a directory first, then search.',
     'No files match your query.': 'No files match your query.',
-    'Search and find files by name, size, or content.': 'Search and find files by name, size, or content.'
+    'Search and find files by name, size, or content.': 'Search and find files by name, size, or content.',
+    'No index data': 'No index data',
+    'Click "Re-index" to scan all system files': 'Click "Re-index" to scan all system files',
+    'Building index in background...': 'Building index in background...',
+    'indexed so far, searchable when done': 'indexed so far, searchable when done',
+    'Enter keyword to search files': 'Enter keyword to search files',
+    'No matching files found': 'No matching files found',
+    'Content search requires a filename or glob pattern, e.g. *.yml content:xxx': 'Content search requires a filename or glob pattern, e.g. *.yml content:xxx',
   },
   zh: {
     // Sidebar
@@ -271,7 +278,14 @@ const translations = {
     'matches': '个匹配',
     'Index a directory first, then search.': '请先添加目录建立索引，然后再搜索。',
     'No files match your query.': '没有文件匹配您的查询。',
-    'Search and find files by name, size, or content.': '按文件名、大小或内容搜索文件。'
+    'Search and find files by name, size, or content.': '按文件名、大小或内容搜索文件。',
+    'No index data': '暂无索引数据',
+    'Click "Re-index" to scan all system files': '点击「重建索引」开始扫描全系统文件',
+    'Building index in background...': '正在后台建立索引...',
+    'indexed so far, searchable when done': '条，完成后可搜索',
+    'Enter keyword to search files': '输入关键词搜索文件',
+    'No matching files found': '未找到匹配的文件',
+    'Content search requires a filename or glob pattern, e.g. *.yml content:xxx': 'content 搜索需要同时指定文件名或扩展名，例如：*.yml content:xxx',
   }
 };
 
