@@ -557,22 +557,36 @@ where
 }
 
 /// 从 file_index 表批量重建 FTS5 索引（独立连接，synchronous=OFF 加速）。
-pub fn rebuild_fts5_background(db_path: &str) {
+/// 成功返回 true，失败返回 false。
+pub fn rebuild_fts5_background(db_path: &str) -> bool {
     let conn = match Connection::open(db_path) {
         Ok(c) => c,
-        Err(_) => return,
+        Err(e) => {
+            eprintln!("[mtool fts5] failed to open db: {}", e);
+            return false;
+        }
     };
     conn.execute_batch(
         "PRAGMA synchronous=OFF;
          PRAGMA cache_size=-32768;",
     ).ok();
-    conn.execute_batch(
+    let result = conn.execute_batch(
         "BEGIN;
          INSERT INTO file_fts(file_fts) VALUES('delete-all');
          INSERT INTO file_fts(path, name_lower) SELECT path, name_lower FROM file_index;
          COMMIT;",
-    ).ok();
+    );
     conn.execute_batch("PRAGMA synchronous=NORMAL;").ok();
+    match result {
+        Ok(_) => {
+            eprintln!("[mtool fts5] rebuild completed successfully");
+            true
+        }
+        Err(e) => {
+            eprintln!("[mtool fts5] rebuild failed: {}", e);
+            false
+        }
+    }
 }
 
 

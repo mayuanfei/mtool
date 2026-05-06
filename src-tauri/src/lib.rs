@@ -254,20 +254,21 @@ async fn build_index(
     app.emit("index_progress", total).ok();
     app.emit("index_complete", total).ok();
 
-    // FTS5 后台重建
+    // FTS5 后台重建 + watcher 启动（顺序执行，避免写写竞争）
     let fts5_ready_clone = state.fts5_ready.clone();
-    std::thread::spawn(move || {
-        rebuild_fts5_background(&db_fts);
-        fts5_ready_clone.store(true, Ordering::Relaxed);
-    });
-
-    // 索引完成、DB 就绪后，始终重新启动 watcher
     state.shutdown.store(false, Ordering::Relaxed);
     let disabled = state.disabled.clone();
     let shutdown = state.shutdown.clone();
     let db_path_w = state.db_path.clone();
     let watcher_stopped = state.watcher_stopped.clone();
-    start_fs_watcher(db_path_w, disabled, shutdown, watcher_stopped);
+    std::thread::spawn(move || {
+        // 1. 先完成 FTS5 重建
+        if rebuild_fts5_background(&db_fts) {
+            fts5_ready_clone.store(true, Ordering::Relaxed);
+        }
+        // 2. 再启动 watcher（避免与 FTS5 重建产生写写竞争）
+        start_fs_watcher(db_path_w, disabled, shutdown, watcher_stopped);
+    });
 
     Ok(total)
 }
@@ -595,14 +596,20 @@ pub fn run() {
                         state.load_from_db();
                         app_handle.emit("index_progress", total).ok();
                         app_handle.emit("index_complete", total).ok();
-                        maybe_start_watcher(&state, true, false);
-                    }
 
-                    let fts5_ready_clone = state.fts5_ready.clone();
-                    std::thread::spawn(move || {
-                        rebuild_fts5_background(&db_fts);
-                        fts5_ready_clone.store(true, Ordering::Relaxed);
-                    });
+                        // FTS5 后台重建 + watcher 启动（顺序执行，避免写写竞争）
+                        let fts5_ready_clone = state.fts5_ready.clone();
+                        let disabled = state.disabled.clone();
+                        let shutdown_clone = state.shutdown.clone();
+                        let db_path_w = state.db_path.clone();
+                        let watcher_stopped = state.watcher_stopped.clone();
+                        std::thread::spawn(move || {
+                            if rebuild_fts5_background(&db_fts) {
+                                fts5_ready_clone.store(true, Ordering::Relaxed);
+                            }
+                            start_fs_watcher(db_path_w, disabled, shutdown_clone, watcher_stopped);
+                        });
+                    }
                 });
             }
 
