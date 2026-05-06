@@ -12,6 +12,7 @@ export function MarkdownEditor() {
   const [content, setContent] = useState('');
   const [filePath, setFilePath] = useState('');
   const [isDirty, setIsDirty] = useState(false);
+  const [originalContent, setOriginalContent] = useState('');
   const [isCopied, setIsCopied] = useState(false);
   const [isDragOver, setIsDragOver] = useState(false);
   const [viewMode, setViewMode] = useState<'split' | 'edit' | 'preview'>('preview');
@@ -53,8 +54,8 @@ export function MarkdownEditor() {
   // Track dirty state
   const handleContentChange = useCallback((value: string) => {
     setContent(value);
-    setIsDirty(true);
-  }, []);
+    setIsDirty(value !== originalContent);
+  }, [originalContent]);
 
   // Open file
   const handleOpen = useCallback(async () => {
@@ -62,6 +63,7 @@ export function MarkdownEditor() {
       const result = await invoke<[string, string]>('open_md_file');
       setFilePath(result[0]);
       setContent(result[1]);
+      setOriginalContent(result[1]);
       setIsDirty(false);
     } catch {
       // user cancelled or error
@@ -73,6 +75,7 @@ export function MarkdownEditor() {
     try {
       const savedPath = await invoke<string>('save_md_file', { path: filePath, content });
       setFilePath(savedPath);
+      setOriginalContent(content);
       setIsDirty(false);
     } catch {
       // user cancelled or error
@@ -84,6 +87,7 @@ export function MarkdownEditor() {
     try {
       const savedPath = await invoke<string>('save_md_file_as', { content });
       setFilePath(savedPath);
+      setOriginalContent(content);
       setIsDirty(false);
     } catch {
       // user cancelled or error
@@ -94,6 +98,7 @@ export function MarkdownEditor() {
   const handleClear = useCallback(() => {
     setContent('');
     setFilePath('');
+    setOriginalContent('');
     setIsDirty(false);
   }, []);
 
@@ -142,6 +147,7 @@ export function MarkdownEditor() {
             const result = await invoke<[string, string]>('open_md_file_by_path', { path: droppedPath });
             setFilePath(result[0]);
             setContent(result[1]);
+            setOriginalContent(result[1]);
             setIsDirty(false);
           } catch {
             // read error

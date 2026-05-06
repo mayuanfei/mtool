@@ -1,5 +1,5 @@
 import { Copy, Download, Clipboard, Trash2, QrCode, Check } from 'lucide-react';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { useI18n } from '../i18n';
 
@@ -12,16 +12,15 @@ export function TextToQr() {
   const [qrBase64, setQrBase64] = useState('');
   const [isGenerating, setIsGenerating] = useState(false);
   const [isCopied, setIsCopied] = useState(false);
+  const genIdRef = useRef(0);
 
   useEffect(() => {
     if (!payload.trim()) {
       setQrBase64('');
       return;
     }
-    const genIdRef = { current: 0 };
+    const id = ++genIdRef.current;
     const timer = setTimeout(async () => {
-      genIdRef.current++;
-      const id = genIdRef.current;
       setIsGenerating(true);
       try {
         const result = await invoke<string>('generate_qr', {
