@@ -565,10 +565,10 @@ export function FileSearch() {
         <div className="flex items-center gap-4">
           <span className="flex items-center gap-1.5">
             <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
-            System Ready
+            {t('System Ready')}
           </span>
           {query.trim() && (
-            <span>Results: {results.length}</span>
+            <span>{t('Results')}: {results.length}</span>
           )}
         </div>
         <div className="italic">

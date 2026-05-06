@@ -81,6 +81,17 @@ export function PasswordGenerator() {
     return 'WEAK';
   }, [useUpper, useLower, useNumbers, useSymbols]);
 
+  const unbiasedRandom = (max: number): number => {
+    const limit = Math.floor(0x100000000 / max) * max;
+    const arr = new Uint32Array(1);
+    let val: number;
+    do {
+      window.crypto.getRandomValues(arr);
+      val = arr[0];
+    } while (val >= limit);
+    return val % max;
+  };
+
   const generatePassword = useCallback((addToHistory = true) => {
     let charset = '';
     if (useUpper) charset += UPPERCASE;
@@ -107,10 +118,8 @@ export function PasswordGenerator() {
 
     for (let c = 0; c < generateCount; c++) {
       let generated = '';
-      const array = new Uint32Array(length);
-      window.crypto.getRandomValues(array);
       for (let i = 0; i < length; i++) {
-        generated += charset[array[i] % charset.length];
+        generated += charset[unbiasedRandom(charset.length)];
       }
       newPasswords.push(generated);
       
