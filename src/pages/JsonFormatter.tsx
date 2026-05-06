@@ -224,7 +224,7 @@ export function JsonFormatter() {
              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span> {t('System Ready')}
           </span>
           <span>{t('Lines')}: {lineCount}</span>
-          <span>Length: {charCount} {t('chars')}</span>
+          <span>{t('Length')}: {charCount} {t('chars')}</span>
         </div>
         <div className="flex items-center gap-2 italic">
           MTOOL Desktop Tools {new Date().getFullYear()}

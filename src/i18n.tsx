@@ -24,6 +24,7 @@ const translations = {
     'Formatted output will appear here...': 'Formatted output will appear here...',
     'System Ready': 'System Ready',
     'Lines': 'Lines',
+    'Length': 'Length',
     'chars': 'chars',
     
     // TextToQr
@@ -156,6 +157,7 @@ const translations = {
     'Formatted output will appear here...': '格式化后的输出将显示在此处...',
     'System Ready': '系统就绪',
     'Lines': '行数',
+    'Length': '长度',
     'chars': '字符',
     
     // TextToQr

@@ -18,20 +18,25 @@ export function TextToQr() {
       setQrBase64('');
       return;
     }
+    const genIdRef = { current: 0 };
     const timer = setTimeout(async () => {
+      genIdRef.current++;
+      const id = genIdRef.current;
+      setIsGenerating(true);
       try {
-        setIsGenerating(true);
         const result = await invoke<string>('generate_qr', {
           payload,
           redundancy,
           resolution,
           color: selectedColor
         });
+        if (genIdRef.current !== id) return;
         setQrBase64(result);
       } catch (err) {
+        if (genIdRef.current !== id) return;
         console.error('Failed to generate QR:', err);
       } finally {
-        setIsGenerating(false);
+        if (genIdRef.current === id) setIsGenerating(false);
       }
     }, 300);
     return () => clearTimeout(timer);
