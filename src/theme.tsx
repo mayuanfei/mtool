@@ -20,12 +20,6 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
     document.documentElement.setAttribute('data-theme', theme);
   }, [theme]);
 
-  // Set initial theme on mount
-  useEffect(() => {
-    document.documentElement.setAttribute('data-theme', theme);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
   return (
     <ThemeContext.Provider value={{ theme, setTheme }}>
       {children}

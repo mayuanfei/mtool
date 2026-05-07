@@ -27,10 +27,10 @@ export function SqlInBuilder() {
     let formatted: string;
     switch (quoteStyle) {
       case 'single':
-        formatted = unique.map(v => `'${v}'`).join(', ');
+        formatted = unique.map(v => `'${v.replace(/'/g, "''")}'`).join(', ');
         break;
       case 'double':
-        formatted = unique.map(v => `"${v}"`).join(', ');
+        formatted = unique.map(v => `"${v.replace(/"/g, '""')}"`).join(', ');
         break;
       case 'none':
         formatted = unique.join(', ');
@@ -190,7 +190,7 @@ export function SqlInBuilder() {
                 <button
                   onClick={handleCopy}
                   disabled={!output}
-                  className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 disabled:bg-slate-700 disabled:text-slate-500 text-white rounded-lg text-xs font-medium transition-colors flex items-center gap-1.5 focus:outline-none shadow-lg shadow-indigo-600/20"
+                  className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 disabled:bg-[var(--bg-surface)] disabled:text-[var(--text-faint)] text-white rounded-lg text-xs font-medium transition-colors flex items-center gap-1.5 focus:outline-none shadow-lg shadow-indigo-600/20"
                 >
                   {isCopied ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
                   {isCopied ? t('Copied!') : t('Copy')}
