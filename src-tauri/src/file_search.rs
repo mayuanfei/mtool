@@ -605,8 +605,11 @@ where
 }
 
 /// 从 file_index 表批量重建 FTS5 索引（独立连接，synchronous=OFF 加速）。
+/// 分批提交（每 BATCH_SIZE 行一个事务），避免长时间持有排他写锁导致 UI 卡死。
 /// 成功返回 true，失败返回 false。
 pub fn rebuild_fts5_background(db_path: &str) -> bool {
+    const BATCH_SIZE: i64 = 50_000;
+
     let conn = match Connection::open(db_path) {
         Ok(c) => c,
         Err(e) => {
@@ -618,28 +621,47 @@ pub fn rebuild_fts5_background(db_path: &str) -> bool {
         "PRAGMA synchronous=OFF;
          PRAGMA cache_size=-32768;",
     ).ok();
-    let result = conn.execute_batch(
+
+    // 1. 清空旧的 FTS5 数据
+    if let Err(e) = conn.execute_batch(
         "BEGIN;
          INSERT INTO file_fts(file_fts) VALUES('delete-all');
-         INSERT INTO file_fts(path, name_lower) SELECT path, name_lower FROM file_index;
          COMMIT;",
-    );
-    conn.execute_batch("PRAGMA synchronous=NORMAL;").ok();
-    match result {
-        Ok(_) => {
-            eprintln!("[mtool fts5] rebuild completed successfully");
-            conn.execute(
-                "INSERT OR REPLACE INTO index_meta(key,value) \
-                 SELECT 'fts5_count', COUNT(*) FROM file_index",
-                [],
-            ).ok();
-            true
-        }
-        Err(e) => {
-            eprintln!("[mtool fts5] rebuild failed: {}", e);
-            false
-        }
+    ) {
+        eprintln!("[mtool fts5] failed to clear fts5: {}", e);
+        conn.execute_batch("PRAGMA synchronous=NORMAL;").ok();
+        return false;
     }
+
+    // 2. 分批插入，每批之间释放写锁，让前端 IPC 有机会读取数据库
+    let total: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM file_index", [], |r| r.get(0),
+    ).unwrap_or(0);
+
+    let mut offset: i64 = 0;
+    while offset < total {
+        let result = conn.execute(
+            "INSERT INTO file_fts(path, name_lower) \
+             SELECT path, name_lower FROM file_index LIMIT ?1 OFFSET ?2",
+            params![BATCH_SIZE, offset],
+        );
+        if let Err(e) = result {
+            eprintln!("[mtool fts5] batch insert failed at offset {}: {}", offset, e);
+            conn.execute_batch("PRAGMA synchronous=NORMAL;").ok();
+            return false;
+        }
+        offset += BATCH_SIZE;
+        // 短暂让出，让其他连接有机会获取读锁
+        std::thread::sleep(Duration::from_millis(10));
+    }
+
+    conn.execute_batch("PRAGMA synchronous=NORMAL;").ok();
+    eprintln!("[mtool fts5] rebuild completed successfully ({} rows)", total);
+    conn.execute(
+        "INSERT OR REPLACE INTO index_meta(key,value) VALUES('fts5_count', ?1)",
+        params![total],
+    ).ok();
+    true
 }
 
 
