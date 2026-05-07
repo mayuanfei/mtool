@@ -389,7 +389,7 @@ fn get_system_roots() -> Vec<PathBuf> {
         drop(tx);
         let deadline = Instant::now() + Duration::from_secs(2);
         let mut roots = Vec::new();
-        while let Ok(dur) = deadline.checked_duration_since(Instant::now()) {
+        while let Some(dur) = deadline.checked_duration_since(Instant::now()) {
             match rx.recv_timeout(dur) {
                 Ok((p, true)) => roots.push(p),
                 Ok((_, false)) => {}
