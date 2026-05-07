@@ -368,13 +368,8 @@ export function PasswordGenerator() {
                 min="1" max="100"
                 value={generateCount}
                 onChange={(e) => {
-                  let val = parseInt(e.target.value);
-                  if (isNaN(val)) val = 1;
-                  setGenerateCount(val);
-                }}
-                onBlur={() => {
-                  if (generateCount < 1) setGenerateCount(1);
-                  if (generateCount > 100) setGenerateCount(100);
+                  const val = parseInt(e.target.value);
+                  setGenerateCount(isNaN(val) ? 1 : Math.max(1, Math.min(100, val)));
                 }}
                 className="w-full th-bg-card border th-border-subtle th-text-2 text-sm font-mono rounded px-3 py-1.5 focus:outline-none focus:border-indigo-500"
               />

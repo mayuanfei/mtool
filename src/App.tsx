@@ -111,6 +111,8 @@ export default function App() {
               setMdEnabled={setMdEnabled}
               fileSearchEnabled={fileSearchEnabled}
               setFileSearchEnabled={setFileSearchEnabled}
+              activePage={activePage}
+              setActivePage={setActivePage}
             />
           )}
           {activePage !== 'settings' && activePage !== 'user' &&

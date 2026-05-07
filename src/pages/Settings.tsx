@@ -36,9 +36,11 @@ interface SettingsPageProps {
   setMdEnabled: (v: boolean) => void;
   fileSearchEnabled: boolean;
   setFileSearchEnabled: (v: boolean) => void;
+  activePage: string;
+  setActivePage: (page: string) => void;
 }
 
-export function SettingsPage({ jsonEnabled, setJsonEnabled, qrEnabled, setQrEnabled, pwdEnabled, setPwdEnabled, sqlInEnabled, setSqlInEnabled, mdEnabled, setMdEnabled, fileSearchEnabled, setFileSearchEnabled }: SettingsPageProps) {
+export function SettingsPage({ jsonEnabled, setJsonEnabled, qrEnabled, setQrEnabled, pwdEnabled, setPwdEnabled, sqlInEnabled, setSqlInEnabled, mdEnabled, setMdEnabled, fileSearchEnabled, setFileSearchEnabled, activePage, setActivePage }: SettingsPageProps) {
   const { t, language, setLanguage } = useI18n();
   const { theme, setTheme } = useTheme();
   const [isProcessing, setIsProcessing] = useState(false);
@@ -72,6 +74,7 @@ export function SettingsPage({ jsonEnabled, setJsonEnabled, qrEnabled, setQrEnab
                   setIsProcessing(true);
                   const next = !fileSearchEnabled;
                   setFileSearchEnabled(next);
+                  if (!next && activePage === 'fileSearch') setActivePage('settings');
                   try {
                     if (!next) await invoke('disable_file_search');
                     else await invoke('build_index');
@@ -89,7 +92,11 @@ export function SettingsPage({ jsonEnabled, setJsonEnabled, qrEnabled, setQrEnab
                 <p className="text-base font-medium th-text-2 mb-1">{t('Markdown Editor')}</p>
                 <p className="text-sm th-text-muted">{t('View and edit Markdown files with live preview.')}</p>
               </div>
-              <Toggle checked={mdEnabled} onChange={() => setMdEnabled(!mdEnabled)} />
+              <Toggle checked={mdEnabled} onChange={() => {
+                const next = !mdEnabled;
+                setMdEnabled(next);
+                if (!next && activePage === 'md') setActivePage('settings');
+              }} />
             </div>
 
             <div className="px-6 py-5 flex items-center justify-between th-hover-surface transition-colors">
@@ -97,7 +104,11 @@ export function SettingsPage({ jsonEnabled, setJsonEnabled, qrEnabled, setQrEnab
                 <p className="text-base font-medium th-text-2 mb-1">{t('JSON Formatter')}</p>
                 <p className="text-sm th-text-muted">{t('Parse, validate, and beautify raw JSON payloads.')}</p>
               </div>
-              <Toggle checked={jsonEnabled} onChange={() => setJsonEnabled(!jsonEnabled)} />
+              <Toggle checked={jsonEnabled} onChange={() => {
+                const next = !jsonEnabled;
+                setJsonEnabled(next);
+                if (!next && activePage === 'json') setActivePage('settings');
+              }} />
             </div>
 
             <div className="px-6 py-5 flex items-center justify-between th-hover-surface transition-colors">
@@ -105,7 +116,11 @@ export function SettingsPage({ jsonEnabled, setJsonEnabled, qrEnabled, setQrEnab
                 <p className="text-base font-medium th-text-2 mb-1">{t('Text to QR')}</p>
                 <p className="text-sm th-text-muted">{t('Generate scannable QR codes from string inputs.')}</p>
               </div>
-              <Toggle checked={qrEnabled} onChange={() => setQrEnabled(!qrEnabled)} />
+              <Toggle checked={qrEnabled} onChange={() => {
+                const next = !qrEnabled;
+                setQrEnabled(next);
+                if (!next && activePage === 'qr') setActivePage('settings');
+              }} />
             </div>
 
             <div className="px-6 py-5 flex items-center justify-between th-hover-surface transition-colors">
@@ -113,7 +128,11 @@ export function SettingsPage({ jsonEnabled, setJsonEnabled, qrEnabled, setQrEnab
                 <p className="text-base font-medium th-text-2 mb-1">{t('Password Generator')}</p>
                 <p className="text-sm th-text-muted">{t('Create secure passwords.')}</p>
               </div>
-              <Toggle checked={pwdEnabled} onChange={() => setPwdEnabled(!pwdEnabled)} />
+              <Toggle checked={pwdEnabled} onChange={() => {
+                const next = !pwdEnabled;
+                setPwdEnabled(next);
+                if (!next && activePage === 'pwd') setActivePage('settings');
+              }} />
             </div>
 
             <div className="px-6 py-5 flex items-center justify-between th-hover-surface transition-colors">
@@ -121,7 +140,11 @@ export function SettingsPage({ jsonEnabled, setJsonEnabled, qrEnabled, setQrEnab
                 <p className="text-base font-medium th-text-2 mb-1">{t('SQL IN Builder')}</p>
                 <p className="text-sm th-text-muted">{t('Build SQL IN clause from column values.')}</p>
               </div>
-              <Toggle checked={sqlInEnabled} onChange={() => setSqlInEnabled(!sqlInEnabled)} />
+              <Toggle checked={sqlInEnabled} onChange={() => {
+                const next = !sqlInEnabled;
+                setSqlInEnabled(next);
+                if (!next && activePage === 'sqlIn') setActivePage('settings');
+              }} />
             </div>
 
           </div>

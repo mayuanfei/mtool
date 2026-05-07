@@ -2,9 +2,11 @@ import { Copy, Download, Clipboard, Trash2, QrCode, Check } from 'lucide-react';
 import { useState, useEffect, useRef } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { useI18n } from '../i18n';
+import { useTheme } from '../theme';
 
 export function TextToQr() {
   const { t } = useI18n();
+  const { theme } = useTheme();
   const [payload, setPayload] = useState('');
   const [redundancy, setRedundancy] = useState('Q');
   const [resolution, setResolution] = useState(512);
@@ -13,6 +15,8 @@ export function TextToQr() {
   const [isGenerating, setIsGenerating] = useState(false);
   const [isCopied, setIsCopied] = useState(false);
   const genIdRef = useRef(0);
+
+  const bgColor = theme === 'dark' ? '#1e1e2e' : '#ffffff';
 
   useEffect(() => {
     if (!payload.trim()) {
@@ -27,7 +31,8 @@ export function TextToQr() {
           payload,
           redundancy,
           resolution,
-          color: selectedColor
+          color: selectedColor,
+          bgColor
         });
         if (genIdRef.current !== id) return;
         setQrBase64(result);
@@ -39,7 +44,7 @@ export function TextToQr() {
       }
     }, 300);
     return () => clearTimeout(timer);
-  }, [payload, redundancy, resolution, selectedColor]);
+  }, [payload, redundancy, resolution, selectedColor, bgColor, theme]);
 
   const handleCopyImage = async () => {
     if (!qrBase64) return;
