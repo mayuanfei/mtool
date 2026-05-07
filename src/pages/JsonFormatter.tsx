@@ -136,9 +136,9 @@ export function JsonFormatter() {
 
   return (
     <div className="w-full h-full flex flex-col">
-      <div className="flex justify-between items-center mb-6 border-b border-slate-800 pb-4">
+      <div className="flex justify-between items-center mb-6 border-b th-border pb-4">
         <div className="flex items-center gap-3">
-          <h2 className="text-white font-semibold text-lg flex items-center gap-2">
+          <h2 className="th-text font-semibold text-lg flex items-center gap-2">
              <span className="text-indigo-400">{'{ }'}</span> {t('JSON Formatter')}
           </h2>
         </div>
@@ -146,13 +146,13 @@ export function JsonFormatter() {
         <div className="flex items-center gap-2">
           <button
             onClick={handleClear}
-            className="px-3 py-1.5 text-xs bg-slate-800 hover:bg-slate-700 text-slate-300 rounded font-medium border border-slate-700 transition-colors flex items-center gap-1.5 focus:outline-none"
+            className="px-3 py-1.5 text-xs th-bg-surface th-hover-surface th-text-2 rounded font-medium border th-border-subtle transition-colors flex items-center gap-1.5 focus:outline-none"
           >
             <Trash2 className="w-3.5 h-3.5" /> {t('Clear')}
           </button>
           <button
             onClick={handleMinify}
-            className="px-3 py-1.5 text-xs bg-slate-800 hover:bg-slate-700 text-slate-300 rounded font-medium border border-slate-700 transition-colors flex items-center gap-1.5 focus:outline-none"
+            className="px-3 py-1.5 text-xs th-bg-surface th-hover-surface th-text-2 rounded font-medium border th-border-subtle transition-colors flex items-center gap-1.5 focus:outline-none"
           >
             <MinusSquare className="w-3.5 h-3.5" /> {t('Minify')}
           </button>
@@ -168,12 +168,12 @@ export function JsonFormatter() {
       <div className="flex-1 flex gap-4 min-h-0">
 
         {/* Left: Raw Input */}
-        <div className="flex-1 bg-slate-900 border border-slate-800 rounded-xl flex flex-col overflow-hidden shadow-2xl">
-          <div className="px-4 py-2 bg-slate-800/50 border-b border-slate-800 flex justify-between items-center">
-            <span className="text-[11px] font-bold text-slate-400 uppercase tracking-tighter flex items-center gap-2">
+        <div className="flex-1 th-bg-card border th-border rounded-xl flex flex-col overflow-hidden shadow-2xl">
+          <div className="px-4 py-2 th-bg-surface-h border-b th-border flex justify-between items-center">
+            <span className="text-[11px] font-bold th-text-3 uppercase tracking-tighter flex items-center gap-2">
               {t('Raw Input')}
             </span>
-            <div className="flex gap-3 text-[10px] text-slate-500 font-mono">
+            <div className="flex gap-3 text-[10px] th-text-muted font-mono">
               <span>UTF-8</span>
               <span>CRLF</span>
             </div>
@@ -187,9 +187,9 @@ export function JsonFormatter() {
         </div>
 
         {/* Right: Parsed Output */}
-        <div className="flex-1 bg-slate-900 border border-slate-800 rounded-xl flex flex-col overflow-hidden shadow-2xl">
-          <div className="px-4 py-2 bg-slate-800/50 border-b border-slate-800 flex justify-between items-center">
-            <span className="text-[11px] font-bold text-slate-400 uppercase tracking-tighter">
+        <div className="flex-1 th-bg-card border th-border rounded-xl flex flex-col overflow-hidden shadow-2xl">
+          <div className="px-4 py-2 th-bg-surface-h border-b th-border flex justify-between items-center">
+            <span className="text-[11px] font-bold th-text-3 uppercase tracking-tighter">
               {t('Formatted Output')}
             </span>
             <button
@@ -205,11 +205,11 @@ export function JsonFormatter() {
               <pre
                 tabIndex={0}
                 onKeyDown={handleOutputKeyDown}
-                className={`text-sm font-mono whitespace-pre-wrap focus:outline-none leading-relaxed select-text ${isError ? 'text-red-400' : 'text-slate-300'}`}
+                className={`text-sm font-mono whitespace-pre-wrap focus:outline-none leading-relaxed select-text ${isError ? 'text-red-400' : 'th-text-2'}`}
                 dangerouslySetInnerHTML={{ __html: formattedHtml }}
               />
             ) : (
-              <pre className="text-sm font-mono text-slate-600 whitespace-pre-wrap leading-relaxed italic">
+              <pre className="text-sm font-mono th-text-faint whitespace-pre-wrap leading-relaxed italic">
                 {t('Formatted output will appear here...')}
               </pre>
             )}
@@ -218,7 +218,7 @@ export function JsonFormatter() {
 
       </div>
 
-      <footer className="h-8 border-t border-slate-800 mt-4 px-4 bg-slate-900/50 flex items-center justify-between text-[10px] text-slate-500 rounded-b-xl shadow-inner">
+      <footer className="h-8 border-t th-border mt-4 px-4 th-bg-card flex items-center justify-between text-[10px] th-text-muted rounded-b-xl shadow-inner" style={{ opacity: 0.8 }}>
         <div className="flex flex-row items-center gap-4">
           <span className="flex items-center gap-1.5">
              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span> {t('System Ready')}

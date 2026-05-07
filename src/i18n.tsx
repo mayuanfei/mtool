@@ -95,6 +95,11 @@ const translations = {
     'Language': 'Language',
     'Select application interface language.': 'Select application interface language.',
     'Select a tool from the sidebar': 'Select a tool from the sidebar',
+    'Appearance': 'Appearance',
+    'Theme': 'Theme',
+    'Choose light or dark color scheme.': 'Choose light or dark color scheme.',
+    'Dark': 'Dark',
+    'Light': 'Light',
 
     // MarkdownEditor
     'Markdown Editor': 'Markdown Editor',
@@ -251,6 +256,11 @@ const translations = {
     'Language': '语言',
     'Select application interface language.': '选择应用程序界面语言。',
     'Select a tool from the sidebar': '请从左侧边栏选择一个工具',
+    'Appearance': '外观',
+    'Theme': '主题',
+    'Choose light or dark color scheme.': '选择明亮或暗黑色彩方案。',
+    'Dark': '暗黑',
+    'Light': '明亮',
 
     // MarkdownEditor
     'Markdown Editor': 'Markdown 编辑器',

@@ -75,7 +75,7 @@ export default function App() {
   }, [activePage]);
 
   return (
-    <div className="flex h-screen overflow-hidden font-sans text-slate-300 antialiased" style={{ backgroundColor: '#0f1115' }}>
+    <div className="flex h-screen overflow-hidden font-sans th-text-2 antialiased th-bg-app">
       <Sidebar 
         activePage={activePage} 
         onNavigate={setActivePage} 
@@ -87,7 +87,7 @@ export default function App() {
         fileSearchEnabled={fileSearchEnabled}
       />
       
-      <div className="flex-1 flex flex-col min-w-0 bg-slate-950">
+      <div className="flex-1 flex flex-col min-w-0 th-bg-main">
         
         <main className="flex-1 overflow-y-auto p-6">
           {activePage === 'json' && jsonEnabled && <JsonFormatter />}
@@ -120,11 +120,10 @@ export default function App() {
            !(activePage === 'sqlIn' && sqlInEnabled) && 
            !(activePage === 'md' && mdEnabled) && 
            !(activePage === 'fileSearch' && fileSearchEnabled) && (
-             <div className="text-white flex items-center justify-center h-full text-slate-500 font-medium">{t('Select a tool from the sidebar')}</div>
+             <div className="flex items-center justify-center h-full th-text-muted font-medium">{t('Select a tool from the sidebar')}</div>
           )}
         </main>
       </div>
     </div>
   );
 }
-

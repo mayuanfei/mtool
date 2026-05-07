@@ -237,18 +237,18 @@ export function MarkdownEditor() {
       onDrop={handleDrop}
     >
       {/* Header */}
-      <div className="flex justify-between items-center mb-6 border-b border-slate-800 pb-4">
+      <div className="flex justify-between items-center mb-6 border-b th-border pb-4">
         <div className="flex items-center gap-3">
-          <h2 className="text-white font-semibold text-lg flex items-center gap-2">
+          <h2 className="th-text font-semibold text-lg flex items-center gap-2">
             <span className="text-indigo-400"><FileText className="w-5 h-5 inline" /></span> {t('Markdown Editor')}
           </h2>
           {filePath && (
-            <span className="text-xs text-slate-500 font-mono max-w-[300px] truncate" title={filePath}>
+            <span className="text-xs th-text-muted font-mono max-w-[300px] truncate" title={filePath}>
               {fileName}{isDirty && ' •'}
             </span>
           )}
           {!filePath && isDirty && (
-            <span className="text-xs text-slate-500 font-mono">
+            <span className="text-xs th-text-muted font-mono">
               {t('Untitled')}{' •'}
             </span>
           )}
@@ -256,11 +256,11 @@ export function MarkdownEditor() {
 
         <div className="flex items-center gap-2">
           {/* View mode toggle */}
-          <div className="flex items-center bg-slate-800 rounded border border-slate-700 mr-2">
+          <div className="flex items-center th-bg-surface rounded border th-border-subtle mr-2">
             <button
               onClick={() => setViewMode('edit')}
               className={`px-2 py-1.5 text-xs font-medium transition-colors flex items-center gap-1 rounded-l ${
-                viewMode === 'edit' ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:text-slate-200'
+                viewMode === 'edit' ? 'bg-indigo-600 text-white' : 'th-text-3 hover:th-text-2'
               }`}
               title={t('Edit Mode')}
             >
@@ -268,8 +268,8 @@ export function MarkdownEditor() {
             </button>
             <button
               onClick={() => setViewMode('split')}
-              className={`px-2 py-1.5 text-xs font-medium transition-colors flex items-center gap-1 border-x border-slate-700 ${
-                viewMode === 'split' ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:text-slate-200'
+              className={`px-2 py-1.5 text-xs font-medium transition-colors flex items-center gap-1 border-x th-border-subtle ${
+                viewMode === 'split' ? 'bg-indigo-600 text-white' : 'th-text-3 hover:th-text-2'
               }`}
               title={t('Split View')}
             >
@@ -278,7 +278,7 @@ export function MarkdownEditor() {
             <button
               onClick={() => setViewMode('preview')}
               className={`px-2 py-1.5 text-xs font-medium transition-colors flex items-center gap-1 rounded-r ${
-                viewMode === 'preview' ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:text-slate-200'
+                viewMode === 'preview' ? 'bg-indigo-600 text-white' : 'th-text-3 hover:th-text-2'
               }`}
               title={t('Preview Mode')}
             >
@@ -288,25 +288,25 @@ export function MarkdownEditor() {
 
           <button
             onClick={handleOpen}
-            className="px-3 py-1.5 text-xs bg-slate-800 hover:bg-slate-700 text-slate-300 rounded font-medium border border-slate-700 transition-colors flex items-center gap-1.5 focus:outline-none"
+            className="px-3 py-1.5 text-xs th-bg-surface th-hover-surface th-text-2 rounded font-medium border th-border-subtle transition-colors flex items-center gap-1.5 focus:outline-none"
           >
             <FolderOpen className="w-3.5 h-3.5" /> {t('Open')}
           </button>
           <button
             onClick={handleSave}
-            className="px-3 py-1.5 text-xs bg-slate-800 hover:bg-slate-700 text-slate-300 rounded font-medium border border-slate-700 transition-colors flex items-center gap-1.5 focus:outline-none"
+            className="px-3 py-1.5 text-xs th-bg-surface th-hover-surface th-text-2 rounded font-medium border th-border-subtle transition-colors flex items-center gap-1.5 focus:outline-none"
           >
             <Save className="w-3.5 h-3.5" /> {t('Save')}
           </button>
           <button
             onClick={handleSaveAs}
-            className="px-3 py-1.5 text-xs bg-slate-800 hover:bg-slate-700 text-slate-300 rounded font-medium border border-slate-700 transition-colors flex items-center gap-1.5 focus:outline-none"
+            className="px-3 py-1.5 text-xs th-bg-surface th-hover-surface th-text-2 rounded font-medium border th-border-subtle transition-colors flex items-center gap-1.5 focus:outline-none"
           >
             <Download className="w-3.5 h-3.5" /> {t('Save As')}
           </button>
           <button
             onClick={handleClear}
-            className="px-3 py-1.5 text-xs bg-slate-800 hover:bg-slate-700 text-slate-300 rounded font-medium border border-slate-700 transition-colors flex items-center gap-1.5 focus:outline-none"
+            className="px-3 py-1.5 text-xs th-bg-surface th-hover-surface th-text-2 rounded font-medium border th-border-subtle transition-colors flex items-center gap-1.5 focus:outline-none"
           >
             <Trash2 className="w-3.5 h-3.5" /> {t('Clear')}
           </button>
@@ -318,12 +318,12 @@ export function MarkdownEditor() {
 
         {/* Editor pane */}
         {(viewMode === 'split' || viewMode === 'edit') && (
-          <div className={`${viewMode === 'edit' ? 'flex-1' : 'flex-1'} bg-slate-900 border border-slate-800 rounded-xl flex flex-col overflow-hidden shadow-2xl`}>
-            <div className="px-4 py-2 bg-slate-800/50 border-b border-slate-800 flex justify-between items-center">
-              <span className="text-[11px] font-bold text-slate-400 uppercase tracking-tighter flex items-center gap-2">
+          <div className={`${viewMode === 'edit' ? 'flex-1' : 'flex-1'} th-bg-card border th-border rounded-xl flex flex-col overflow-hidden shadow-2xl`}>
+            <div className="px-4 py-2 th-bg-surface-h border-b th-border flex justify-between items-center">
+              <span className="text-[11px] font-bold th-text-3 uppercase tracking-tighter flex items-center gap-2">
                 <Edit3 className="w-3 h-3" /> {t('Editor')}
               </span>
-              <div className="flex gap-3 text-[10px] text-slate-500 font-mono">
+              <div className="flex gap-3 text-[10px] th-text-muted font-mono">
                 <span>Markdown</span>
                 <span>UTF-8</span>
               </div>
@@ -343,9 +343,9 @@ export function MarkdownEditor() {
 
         {/* Preview pane */}
         {(viewMode === 'split' || viewMode === 'preview') && (
-          <div className={`${viewMode === 'preview' ? 'flex-1' : 'flex-1'} bg-slate-900 border border-slate-800 rounded-xl flex flex-col overflow-hidden shadow-2xl`}>
-            <div className="px-4 py-2 bg-slate-800/50 border-b border-slate-800 flex justify-between items-center">
-              <span className="text-[11px] font-bold text-slate-400 uppercase tracking-tighter flex items-center gap-2">
+          <div className={`${viewMode === 'preview' ? 'flex-1' : 'flex-1'} th-bg-card border th-border rounded-xl flex flex-col overflow-hidden shadow-2xl`}>
+            <div className="px-4 py-2 th-bg-surface-h border-b th-border flex justify-between items-center">
+              <span className="text-[11px] font-bold th-text-3 uppercase tracking-tighter flex items-center gap-2">
                 <Eye className="w-3 h-3" /> {t('Preview')}
               </span>
               <button
@@ -367,7 +367,7 @@ export function MarkdownEditor() {
                   dangerouslySetInnerHTML={{ __html: renderedHtml }}
                 />
               ) : (
-                <div className="text-sm text-slate-600 italic">
+                <div className="text-sm th-text-faint italic">
                   {t('Preview will appear here...')}
                 </div>
               )}
@@ -378,7 +378,7 @@ export function MarkdownEditor() {
       </div>
 
       {/* Status bar */}
-      <footer className="h-8 border-t border-slate-800 mt-4 px-4 bg-slate-900/50 flex items-center justify-between text-[10px] text-slate-500 rounded-b-xl shadow-inner">
+      <footer className="h-8 border-t th-border mt-4 px-4 th-bg-card flex items-center justify-between text-[10px] th-text-muted rounded-b-xl shadow-inner" style={{ opacity: 0.8 }}>
         <div className="flex flex-row items-center gap-4">
           <span className="flex items-center gap-1.5">
             <span className={`w-1.5 h-1.5 rounded-full ${isDirty ? 'bg-amber-400' : 'bg-emerald-500'} animate-pulse`}></span>

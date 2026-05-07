@@ -90,8 +90,8 @@ export function SqlInBuilder() {
 
   return (
     <div className="w-full h-full flex flex-col">
-      <div className="flex justify-between items-center mb-6 border-b border-slate-800 pb-4 shrink-0">
-        <h2 className="text-white font-semibold text-lg flex items-center gap-2">
+      <div className="flex justify-between items-center mb-6 border-b th-border pb-4 shrink-0">
+        <h2 className="th-text font-semibold text-lg flex items-center gap-2">
           <Database className="w-5 h-5 text-indigo-400" />
           {t('SQL IN Builder')}
         </h2>
@@ -101,11 +101,11 @@ export function SqlInBuilder() {
         <div className="max-w-5xl mx-auto w-full space-y-6 pb-6">
 
         {/* Config Card */}
-        <section className="bg-slate-900 border border-slate-800 rounded-xl p-6 shadow-2xl">
+        <section className="th-bg-card border th-border rounded-xl p-6 shadow-2xl">
 
           {/* Quote Style */}
           <div className="mb-6">
-            <span className="text-sm font-bold text-slate-300 block mb-3">{t('Quote Style')}</span>
+            <span className="text-sm font-bold th-text-2 block mb-3">{t('Quote Style')}</span>
             <div className="flex gap-3">
               {([
                 { value: 'single' as QuoteStyle, label: t("Single Quote") + " ( ' )" },
@@ -118,7 +118,7 @@ export function SqlInBuilder() {
                   className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors border focus:outline-none ${
                     quoteStyle === opt.value
                       ? 'bg-indigo-600/15 text-indigo-400 border-indigo-500/30 shadow-sm'
-                      : 'bg-slate-950/50 text-slate-400 border-slate-700 hover:bg-slate-800 hover:text-slate-300'
+                      : 'th-bg-input-alt th-text-3 th-border-subtle th-hover-surface'
                   }`}
                 >
                   {opt.label}
@@ -135,11 +135,11 @@ export function SqlInBuilder() {
               <div className="flex items-center justify-between mb-3">
                 <div className="flex items-center gap-2">
                   <Database className="w-4 h-4 text-indigo-400" />
-                  <span className="text-[11px] font-bold text-slate-400 uppercase tracking-widest">{t('Input Values')}</span>
+                  <span className="text-[11px] font-bold th-text-3 uppercase tracking-widest">{t('Input Values')}</span>
                 </div>
                 <button
                   onClick={handleClear}
-                  className="p-1.5 text-slate-500 hover:text-white hover:bg-slate-800 rounded transition-colors focus:outline-none"
+                  className="p-1.5 th-text-muted hover:th-text th-hover-surface rounded transition-colors focus:outline-none"
                   title={t('Clear')}
                 >
                   <Trash2 className="w-4 h-4" />
@@ -149,10 +149,11 @@ export function SqlInBuilder() {
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
                 placeholder={t('Paste one value per line...')}
-                className="w-full h-72 bg-slate-950 border border-slate-800 rounded-lg p-4 text-sm font-mono text-slate-300 placeholder-slate-600 resize-none focus:outline-none focus:border-indigo-500 transition-colors"
+                className="w-full h-72 th-bg-input border th-border rounded-lg p-4 text-sm font-mono th-text-2 resize-none focus:outline-none focus:border-indigo-500 transition-colors"
+                style={{ ['--tw-placeholder-opacity' as any]: 1 }}
                 spellCheck={false}
               />
-              <div className="mt-2 text-xs text-slate-500 font-mono">
+              <div className="mt-2 text-xs th-text-muted font-mono">
                 {inputCount} {t('items')}
                 {duplicateCount > 0 && (
                   <button
@@ -168,11 +169,11 @@ export function SqlInBuilder() {
                 )}
               </div>
               {showDuplicates && duplicateDetails.length > 0 && (
-                <div className="mt-2 bg-slate-950 border border-amber-500/20 rounded-lg p-3 space-y-1.5">
+                <div className="mt-2 th-bg-input border border-amber-500/20 rounded-lg p-3 space-y-1.5">
                   {duplicateDetails.map((d, i) => (
                     <div key={i} className="flex items-center justify-between text-xs font-mono">
                       <span className="text-amber-400 truncate mr-3">{d.value}</span>
-                      <span className="text-slate-500 shrink-0">×{d.count}</span>
+                      <span className="th-text-muted shrink-0">×{d.count}</span>
                     </div>
                   ))}
                 </div>
@@ -184,7 +185,7 @@ export function SqlInBuilder() {
               <div className="flex items-center justify-between mb-3">
                 <div className="flex items-center gap-2">
                   <Database className="w-4 h-4 text-emerald-400" />
-                  <span className="text-[11px] font-bold text-slate-400 uppercase tracking-widest">{t('SQL Output')}</span>
+                  <span className="text-[11px] font-bold th-text-3 uppercase tracking-widest">{t('SQL Output')}</span>
                 </div>
                 <button
                   onClick={handleCopy}
@@ -195,10 +196,10 @@ export function SqlInBuilder() {
                   {isCopied ? t('Copied!') : t('Copy')}
                 </button>
               </div>
-              <div className="w-full h-72 bg-slate-950 border border-slate-800 rounded-lg p-4 text-sm font-mono text-emerald-400 overflow-y-auto break-all whitespace-pre-wrap">
-                {output || <span className="text-slate-600">{t('SQL IN clause will appear here...')}</span>}
+              <div className="w-full h-72 th-bg-input border th-border rounded-lg p-4 text-sm font-mono text-emerald-400 overflow-y-auto break-all whitespace-pre-wrap">
+                {output || <span className="th-text-faint">{t('SQL IN clause will appear here...')}</span>}
               </div>
-              <div className="mt-2 text-xs text-slate-500 font-mono">
+              <div className="mt-2 text-xs th-text-muted font-mono">
                 {outputCount} {t('unique values')}
               </div>
             </div>
@@ -206,10 +207,10 @@ export function SqlInBuilder() {
 
           {/* Preview */}
           {output && (
-            <div className="mt-6 bg-slate-950 border border-slate-800 rounded-lg p-4">
-              <span className="text-[11px] font-bold text-slate-400 uppercase tracking-widest block mb-3">{t('SQL Preview')}</span>
-              <pre className="text-sm font-mono text-slate-300 overflow-x-auto whitespace-pre-wrap break-all">
-                <span className="text-blue-400">WHERE</span> <span className="text-slate-300">column_name</span> <span className="text-blue-400">IN</span> <span className="text-emerald-400">{output}</span>
+            <div className="mt-6 th-bg-input border th-border rounded-lg p-4">
+              <span className="text-[11px] font-bold th-text-3 uppercase tracking-widest block mb-3">{t('SQL Preview')}</span>
+              <pre className="text-sm font-mono th-text-2 overflow-x-auto whitespace-pre-wrap break-all">
+                <span className="text-blue-400">WHERE</span> <span className="th-text-2">column_name</span> <span className="text-blue-400">IN</span> <span className="text-emerald-400">{output}</span>
               </pre>
             </div>
           )}

@@ -48,7 +48,7 @@ export function Sidebar({ activePage, onNavigate, jsonEnabled, qrEnabled, pwdEna
         className={`w-full flex items-center ${collapsed ? 'justify-center' : ''} gap-3 px-3 py-2 rounded-md font-medium transition-colors ${
           isActive
             ? 'bg-indigo-600/10 text-indigo-400 border border-indigo-500/20 shadow-sm'
-            : 'text-slate-400 hover:bg-slate-800 border border-transparent'
+            : 'th-text-3 th-hover-surface border border-transparent'
         }`}
       >
         <item.icon className="w-[18px] h-[18px] flex-shrink-0" strokeWidth={2} />
@@ -58,7 +58,7 @@ export function Sidebar({ activePage, onNavigate, jsonEnabled, qrEnabled, pwdEna
   };
 
   return (
-    <aside className={`${collapsed ? 'w-16' : 'w-64'} flex-shrink-0 flex flex-col border-r border-slate-800 bg-slate-900/50 transition-all duration-200 ease-in-out`}>
+    <aside className={`${collapsed ? 'w-16' : 'w-64'} flex-shrink-0 flex flex-col border-r th-border th-bg-card transition-all duration-200 ease-in-out`} style={{ opacity: 0.95 }}>
       {/* Header */}
       <div className={`p-4 flex items-center ${collapsed ? 'justify-center' : 'justify-between'}`}>
         <div className={`flex items-center gap-3 ${collapsed ? '' : ''}`}>
@@ -70,12 +70,12 @@ export function Sidebar({ activePage, onNavigate, jsonEnabled, qrEnabled, pwdEna
                 <path d="M16 16C16 16 14.5 17.5 14.5 19C14.5 20.5 16 21 16 21C16 21 17.5 20.5 17.5 19C17.5 17.5 16 16 16 16Z" stroke="currentColor" strokeWidth="2.5"/>
              </svg>
           </div>
-          {!collapsed && <span className="font-bold text-lg text-white tracking-tight">MTOOL</span>}
+          {!collapsed && <span className="font-bold text-lg th-text tracking-tight">MTOOL</span>}
         </div>
         {!collapsed && (
           <button
             onClick={() => setCollapsed(true)}
-            className="text-slate-500 hover:text-slate-300 transition-colors p-1 rounded hover:bg-slate-800"
+            className="th-text-muted hover:th-text-2 transition-colors p-1 rounded th-hover-surface"
             title={t('Collapse Sidebar')}
           >
             <PanelLeftClose className="w-4 h-4" />
@@ -88,7 +88,7 @@ export function Sidebar({ activePage, onNavigate, jsonEnabled, qrEnabled, pwdEna
         <div className="px-3 mb-2">
           <button
             onClick={() => setCollapsed(false)}
-            className="w-full flex items-center justify-center py-1.5 text-slate-500 hover:text-slate-300 transition-colors rounded hover:bg-slate-800"
+            className="w-full flex items-center justify-center py-1.5 th-text-muted hover:th-text-2 transition-colors rounded th-hover-surface"
             title={t('Expand Sidebar')}
           >
             <PanelLeftOpen className="w-4 h-4" />
@@ -99,7 +99,7 @@ export function Sidebar({ activePage, onNavigate, jsonEnabled, qrEnabled, pwdEna
       {/* Nav items */}
       <div className="flex-1 px-3 space-y-1">
         {!collapsed && (
-          <div className="text-[10px] font-bold text-slate-500 uppercase tracking-widest px-3 mb-2 mt-2">{t('Tools')}</div>
+          <div className="text-[10px] font-bold th-text-muted uppercase tracking-widest px-3 mb-2 mt-2">{t('Tools')}</div>
         )}
         {navItems.map((item) => (
           <NavItem key={item.id} item={item} />
@@ -109,7 +109,7 @@ export function Sidebar({ activePage, onNavigate, jsonEnabled, qrEnabled, pwdEna
       {/* Bottom items */}
       <div className="mt-auto p-3 space-y-1">
         {!collapsed && (
-          <div className="text-[10px] font-bold text-slate-500 uppercase tracking-widest px-3 mb-2">{t('System')}</div>
+          <div className="text-[10px] font-bold th-text-muted uppercase tracking-widest px-3 mb-2">{t('System')}</div>
         )}
         {bottomItems.map((item) => (
           <NavItem key={item.id} item={item} />

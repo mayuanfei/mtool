@@ -1,15 +1,17 @@
 import { useState } from 'react';
-import { Globe, Wrench } from 'lucide-react';
+import { Globe, Wrench, Palette } from 'lucide-react';
 import { invoke } from '@tauri-apps/api/core';
 import { useI18n } from '../i18n';
+import { useTheme } from '../theme';
+import type { Theme } from '../theme';
 
 const Toggle = ({ checked, onChange, disabled }: { checked: boolean; onChange: () => void; disabled?: boolean }) => {
   return (
     <button
       onClick={onChange}
       disabled={disabled}
-      className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 focus:ring-offset-slate-900 ${
-        checked ? 'bg-indigo-500' : 'bg-slate-700'
+      className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 th-ring-offset ${
+        checked ? 'bg-indigo-500' : 'th-bg-surface'
       } ${disabled ? 'opacity-50 cursor-not-allowed' : ''}`}
     >
       <span
@@ -38,28 +40,29 @@ interface SettingsPageProps {
 
 export function SettingsPage({ jsonEnabled, setJsonEnabled, qrEnabled, setQrEnabled, pwdEnabled, setPwdEnabled, sqlInEnabled, setSqlInEnabled, mdEnabled, setMdEnabled, fileSearchEnabled, setFileSearchEnabled }: SettingsPageProps) {
   const { t, language, setLanguage } = useI18n();
+  const { theme, setTheme } = useTheme();
   const [isProcessing, setIsProcessing] = useState(false);
 
   return (
     <div className="max-w-4xl max-w-5xl mx-auto w-full">
       <div className="mb-10">
-        <h1 className="text-4xl font-bold tracking-tight text-white mb-2">{t('Settings')}</h1>
-        <p className="text-slate-400">{t('Configure MTOOL behaviors and active utilities.')}</p>
+        <h1 className="text-4xl font-bold tracking-tight th-text mb-2">{t('Settings')}</h1>
+        <p className="th-text-3">{t('Configure MTOOL behaviors and active utilities.')}</p>
       </div>
 
       <div className="space-y-6">
         {/* Utility Configuration Card */}
-        <section className="bg-slate-900 border border-slate-800 rounded-xl overflow-hidden shadow-2xl">
-          <div className="px-6 py-4 border-b border-slate-800 flex items-center gap-3 bg-slate-800/50">
+        <section className="th-bg-card border th-border rounded-xl overflow-hidden shadow-2xl">
+          <div className="px-6 py-4 border-b th-border flex items-center gap-3 th-bg-surface-h">
             <Wrench className="w-5 h-5 text-indigo-400" />
-            <h2 className="text-sm font-bold tracking-tighter text-slate-300 uppercase">{t('Utility Configuration')}</h2>
+            <h2 className="text-sm font-bold tracking-tighter th-text-2 uppercase">{t('Utility Configuration')}</h2>
           </div>
           
-          <div className="divide-y divide-slate-800">
-            <div className="px-6 py-5 flex items-center justify-between hover:bg-slate-800/50 transition-colors">
+          <div className="divide-y th-divide">
+            <div className="px-6 py-5 flex items-center justify-between th-hover-surface transition-colors">
               <div>
-                <p className="text-base font-medium text-slate-200 mb-1">{t('File Search')}</p>
-                <p className="text-sm text-slate-500">{t('Search and find files by name, size, or content.')}</p>
+                <p className="text-base font-medium th-text-2 mb-1">{t('File Search')}</p>
+                <p className="text-sm th-text-muted">{t('Search and find files by name, size, or content.')}</p>
               </div>
               <Toggle
                 checked={fileSearchEnabled}
@@ -81,42 +84,42 @@ export function SettingsPage({ jsonEnabled, setJsonEnabled, qrEnabled, setQrEnab
               />
             </div>
 
-            <div className="px-6 py-5 flex items-center justify-between hover:bg-slate-800/50 transition-colors">
+            <div className="px-6 py-5 flex items-center justify-between th-hover-surface transition-colors">
               <div>
-                <p className="text-base font-medium text-slate-200 mb-1">{t('Markdown Editor')}</p>
-                <p className="text-sm text-slate-500">{t('View and edit Markdown files with live preview.')}</p>
+                <p className="text-base font-medium th-text-2 mb-1">{t('Markdown Editor')}</p>
+                <p className="text-sm th-text-muted">{t('View and edit Markdown files with live preview.')}</p>
               </div>
               <Toggle checked={mdEnabled} onChange={() => setMdEnabled(!mdEnabled)} />
             </div>
 
-            <div className="px-6 py-5 flex items-center justify-between hover:bg-slate-800/50 transition-colors">
+            <div className="px-6 py-5 flex items-center justify-between th-hover-surface transition-colors">
               <div>
-                <p className="text-base font-medium text-slate-200 mb-1">{t('JSON Formatter')}</p>
-                <p className="text-sm text-slate-500">{t('Parse, validate, and beautify raw JSON payloads.')}</p>
+                <p className="text-base font-medium th-text-2 mb-1">{t('JSON Formatter')}</p>
+                <p className="text-sm th-text-muted">{t('Parse, validate, and beautify raw JSON payloads.')}</p>
               </div>
               <Toggle checked={jsonEnabled} onChange={() => setJsonEnabled(!jsonEnabled)} />
             </div>
 
-            <div className="px-6 py-5 flex items-center justify-between hover:bg-slate-800/50 transition-colors">
+            <div className="px-6 py-5 flex items-center justify-between th-hover-surface transition-colors">
               <div>
-                <p className="text-base font-medium text-slate-200 mb-1">{t('Text to QR')}</p>
-                <p className="text-sm text-slate-500">{t('Generate scannable QR codes from string inputs.')}</p>
+                <p className="text-base font-medium th-text-2 mb-1">{t('Text to QR')}</p>
+                <p className="text-sm th-text-muted">{t('Generate scannable QR codes from string inputs.')}</p>
               </div>
               <Toggle checked={qrEnabled} onChange={() => setQrEnabled(!qrEnabled)} />
             </div>
 
-            <div className="px-6 py-5 flex items-center justify-between hover:bg-slate-800/50 transition-colors">
+            <div className="px-6 py-5 flex items-center justify-between th-hover-surface transition-colors">
               <div>
-                <p className="text-base font-medium text-slate-200 mb-1">{t('Password Generator')}</p>
-                <p className="text-sm text-slate-500">{t('Create secure passwords.')}</p>
+                <p className="text-base font-medium th-text-2 mb-1">{t('Password Generator')}</p>
+                <p className="text-sm th-text-muted">{t('Create secure passwords.')}</p>
               </div>
               <Toggle checked={pwdEnabled} onChange={() => setPwdEnabled(!pwdEnabled)} />
             </div>
 
-            <div className="px-6 py-5 flex items-center justify-between hover:bg-slate-800/50 transition-colors">
+            <div className="px-6 py-5 flex items-center justify-between th-hover-surface transition-colors">
               <div>
-                <p className="text-base font-medium text-slate-200 mb-1">{t('SQL IN Builder')}</p>
-                <p className="text-sm text-slate-500">{t('Build SQL IN clause from column values.')}</p>
+                <p className="text-base font-medium th-text-2 mb-1">{t('SQL IN Builder')}</p>
+                <p className="text-sm th-text-muted">{t('Build SQL IN clause from column values.')}</p>
               </div>
               <Toggle checked={sqlInEnabled} onChange={() => setSqlInEnabled(!sqlInEnabled)} />
             </div>
@@ -125,30 +128,67 @@ export function SettingsPage({ jsonEnabled, setJsonEnabled, qrEnabled, setQrEnab
         </section>
 
         {/* General Settings Card */}
-        <section className="bg-slate-900 border border-slate-800 rounded-xl overflow-hidden shadow-2xl">
-          <div className="px-6 py-4 border-b border-slate-800 flex items-center gap-3 bg-slate-800/50">
+        <section className="th-bg-card border th-border rounded-xl overflow-hidden shadow-2xl">
+          <div className="px-6 py-4 border-b th-border flex items-center gap-3 th-bg-surface-h">
             <Globe className="w-5 h-5 text-indigo-400" />
-            <h2 className="text-sm font-bold tracking-tighter text-slate-300 uppercase">{t('General Settings')}</h2>
+            <h2 className="text-sm font-bold tracking-tighter th-text-2 uppercase">{t('General Settings')}</h2>
           </div>
           
-          <div className="px-6 py-5 flex items-center justify-between hover:bg-slate-800/50 transition-colors">
+          <div className="divide-y th-divide">
+            <div className="px-6 py-5 flex items-center justify-between th-hover-surface transition-colors">
+              <div>
+                <p className="text-base font-medium th-text-2 mb-1">{t('Language')}</p>
+                <p className="text-sm th-text-muted">{t('Select application interface language.')}</p>
+              </div>
+              
+              <div className="relative">
+                <select 
+                  value={language}
+                  onChange={(e) => setLanguage(e.target.value as any)}
+                  className="appearance-none th-bg-input border th-border-subtle th-text-2 text-sm rounded-lg focus:ring-indigo-500 focus:border-indigo-500 focus:outline-none block w-40 p-2.5 pr-8 transition-colors cursor-pointer shadow-inner"
+                >
+                  <option value="en">English</option>
+                  <option value="zh">简体中文</option>
+                </select>
+                <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-2 th-text-3">
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7"></path></svg>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        {/* Appearance Card */}
+        <section className="th-bg-card border th-border rounded-xl overflow-hidden shadow-2xl">
+          <div className="px-6 py-4 border-b th-border flex items-center gap-3 th-bg-surface-h">
+            <Palette className="w-5 h-5 text-indigo-400" />
+            <h2 className="text-sm font-bold tracking-tighter th-text-2 uppercase">{t('Appearance')}</h2>
+          </div>
+          
+          <div className="px-6 py-5 flex items-center justify-between th-hover-surface transition-colors">
             <div>
-              <p className="text-base font-medium text-slate-200 mb-1">{t('Language')}</p>
-              <p className="text-sm text-slate-500">{t('Select application interface language.')}</p>
+              <p className="text-base font-medium th-text-2 mb-1">{t('Theme')}</p>
+              <p className="text-sm th-text-muted">{t('Choose light or dark color scheme.')}</p>
             </div>
             
-            <div className="relative">
-              <select 
-                value={language}
-                onChange={(e) => setLanguage(e.target.value as any)}
-                className="appearance-none bg-slate-950 border border-slate-700 text-slate-300 text-sm rounded-lg focus:ring-indigo-500 focus:border-indigo-500 focus:outline-none block w-40 p-2.5 pr-8 hover:border-slate-500 transition-colors cursor-pointer shadow-inner"
-              >
-                <option value="en">English</option>
-                <option value="zh">简体中文</option>
-              </select>
-              <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-2 text-gray-400">
-                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7"></path></svg>
-              </div>
+            <div className="flex gap-3">
+              {([
+                { value: 'dark' as Theme, label: t('Dark'), icon: '🌙' },
+                { value: 'light' as Theme, label: t('Light'), icon: '☀️' },
+              ]).map(opt => (
+                <button
+                  key={opt.value}
+                  onClick={() => setTheme(opt.value)}
+                  className={`px-4 py-2 rounded-lg text-sm font-medium transition-all border focus:outline-none flex items-center gap-2 ${
+                    theme === opt.value
+                      ? 'bg-indigo-600/15 text-indigo-400 border-indigo-500/30 shadow-sm'
+                      : 'th-bg-input-alt th-text-3 th-border-subtle th-hover-surface'
+                  }`}
+                >
+                  <span>{opt.icon}</span>
+                  {opt.label}
+                </button>
+              ))}
             </div>
           </div>
         </section>

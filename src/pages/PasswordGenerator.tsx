@@ -6,8 +6,8 @@ const Toggle = ({ checked, onChange }: { checked: boolean; onChange: () => void 
   return (
     <button
       onClick={onChange}
-      className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 focus:ring-offset-slate-900 ${
-        checked ? 'bg-indigo-500' : 'bg-slate-700'
+      className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 th-ring-offset ${
+        checked ? 'bg-indigo-500' : 'th-bg-surface'
       }`}
     >
       <span
@@ -220,7 +220,7 @@ export function PasswordGenerator() {
           <div 
             key={i} 
             className={`h-1.5 rounded-full flex-1 transition-colors ${
-              i <= bars ? getStrengthColor(strength) : 'bg-slate-800'
+              i <= bars ? getStrengthColor(strength) : 'th-bg-surface'
             } ${i <= bars && strength === 'STRONG' ? 'shadow-[0_0_10px_rgba(16,185,129,0.5)]' : ''}`}
           ></div>
         ))}
@@ -235,8 +235,8 @@ export function PasswordGenerator() {
 
   return (
     <div className="w-full h-full flex flex-col">
-      <div className="flex justify-between items-center mb-6 border-b border-slate-800 pb-4 shrink-0">
-        <h2 className="text-white font-semibold text-lg flex items-center gap-2">
+      <div className="flex justify-between items-center mb-6 border-b th-border pb-4 shrink-0">
+        <h2 className="th-text font-semibold text-lg flex items-center gap-2">
           <Key className="w-5 h-5 text-indigo-400" />
           {t('Password Generator')}
         </h2>
@@ -246,12 +246,12 @@ export function PasswordGenerator() {
         <div className="max-w-5xl mx-auto w-full space-y-6 pb-6">
         
         {/* Main Generator Card */}
-        <section className="bg-slate-900 border border-slate-800 rounded-xl p-6 shadow-2xl">
+        <section className="th-bg-card border th-border rounded-xl p-6 shadow-2xl">
           
           {/* Password Display */}
-          <div className="bg-slate-950 border border-slate-800 rounded-lg p-5 mb-8">
+          <div className="th-bg-input border th-border rounded-lg p-5 mb-8">
             <div className="flex items-start justify-between mb-6">
-              <div className={`font-mono tracking-widest text-white overflow-y-auto max-h-40 mr-4 flex flex-col gap-2 w-full ${passwords.length > 1 ? 'text-xl' : 'text-3xl whitespace-nowrap overflow-hidden text-ellipsis'}`}>
+              <div className={`font-mono tracking-widest th-text overflow-y-auto max-h-40 mr-4 flex flex-col gap-2 w-full ${passwords.length > 1 ? 'text-xl' : 'text-3xl whitespace-nowrap overflow-hidden text-ellipsis'}`}>
                 {passwords.length > 0 ? passwords.map((p, i) => (
                   <div key={i} className="break-all">{p}</div>
                 )) : '---'}
@@ -259,7 +259,7 @@ export function PasswordGenerator() {
               <div className="flex items-center gap-3 shrink-0 mt-1">
                 <button 
                   onClick={() => generatePassword(true)}
-                  className="p-2 text-slate-400 hover:text-white hover:bg-slate-800 rounded-lg transition-colors focus:outline-none"
+                  className="p-2 th-text-3 hover:th-text th-hover-surface rounded-lg transition-colors focus:outline-none"
                 >
                   <RefreshCcw className="w-5 h-5" />
                 </button>
@@ -284,7 +284,7 @@ export function PasswordGenerator() {
           {/* Controls */}
           <div className="mb-8">
             <div className="flex justify-between items-center mb-4">
-              <span className="text-sm font-bold text-slate-300">{t('Password Length')}</span>
+              <span className="text-sm font-bold th-text-2">{t('Password Length')}</span>
               <div className="flex items-center gap-3">
                 <input 
                   type="number" 
@@ -299,7 +299,7 @@ export function PasswordGenerator() {
                   onBlur={() => {
                     if (length < 4) setLength(4);
                   }}
-                  className="w-16 bg-slate-950 border border-slate-700 text-slate-300 text-sm font-mono rounded px-2 py-1 focus:outline-none focus:border-indigo-500 text-center"
+                  className="w-16 th-bg-input border th-border-subtle th-text-2 text-sm font-mono rounded px-2 py-1 focus:outline-none focus:border-indigo-500 text-center"
                 />
               </div>
             </div>
@@ -307,43 +307,43 @@ export function PasswordGenerator() {
               type="range" min="4" max="128" step="1"
               value={length}
               onChange={(e) => setLength(parseInt(e.target.value))}
-              className="w-full h-1.5 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-indigo-500"
+              className="w-full h-1.5 th-bg-surface rounded-lg appearance-none cursor-pointer accent-indigo-500"
             />
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div className="bg-slate-950/50 border border-slate-800 rounded-lg p-4 flex items-center justify-between">
+            <div className="th-bg-input-alt border th-border rounded-lg p-4 flex items-center justify-between">
               <div>
-                <p className="text-sm font-bold text-slate-300 mb-1">{t('Uppercase Letters')}</p>
-                <p className="text-xs text-slate-500 font-mono">{t('A-Z')}</p>
+                <p className="text-sm font-bold th-text-2 mb-1">{t('Uppercase Letters')}</p>
+                <p className="text-xs th-text-muted font-mono">{t('A-Z')}</p>
               </div>
               <Toggle checked={useUpper} onChange={() => setUseUpper(!useUpper)} />
             </div>
             
-            <div className="bg-slate-950/50 border border-slate-800 rounded-lg p-4 flex items-center justify-between">
+            <div className="th-bg-input-alt border th-border rounded-lg p-4 flex items-center justify-between">
               <div>
-                <p className="text-sm font-bold text-slate-300 mb-1">{t('Lowercase Letters')}</p>
-                <p className="text-xs text-slate-500 font-mono">{t('a-z')}</p>
+                <p className="text-sm font-bold th-text-2 mb-1">{t('Lowercase Letters')}</p>
+                <p className="text-xs th-text-muted font-mono">{t('a-z')}</p>
               </div>
               <Toggle checked={useLower} onChange={() => setUseLower(!useLower)} />
             </div>
 
-            <div className="bg-slate-950/50 border border-slate-800 rounded-lg p-4 flex items-center justify-between">
+            <div className="th-bg-input-alt border th-border rounded-lg p-4 flex items-center justify-between">
               <div>
-                <p className="text-sm font-bold text-slate-300 mb-1">{t('Numbers')}</p>
-                <p className="text-xs text-slate-500 font-mono">{t('0-9')}</p>
+                <p className="text-sm font-bold th-text-2 mb-1">{t('Numbers')}</p>
+                <p className="text-xs th-text-muted font-mono">{t('0-9')}</p>
               </div>
               <Toggle checked={useNumbers} onChange={() => setUseNumbers(!useNumbers)} />
             </div>
 
-            <div className="bg-slate-950/50 border border-slate-800 rounded-lg p-4 flex items-center justify-between">
+            <div className="th-bg-input-alt border th-border rounded-lg p-4 flex items-center justify-between">
               <div className="flex-1 mr-4">
-                <p className="text-sm font-bold text-slate-300 mb-1">{t('Symbols')}</p>
+                <p className="text-sm font-bold th-text-2 mb-1">{t('Symbols')}</p>
                 <input 
                   type="text" 
                   value={customSymbols}
                   onChange={(e) => setCustomSymbols(e.target.value)}
-                  className="w-full bg-slate-900 border border-slate-700 text-slate-300 text-xs font-mono rounded px-2 py-1 focus:outline-none focus:border-indigo-500"
+                  className="w-full th-bg-card border th-border-subtle th-text-2 text-xs font-mono rounded px-2 py-1 focus:outline-none focus:border-indigo-500"
                 />
               </div>
               <Toggle checked={useSymbols} onChange={() => setUseSymbols(!useSymbols)} />
@@ -351,18 +351,18 @@ export function PasswordGenerator() {
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4">
-            <div className="bg-slate-950/50 border border-slate-800 rounded-lg p-4">
-              <p className="text-sm font-bold text-slate-300 mb-2">{t('Exclude Characters')}</p>
+            <div className="th-bg-input-alt border th-border rounded-lg p-4">
+              <p className="text-sm font-bold th-text-2 mb-2">{t('Exclude Characters')}</p>
               <input 
                 type="text" 
                 value={excludeChars}
                 onChange={(e) => setExcludeChars(e.target.value)}
                 placeholder={t('e.g. iIl1Oo0')}
-                className="w-full bg-slate-900 border border-slate-700 text-slate-300 text-xs font-mono rounded px-3 py-2 focus:outline-none focus:border-indigo-500"
+                className="w-full th-bg-card border th-border-subtle th-text-2 text-xs font-mono rounded px-3 py-2 focus:outline-none focus:border-indigo-500"
               />
             </div>
-            <div className="bg-slate-950/50 border border-slate-800 rounded-lg p-4">
-              <p className="text-sm font-bold text-slate-300 mb-2">{t('Generate Count')}</p>
+            <div className="th-bg-input-alt border th-border rounded-lg p-4">
+              <p className="text-sm font-bold th-text-2 mb-2">{t('Generate Count')}</p>
               <input 
                 type="number" 
                 min="1" max="100"
@@ -376,7 +376,7 @@ export function PasswordGenerator() {
                   if (generateCount < 1) setGenerateCount(1);
                   if (generateCount > 100) setGenerateCount(100);
                 }}
-                className="w-full bg-slate-900 border border-slate-700 text-slate-300 text-sm font-mono rounded px-3 py-1.5 focus:outline-none focus:border-indigo-500"
+                className="w-full th-bg-card border th-border-subtle th-text-2 text-sm font-mono rounded px-3 py-1.5 focus:outline-none focus:border-indigo-500"
               />
             </div>
           </div>
@@ -384,10 +384,10 @@ export function PasswordGenerator() {
 
         {/* History Table */}
         {history.length > 0 && (
-          <section className="bg-slate-900 border border-slate-800 rounded-xl overflow-hidden shadow-2xl">
+          <section className="th-bg-card border th-border rounded-xl overflow-hidden shadow-2xl">
             <div className="overflow-x-auto">
-              <table className="w-full text-left text-sm text-slate-400">
-                <thead className="text-[10px] uppercase font-bold tracking-widest text-slate-500 border-b border-slate-800 bg-slate-950/50">
+              <table className="w-full text-left text-sm th-text-3">
+                <thead className="text-[10px] uppercase font-bold tracking-widest th-text-muted border-b th-border th-bg-input-alt">
                   <tr>
                     <th className="px-6 py-4">{t('TIMESTAMP')}</th>
                     <th className="px-6 py-4">{t('PREVIEW')}</th>
@@ -395,11 +395,11 @@ export function PasswordGenerator() {
                     <th className="px-6 py-4 text-right">{t('ACTION')}</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-slate-800">
+                <tbody className="divide-y th-divide">
                   {history.map((item) => (
-                    <tr key={item.id} className="hover:bg-slate-800/30 transition-colors">
+                    <tr key={item.id} className="th-hover-surface transition-colors">
                       <td className="px-6 py-4 font-mono text-xs">{item.timestamp}</td>
-                      <td className="px-6 py-4 font-mono text-slate-300">{maskPassword(item.password)}</td>
+                      <td className="px-6 py-4 font-mono th-text-2">{maskPassword(item.password)}</td>
                       <td className="px-6 py-4">
                         <span className={`px-2 py-1 rounded text-[10px] font-bold uppercase ${
                           item.strength === 'STRONG' ? 'bg-emerald-500/10 text-emerald-400' :
@@ -413,7 +413,7 @@ export function PasswordGenerator() {
                       <td className="px-6 py-4 text-right">
                         <button 
                           onClick={() => handleCopy(item.password, item.id)}
-                          className="p-2 text-slate-500 hover:text-white hover:bg-slate-800 rounded transition-colors focus:outline-none inline-flex"
+                          className="p-2 th-text-muted hover:th-text th-hover-surface rounded transition-colors focus:outline-none inline-flex"
                         >
                           {historyCopiedId === item.id ? <Check className="w-4 h-4 text-emerald-400" /> : <Copy className="w-4 h-4" />}
                         </button>
