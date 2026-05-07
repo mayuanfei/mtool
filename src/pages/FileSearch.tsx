@@ -145,17 +145,20 @@ export function FileSearch() {
   useEffect(() => {
     invoke<IndexStatus>("get_index_status").then(setStatus).catch(() => {});
 
-    const unlistenProgress = listen<number>("index_progress", (event) => {
-      setStatus((prev) => ({ ...prev, is_indexing: true, total: event.payload }));
-    });
+    let unlistenProgress: (() => void) | null = null;
+    let unlistenComplete: (() => void) | null = null;
 
-    const unlistenComplete = listen<number>("index_complete", () => {
+    listen<number>("index_progress", (event) => {
+      setStatus((prev) => ({ ...prev, is_indexing: true, total: event.payload }));
+    }).then((fn) => { unlistenProgress = fn; });
+
+    listen<number>("index_complete", () => {
       invoke<IndexStatus>("get_index_status").then(setStatus).catch(() => {});
-    });
+    }).then((fn) => { unlistenComplete = fn; });
 
     return () => {
-      unlistenProgress.then((fn) => fn());
-      unlistenComplete.then((fn) => fn());
+      unlistenProgress?.();
+      unlistenComplete?.();
     };
   }, []);
 

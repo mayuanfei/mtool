@@ -69,14 +69,14 @@ fn generate_qr(payload: &str, redundancy: &str, resolution: u32, color: &str, bg
     let g = u8::from_str_radix(hex.get(2..4).unwrap_or("00"), 16).unwrap_or(0);
     let b = u8::from_str_radix(hex.get(4..6).unwrap_or("00"), 16).unwrap_or(0);
     let bghex = bg_color.trim_start_matches('#');
-    let br = u8::from_str_radix(bghex.get(0..2).unwrap_or("ff"), 16).unwrap_or(255);
-    let bg = u8::from_str_radix(bghex.get(2..4).unwrap_or("ff"), 16).unwrap_or(255);
-    let bb = u8::from_str_radix(bghex.get(4..6).unwrap_or("ff"), 16).unwrap_or(255);
+    let bg_r = u8::from_str_radix(bghex.get(0..2).unwrap_or("ff"), 16).unwrap_or(255);
+    let bg_g = u8::from_str_radix(bghex.get(2..4).unwrap_or("ff"), 16).unwrap_or(255);
+    let bg_b = u8::from_str_radix(bghex.get(4..6).unwrap_or("ff"), 16).unwrap_or(255);
     let image = code
         .render::<Rgb<u8>>()
         .min_dimensions(resolution, resolution)
         .dark_color(Rgb([r, g, b]))
-        .light_color(Rgb([br, bg, bb]))
+        .light_color(Rgb([bg_r, bg_g, bg_b]))
         .build();
     let mut buf = Vec::new();
     let mut cursor = Cursor::new(&mut buf);

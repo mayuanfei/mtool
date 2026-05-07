@@ -16,7 +16,8 @@ export function TextToQr() {
   const [isCopied, setIsCopied] = useState(false);
   const genIdRef = useRef(0);
 
-  const bgColor = theme === 'dark' ? '#1e1e2e' : '#ffffff';
+  const bgColor = getComputedStyle(document.documentElement)
+    .getPropertyValue('--bg-card').trim() || (theme === 'dark' ? '#0f172a' : '#ffffff');
 
   useEffect(() => {
     if (!payload.trim()) {
