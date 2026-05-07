@@ -163,7 +163,7 @@ export function TextToQr() {
                 <div className="flex gap-2">
                    <button onClick={() => setSelectedColor('#6366f1')} className={`w-8 h-8 rounded-full bg-[#6366f1] cursor-pointer transition-all ${selectedColor === '#6366f1' ? 'ring-2 ring-offset-2 ring-indigo-500' : 'hover:ring-2 ring-offset-2'}`} style={{ ['--tw-ring-offset-color' as any]: 'var(--bg-card)' }}></button>
                    <button onClick={() => setSelectedColor('#34d399')} className={`w-8 h-8 rounded-full bg-[#34d399] cursor-pointer transition-all ${selectedColor === '#34d399' ? 'ring-2 ring-offset-2 ring-emerald-400' : 'hover:ring-2 ring-offset-2'}`} style={{ ['--tw-ring-offset-color' as any]: 'var(--bg-card)' }}></button>
-                   <button onClick={() => setSelectedColor('#000000')} className={`w-8 h-8 rounded-full bg-[#000000] border th-border-subtle cursor-pointer transition-all ${selectedColor === '#000000' ? 'ring-2 ring-offset-2' : 'hover:ring-2 ring-offset-2'}`} style={{ ['--tw-ring-offset-color' as any]: 'var(--bg-card)' }}></button>
+                   <button onClick={() => setSelectedColor('#f97316')} className={`w-8 h-8 rounded-full bg-[#f97316] cursor-pointer transition-all ${selectedColor === '#f97316' ? 'ring-2 ring-offset-2 ring-orange-400' : 'hover:ring-2 ring-offset-2'}`} style={{ ['--tw-ring-offset-color' as any]: 'var(--bg-card)' }}></button>
                 </div>
                 <div className="h-8 w-px" style={{ backgroundColor: 'var(--border-default)' }}></div>
                 <div className="flex-1 flex items-center th-bg-input-alt border th-border-muted rounded-md px-3 py-1.5 focus-within:border-indigo-500 transition-colors shadow-inner">
