@@ -546,7 +546,7 @@ where
         while !emitter_done.load(Ordering::Relaxed) {
             let count = emitter_counter.load(Ordering::Relaxed);
             emitter_cb(count, None);
-            std::thread::sleep(Duration::from_millis(500));
+            std::thread::sleep(Duration::from_millis(50));
         }
         emitter_cb(emitter_counter.load(Ordering::Relaxed), None);
     });
@@ -560,8 +560,7 @@ where
             Err(_) => return 0usize,
         };
         conn.execute_batch(
-            "PRAGMA journal_mode=WAL;
-             PRAGMA synchronous=OFF;
+            "PRAGMA synchronous=OFF;
              PRAGMA cache_size=-32768;",
         ).ok();
         let mut total = 0usize;
@@ -619,8 +618,7 @@ pub fn rebuild_fts5_background(db_path: &str) -> bool {
         }
     };
     conn.execute_batch(
-        "PRAGMA journal_mode=WAL;
-         PRAGMA synchronous=OFF;
+        "PRAGMA synchronous=OFF;
          PRAGMA cache_size=-32768;",
     ).ok();
 
@@ -653,8 +651,8 @@ pub fn rebuild_fts5_background(db_path: &str) -> bool {
             return false;
         }
         offset += BATCH_SIZE;
-        // 让出足够时间，让前端 IPC 有机会获取读锁（避免首次启动 UI 卡死）
-        std::thread::sleep(Duration::from_millis(200));
+        // 短暂让出，让其他连接有机会获取读锁
+        std::thread::sleep(Duration::from_millis(10));
     }
 
     conn.execute_batch("PRAGMA synchronous=NORMAL;").ok();
