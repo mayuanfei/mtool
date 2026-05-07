@@ -279,15 +279,14 @@ export function FileSearch() {
         <>
           <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
           <span>
-            已索引&nbsp;
             <span className="text-slate-300 font-medium">
               {status.total.toLocaleString()}
             </span>
-            &nbsp;个文件
+            &nbsp;{t('files indexed')}
           </span>
           {status.last_built_at && (
             <span className="text-slate-600">
-              · 上次建立 {formatDate(status.last_built_at)}
+              · {t('last built')} {formatDate(status.last_built_at)}
             </span>
           )}
         </>
@@ -297,11 +296,11 @@ export function FileSearch() {
       <>
         <RefreshCw className="w-3 h-3 animate-spin text-indigo-400" />
         <span className="text-indigo-300">
-          正在建立索引...&nbsp;
+          {t('Indexing...')}&nbsp;
           <span className="font-mono tabular-nums text-indigo-400">
             {status.total.toLocaleString()}
           </span>
-          &nbsp;个文件
+          &nbsp;{t('files indexed')}
         </span>
       </>
     );
@@ -332,7 +331,7 @@ export function FileSearch() {
               disabled:opacity-40 disabled:cursor-not-allowed"
           >
             <RotateCcw className="w-3 h-3" />
-            重建索引
+            {t('Re-index')}
           </button>
         </div>
       </div>
@@ -354,7 +353,7 @@ export function FileSearch() {
                 setShowRecent(true);
               }
             }}
-            placeholder='搜索文件名...  例: *.yml   report draft   size:>100MB   content:"关键词"'
+            placeholder={t('Search file names...   e.g. *.yml   report draft   size:>100MB   content:"keyword"')}
             className="w-full pl-9 pr-10 py-2.5 bg-slate-900 border border-slate-700
               rounded-lg text-sm text-slate-200 placeholder-slate-600
               focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500
@@ -372,7 +371,7 @@ export function FileSearch() {
                 rounded-lg shadow-2xl z-50 overflow-hidden"
             >
               <div className="px-3 py-1.5 text-[10px] font-semibold text-slate-500 uppercase tracking-wider">
-                最近搜索
+                {t('Recent Searches')}
               </div>
               {recentSearches.map((s) => (
                 <div
@@ -391,7 +390,7 @@ export function FileSearch() {
                     }}
                     className="p-0.5 rounded text-slate-700 hover:text-slate-400 hover:bg-slate-700
                       opacity-0 group-hover:opacity-100 transition-all shrink-0"
-                    title="删除此记录"
+                    title={t('Remove this record')}
                   >
                     <X className="w-3 h-3" />
                   </button>
@@ -404,10 +403,10 @@ export function FileSearch() {
         {/* 语法快捷按钮 */}
         <div className="flex gap-2 mt-2 flex-wrap">
           {[
-            { label: "*.md", tip: "glob 匹配" },
-            { label: "*.yml", tip: "glob 匹配" },
-            { label: "size:>100MB", tip: "大小过滤" },
-            { label: 'content:"关键词"', tip: "文件内容搜索" },
+            { label: "*.md", tip: t('glob match') },
+            { label: "*.yml", tip: t('glob match') },
+            { label: "size:>100MB", tip: t('size filter') },
+            { label: 'content:"关键词"', tip: t('file content search') },
           ].map((item) => (
             <button
               key={item.label}
@@ -438,11 +437,11 @@ export function FileSearch() {
         {/* 结果列表头 */}
         <div className="px-4 py-2 bg-slate-800/50 border-b border-slate-800 flex items-center justify-between">
           <span className="text-[11px] font-bold text-slate-400 uppercase tracking-tighter">
-            搜索结果
+            {t('Search Results')}
           </span>
           {results.length > 0 && query.trim() && (
             <span className="text-[10px] text-slate-500 font-mono">
-              {results.length} 条{results.length >= 200 && "（仅显示前 200 条）"}
+              {results.length} {t('entries')}{results.length >= 200 && ` ${t('(first 200 shown)')}`}
               {searchElapsed !== null && (
                 <span className="ml-2 text-slate-600">
                   · {searchElapsed < 1000
@@ -524,7 +523,7 @@ export function FileSearch() {
                     {!entry.is_dir && (
                       <button
                         onClick={(e) => { e.stopPropagation(); handleReveal(entry.path); }}
-                        title="在文件管理器中定位"
+                        title={t('Reveal in file manager')}
                         className="ml-auto shrink-0 p-1 rounded text-slate-600 hover:text-slate-300
                           hover:bg-slate-700 opacity-0 group-hover:opacity-100 transition-all"
                       >
@@ -542,16 +541,16 @@ export function FileSearch() {
                   <div className="flex flex-wrap gap-x-4 gap-y-0.5 pl-6">
                     {!entry.is_dir && (
                       <span className="text-[11px] text-slate-600">
-                        大小:{" "}
+                        {t('Size')}:{" "}
                         <span className="text-slate-400">{formatSize(entry.size)}</span>
                       </span>
                     )}
                     <span className="text-[11px] text-slate-600">
-                      创建:{" "}
+                      {t('Created')}:{" "}
                       <span className="text-slate-400 font-mono">{formatDate(entry.created)}</span>
                     </span>
                     <span className="text-[11px] text-slate-600">
-                      修改:{" "}
+                      {t('Date Modified')}:{" "}
                       <span className="text-slate-400 font-mono">{formatDate(entry.modified)}</span>
                     </span>
                   </div>
