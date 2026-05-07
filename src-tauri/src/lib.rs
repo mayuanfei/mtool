@@ -589,10 +589,12 @@ pub fn run() {
                     .await;
 
                     if let Ok((total, ts)) = result {
-                        let mut s = status_ref.write().unwrap();
-                        s.is_indexing = false;
-                        s.total = total;
-                        s.last_built_at = Some(ts);
+                        {
+                            let mut s = status_ref.write().unwrap();
+                            s.is_indexing = false;
+                            s.total = total;
+                            s.last_built_at = Some(ts);
+                        }
                         state.load_from_db();
                         app_handle.emit("index_progress", total).ok();
                         app_handle.emit("index_complete", total).ok();
