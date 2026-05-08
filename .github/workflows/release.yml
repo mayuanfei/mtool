@@ -41,6 +41,19 @@ jobs:
 
       - run: npm run tauri build -- ${{ matrix.args }}
 
+      - name: Rename artifacts
+        shell: bash
+        run: |
+          if [ "${{ matrix.platform }}" == "macos-latest" ]; then
+            cd src-tauri/target/universal-apple-darwin/release/bundle/dmg
+            mv *.dmg mtool_${{ github.ref_name }}.dmg
+          else
+            cd src-tauri/target/release/bundle/nsis
+            mv *-setup.exe mtool_${{ github.ref_name }}.exe
+            cd ../msi
+            mv *.msi mtool_${{ github.ref_name }}.msi
+          fi
+
       - uses: softprops/action-gh-release@v2
         with:
           files: |
