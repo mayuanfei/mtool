@@ -41,6 +41,7 @@ const translations = {
     'Dimensions': 'Dimensions',
     'Copy Image': 'Copy Image',
     'Download': 'Download',
+    'Failed': 'Failed',
     'Enter payload to generate': 'Enter payload to generate',
     
     // PasswordGenerator
@@ -202,6 +203,7 @@ const translations = {
     'Dimensions': '尺寸',
     'Copy Image': '复制图片',
     'Download': '下载',
+    'Failed': '操作失败',
     'Enter payload to generate': '输入文本以生成',
     
     // PasswordGenerator

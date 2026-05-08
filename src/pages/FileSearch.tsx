@@ -145,18 +145,26 @@ export function FileSearch() {
   useEffect(() => {
     invoke<IndexStatus>("get_index_status").then(setStatus).catch(() => {});
 
+    let cancelled = false;
     let unlistenProgress: (() => void) | null = null;
     let unlistenComplete: (() => void) | null = null;
 
     listen<number>("index_progress", (event) => {
       setStatus((prev) => ({ ...prev, is_indexing: true, total: event.payload }));
-    }).then((fn) => { unlistenProgress = fn; });
+    }).then((fn) => {
+      if (cancelled) fn();
+      else unlistenProgress = fn;
+    });
 
     listen<number>("index_complete", () => {
       invoke<IndexStatus>("get_index_status").then(setStatus).catch(() => {});
-    }).then((fn) => { unlistenComplete = fn; });
+    }).then((fn) => {
+      if (cancelled) fn();
+      else unlistenComplete = fn;
+    });
 
     return () => {
+      cancelled = true;
       unlistenProgress?.();
       unlistenComplete?.();
     };

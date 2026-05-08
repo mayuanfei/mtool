@@ -41,6 +41,9 @@ fn maybe_start_watcher(engine: &IndexEngine, has_data: bool, index_disabled: boo
 
 #[tauri::command]
 fn format_json(input: &str) -> Result<String, String> {
+    if input.len() > 5 * 1024 * 1024 {
+        return Err("JSON too large (max 5 MB)".to_string());
+    }
     let value: serde_json::Value =
         serde_json::from_str(input).map_err(|e| format!("Invalid JSON: {}", e))?;
     serde_json::to_string_pretty(&value).map_err(|e| format!("Format error: {}", e))
@@ -48,6 +51,9 @@ fn format_json(input: &str) -> Result<String, String> {
 
 #[tauri::command]
 fn minify_json(input: &str) -> Result<String, String> {
+    if input.len() > 5 * 1024 * 1024 {
+        return Err("JSON too large (max 5 MB)".to_string());
+    }
     let value: serde_json::Value =
         serde_json::from_str(input).map_err(|e| format!("Invalid JSON: {}", e))?;
     serde_json::to_string(&value).map_err(|e| format!("Minify error: {}", e))
@@ -137,6 +143,13 @@ fn open_md_file() -> Result<(String, String), String> {
         .add_filter("Markdown", &["md", "markdown", "txt"])
         .pick_file()
     {
+        let metadata = std::fs::metadata(&path).map_err(|e| e.to_string())?;
+        if metadata.len() > 10 * 1024 * 1024 {
+            return Err(format!(
+                "File too large ({} MB). Max 10 MB.",
+                metadata.len() / 1024 / 1024
+            ));
+        }
         let content = fs::read_to_string(&path)
             .map_err(|e| format!("Failed to read file: {}", e))?;
         let path_str = path.to_string_lossy().to_string();

@@ -5,6 +5,7 @@ import { getCurrentWebview } from '@tauri-apps/api/webview';
 import { Marked } from 'marked';
 import { markedHighlight } from 'marked-highlight';
 import hljs from 'highlight.js';
+import DOMPurify from 'dompurify';
 import { useI18n } from '../i18n';
 
 export function MarkdownEditor() {
@@ -45,7 +46,7 @@ export function MarkdownEditor() {
   const renderedHtml = useMemo(() => {
     if (!content.trim()) return '';
     try {
-      return marked.parse(content) as string;
+      return DOMPurify.sanitize(marked.parse(content) as string);
     } catch {
       return '<p class="text-red-400">Render error</p>';
     }

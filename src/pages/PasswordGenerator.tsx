@@ -47,12 +47,12 @@ export function PasswordGenerator() {
   const [length, setLength] = useState(() => {
     const saved = localStorage.getItem('mtool_pwd_length');
     const val = saved ? parseInt(saved, 10) : 16;
-    return isNaN(val) ? 16 : val;
+    return isNaN(val) ? 16 : Math.max(4, Math.min(128, val));
   });
   const [generateCount, setGenerateCount] = useState(() => {
     const saved = localStorage.getItem('mtool_pwd_count');
     const val = saved ? parseInt(saved, 10) : 1;
-    return isNaN(val) ? 1 : val;
+    return isNaN(val) ? 1 : Math.max(1, Math.min(100, val));
   });
   const [useUpper, setUseUpper] = useState(true);
   const [useLower, setUseLower] = useState(true);

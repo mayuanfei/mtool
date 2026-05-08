@@ -80,6 +80,7 @@ export function SettingsPage({ jsonEnabled, setJsonEnabled, qrEnabled, setQrEnab
                     else await invoke('build_index');
                   } catch (e) {
                     console.error(e);
+                    setFileSearchEnabled(!next);
                   } finally {
                     setIsProcessing(false);
                   }

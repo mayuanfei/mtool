@@ -1,4 +1,4 @@
-import { Copy, Download, Clipboard, Trash2, QrCode, Check } from 'lucide-react';
+import { Copy, Download, Clipboard, Trash2, QrCode, Check, XCircle } from 'lucide-react';
 import { useState, useEffect, useRef } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { useI18n } from '../i18n';
@@ -14,6 +14,8 @@ export function TextToQr() {
   const [qrBase64, setQrBase64] = useState('');
   const [isGenerating, setIsGenerating] = useState(false);
   const [isCopied, setIsCopied] = useState(false);
+  const [copyError, setCopyError] = useState(false);
+  const [downloadError, setDownloadError] = useState(false);
   const genIdRef = useRef(0);
 
   const bgColor = getComputedStyle(document.documentElement)
@@ -55,6 +57,8 @@ export function TextToQr() {
       setTimeout(() => setIsCopied(false), 2000);
     } catch (e) {
       console.error('Failed to copy image', e);
+      setCopyError(true);
+      setTimeout(() => setCopyError(false), 2000);
     }
   };
 
@@ -64,6 +68,8 @@ export function TextToQr() {
       await invoke('download_qr', { base64Str: qrBase64 });
     } catch (e) {
       console.error('Failed to download image', e);
+      setDownloadError(true);
+      setTimeout(() => setDownloadError(false), 2000);
     }
   };
 
@@ -213,11 +219,13 @@ export function TextToQr() {
           </div>
           
           <div className="flex gap-4">
-            <button onClick={handleCopyImage} className={`flex-1 flex items-center justify-center gap-2 py-2.5 rounded-md transition-colors border text-sm font-medium shadow-sm focus:outline-none disabled:opacity-50 ${isCopied ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' : 'th-bg-surface th-text-2 th-border-subtle'}`} disabled={!qrBase64}>
-              {isCopied ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />} {isCopied ? t('Copied!') : t('Copy Image')}
+            <button onClick={handleCopyImage} className={`flex-1 flex items-center justify-center gap-2 py-2.5 rounded-md transition-colors border text-sm font-medium shadow-sm focus:outline-none disabled:opacity-50 ${copyError ? 'bg-red-500/10 text-red-400 border-red-500/20' : isCopied ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' : 'th-bg-surface th-text-2 th-border-subtle'}`} disabled={!qrBase64}>
+              {copyError ? <XCircle className="w-4 h-4" /> : isCopied ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
+              {copyError ? t('Failed') : isCopied ? t('Copied!') : t('Copy Image')}
             </button>
-            <button onClick={handleDownload} className="flex-1 flex items-center justify-center gap-2 py-2.5 bg-indigo-600 text-white rounded-md hover:bg-indigo-500 transition-colors text-sm font-medium shadow-lg shadow-indigo-600/20 focus:outline-none disabled:opacity-50" disabled={!qrBase64}>
-              <Download className="w-4 h-4" /> {t('Download')}
+            <button onClick={handleDownload} className={`flex-1 flex items-center justify-center gap-2 py-2.5 rounded-md transition-colors text-sm font-medium shadow-lg focus:outline-none disabled:opacity-50 ${downloadError ? 'bg-red-500/20 text-red-400 shadow-red-500/10' : 'bg-indigo-600 text-white hover:bg-indigo-500 shadow-indigo-600/20'}`} disabled={!qrBase64}>
+              {downloadError ? <XCircle className="w-4 h-4" /> : <Download className="w-4 h-4" />}
+              {downloadError ? t('Failed') : t('Download')}
             </button>
           </div>
         </div>
