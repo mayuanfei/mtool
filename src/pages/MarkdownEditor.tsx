@@ -1,6 +1,7 @@
 import { useState, useCallback, useEffect, useRef, useMemo } from 'react';
 import { Trash2, FolderOpen, Save, Copy, Check, Eye, Edit3, FileText, Download, Upload } from 'lucide-react';
 import { invoke } from '@tauri-apps/api/core';
+import { openUrl } from '@tauri-apps/plugin-opener';
 import { getCurrentWebview } from '@tauri-apps/api/webview';
 import { Marked } from 'marked';
 import { markedHighlight } from 'marked-highlight';
@@ -224,6 +225,16 @@ export function MarkdownEditor() {
     }
   }, [handleContentChange]);
 
+  // Intercept link clicks in preview — open in system browser instead of navigating the webview
+  const handlePreviewClick = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
+    const anchor = (e.target as HTMLElement).closest('a');
+    if (!anchor) return;
+    const href = anchor.getAttribute('href');
+    if (!href) return;
+    e.preventDefault();
+    openUrl(href).catch(console.error);
+  }, []);
+
   const lineCount = content ? content.split('\n').length : 0;
   const charCount = content.length;
   const wordCount = content.trim() ? content.trim().split(/\s+/).length : 0;
@@ -360,6 +371,7 @@ export function MarkdownEditor() {
             <div
               ref={previewRef}
               onScroll={handlePreviewScroll}
+              onClick={handlePreviewClick}
               className="flex-1 p-6 overflow-y-auto"
             >
               {renderedHtml ? (
