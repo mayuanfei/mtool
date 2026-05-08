@@ -335,7 +335,7 @@ export function MarkdownEditor() {
               onChange={(e) => handleContentChange(e.target.value)}
               onScroll={handleEditorScroll}
               onKeyDown={handleEditorKeyDown}
-              className="flex-1 w-full bg-transparent p-4 text-indigo-300/80 text-sm font-mono focus:outline-none resize-none leading-relaxed"
+              className="flex-1 w-full bg-transparent p-4 th-text-2 text-sm font-mono focus:outline-none resize-none leading-relaxed"
               placeholder={t('Start writing Markdown...')}
               spellCheck={false}
             />

@@ -480,3 +480,66 @@ body {
   color: #82071e;
   background-color: #ffebe9;
 }
+
+/* ========================================
+   Password Generator Slider
+   ======================================== */
+
+.pwd-slider {
+  -webkit-appearance: none;
+  appearance: none;
+  height: 6px;
+  border-radius: 9999px;
+  background-color: #cbd5e1; /* slate-300 — visible on light */
+  outline: none;
+}
+
+[data-theme="dark"] .pwd-slider {
+  background-color: #334155; /* slate-700 */
+}
+
+.pwd-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 18px;
+  height: 18px;
+  border-radius: 9999px;
+  background-color: #6366f1; /* indigo-500 */
+  border: 2px solid #ffffff;
+  box-shadow: 0 1px 4px rgba(0,0,0,0.25);
+  cursor: pointer;
+  transition: background-color 0.15s, transform 0.1s;
+}
+
+[data-theme="dark"] .pwd-slider::-webkit-slider-thumb {
+  border-color: #1e293b; /* slate-800 */
+}
+
+.pwd-slider::-webkit-slider-thumb:hover {
+  background-color: #4f46e5; /* indigo-600 */
+  transform: scale(1.15);
+}
+
+.pwd-slider::-moz-range-thumb {
+  width: 18px;
+  height: 18px;
+  border-radius: 9999px;
+  background-color: #6366f1;
+  border: 2px solid #ffffff;
+  box-shadow: 0 1px 4px rgba(0,0,0,0.25);
+  cursor: pointer;
+}
+
+[data-theme="dark"] .pwd-slider::-moz-range-thumb {
+  border-color: #1e293b;
+}
+
+.pwd-slider::-moz-range-track {
+  height: 6px;
+  border-radius: 9999px;
+  background-color: #cbd5e1;
+}
+
+[data-theme="dark"] .pwd-slider::-moz-range-track {
+  background-color: #334155;
+}

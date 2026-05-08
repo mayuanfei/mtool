@@ -190,13 +190,13 @@ export function SqlInBuilder() {
                 <button
                   onClick={handleCopy}
                   disabled={!output}
-                  className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 disabled:bg-[var(--bg-surface)] disabled:text-[var(--text-faint)] text-white rounded-lg text-xs font-medium transition-colors flex items-center gap-1.5 focus:outline-none shadow-lg shadow-indigo-600/20"
+                  className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 disabled:bg-[var(--bg-surface)] disabled:text-[var(--text-muted)] disabled:border disabled:border-[var(--border-subtle)] disabled:shadow-none text-white rounded-lg text-xs font-medium transition-colors flex items-center gap-1.5 focus:outline-none shadow-lg shadow-indigo-600/20"
                 >
                   {isCopied ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
                   {isCopied ? t('Copied!') : t('Copy')}
                 </button>
               </div>
-              <div className="w-full h-72 th-bg-input border th-border rounded-lg p-4 text-sm font-mono text-emerald-400 overflow-y-auto break-all whitespace-pre-wrap">
+              <div className="w-full h-72 th-bg-input border th-border rounded-lg p-4 text-sm font-mono text-emerald-700 dark:text-emerald-400 overflow-y-auto break-all whitespace-pre-wrap">
                 {output || <span className="th-text-faint">{t('SQL IN clause will appear here...')}</span>}
               </div>
               <div className="mt-2 text-xs th-text-muted font-mono">
@@ -210,7 +210,7 @@ export function SqlInBuilder() {
             <div className="mt-6 th-bg-input border th-border rounded-lg p-4">
               <span className="text-[11px] font-bold th-text-3 uppercase tracking-widest block mb-3">{t('SQL Preview')}</span>
               <pre className="text-sm font-mono th-text-2 overflow-x-auto whitespace-pre-wrap break-all">
-                <span className="text-blue-400">WHERE</span> <span className="th-text-2">column_name</span> <span className="text-blue-400">IN</span> <span className="text-emerald-400">{output}</span>
+                <span className="text-blue-400">WHERE</span> <span className="th-text-2">column_name</span> <span className="text-blue-400">IN</span> <span className="text-emerald-700 dark:text-emerald-400">{output}</span>
               </pre>
             </div>
           )}

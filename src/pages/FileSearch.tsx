@@ -105,7 +105,7 @@ function HighlightedName({ name, query }: { name: string; query: string }) {
   return (
     <span>
       {name.slice(0, idx)}
-      <mark className="bg-indigo-500/30 text-indigo-300 rounded-sm px-0.5">
+      <mark className="bg-indigo-500/20 text-indigo-700 dark:bg-indigo-500/30 dark:text-indigo-300 rounded-sm px-0.5">
         {name.slice(idx, idx + term.length)}
       </mark>
       {name.slice(idx + term.length)}
@@ -306,7 +306,7 @@ export function FileSearch() {
     return (
       <>
         <RefreshCw className="w-3 h-3 animate-spin text-indigo-400" />
-        <span className="text-indigo-300">
+        <span className="text-indigo-600 dark:text-indigo-300">
           {t('Indexing...')}&nbsp;
           <span className="font-mono tabular-nums text-indigo-400">
             {status.total.toLocaleString()}
@@ -389,7 +389,7 @@ export function FileSearch() {
                   key={s}
                   onClick={() => selectRecent(s)}
                   className="flex items-center gap-2 px-3 py-2 text-sm th-text-2
-                    hover:bg-indigo-900/30 hover:text-indigo-300 cursor-pointer
+                    hover:bg-indigo-500/10 hover:text-indigo-600 dark:hover:bg-indigo-900/30 dark:hover:text-indigo-300 cursor-pointer
                     transition-colors group"
                 >
                   <Clock className="w-3.5 h-3.5 th-text-faint group-hover:text-indigo-400 shrink-0" />
@@ -426,7 +426,7 @@ export function FileSearch() {
               }
               title={item.tip}
               className="text-xs px-2 py-0.5 rounded th-bg-surface th-text-3
-                hover:bg-indigo-900/50 hover:text-indigo-300 font-mono
+                hover:bg-indigo-500/10 hover:text-indigo-600 dark:hover:bg-indigo-900/50 dark:hover:text-indigo-300 font-mono
                 border th-border-subtle transition-colors"
             >
               {item.label}

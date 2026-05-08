@@ -181,7 +181,7 @@ export function JsonFormatter() {
           <textarea
             value={rawInput}
             onChange={(e) => setRawInput(e.target.value)}
-            className="flex-1 w-full bg-transparent p-4 text-indigo-300/80 text-sm font-mono focus:outline-none resize-none"
+            className="flex-1 w-full bg-transparent p-4 th-text-2 text-sm font-mono focus:outline-none resize-none"
             placeholder={t('Paste raw JSON here...')}
           />
         </div>

@@ -307,7 +307,7 @@ export function PasswordGenerator() {
               type="range" min="4" max="128" step="1"
               value={length}
               onChange={(e) => setLength(parseInt(e.target.value))}
-              className="w-full h-1.5 th-bg-surface rounded-lg appearance-none cursor-pointer accent-indigo-500"
+              className="w-full cursor-pointer pwd-slider"
             />
           </div>
 
