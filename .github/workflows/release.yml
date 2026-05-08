@@ -44,6 +44,10 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.MTOOL_PRIVATE_KEY }}
         run: npm run tauri build -- ${{ matrix.args }}
 
+      - name: List bundle output (debug)
+        shell: bash
+        run: find src-tauri/target -path "*/bundle/*" -type f | sort
+
       - name: Rename artifacts (macOS)
         if: matrix.platform == 'macos-latest'
         shell: bash
@@ -51,8 +55,12 @@ jobs:
           cd src-tauri/target/universal-apple-darwin/release/bundle/dmg
           mv *.dmg mtool_${{ github.ref_name }}.dmg
           cd ../macos
-          mv *.app.tar.gz mtool_${{ github.ref_name }}.app.tar.gz
-          mv *.app.tar.gz.sig mtool_${{ github.ref_name }}.app.tar.gz.sig
+          if ls *.app.tar.gz 2>/dev/null; then
+            mv *.app.tar.gz mtool_${{ github.ref_name }}.app.tar.gz
+            mv *.app.tar.gz.sig mtool_${{ github.ref_name }}.app.tar.gz.sig
+          else
+            echo "WARNING: No .app.tar.gz found — signing key may not be working"
+          fi
 
       - name: Rename artifacts (Windows)
         if: matrix.platform == 'windows-latest'
@@ -60,7 +68,11 @@ jobs:
         run: |
           cd src-tauri/target/release/bundle/nsis
           mv *-setup.exe mtool_${{ github.ref_name }}.exe
-          mv *-setup.exe.sig mtool_${{ github.ref_name }}.exe.sig
+          if ls *-setup.exe.sig 2>/dev/null; then
+            mv *-setup.exe.sig mtool_${{ github.ref_name }}.exe.sig
+          else
+            echo "WARNING: No .exe.sig found — signing key may not be working"
+          fi
           cd ../msi
           mv *.msi mtool_${{ github.ref_name }}.msi
 
@@ -70,6 +82,7 @@ jobs:
         with:
           name: macos-sig
           path: src-tauri/target/universal-apple-darwin/release/bundle/macos/*.app.tar.gz.sig
+          if-no-files-found: warn
 
       - name: Upload Windows updater signature
         if: matrix.platform == 'windows-latest'
@@ -77,6 +90,7 @@ jobs:
         with:
           name: windows-sig
           path: src-tauri/target/release/bundle/nsis/*.exe.sig
+          if-no-files-found: warn
 
       - uses: softprops/action-gh-release@v2
         with:
