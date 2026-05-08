@@ -101,7 +101,7 @@ export function TextToQr() {
               autoCapitalize="none"
               autoCorrect="off"
               spellCheck={false}
-              className="w-full th-bg-input-alt border th-border-muted rounded-md p-4 th-text-2 text-sm focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 resize-none h-32 mb-3 shadow-inner"
+              className="w-full th-bg-input-alt border th-border-muted rounded-md p-4 th-text-2 text-sm focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 resize-none h-32 mb-3 shadow-inner placeholder:text-slate-400 dark:placeholder:text-slate-500"
               placeholder={t('Enter URL, text, or JSON payload...')}
             />
             

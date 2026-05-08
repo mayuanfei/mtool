@@ -149,8 +149,7 @@ export function SqlInBuilder() {
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
                 placeholder={t('Paste one value per line...')}
-                className="w-full h-72 th-bg-input border th-border rounded-lg p-4 text-sm font-mono th-text-2 resize-none focus:outline-none focus:border-indigo-500 transition-colors"
-                style={{ ['--tw-placeholder-opacity' as any]: 1 }}
+                className="w-full h-72 th-bg-input border th-border rounded-lg p-4 text-sm font-mono th-text-2 resize-none focus:outline-none focus:border-indigo-500 transition-colors placeholder:text-slate-400 dark:placeholder:text-slate-500"
                 spellCheck={false}
               />
               <div className="mt-2 text-xs th-text-muted font-mono">
