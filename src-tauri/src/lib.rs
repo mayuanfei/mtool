@@ -196,6 +196,13 @@ fn save_md_file_as(content: &str) -> Result<String, String> {
 
 #[tauri::command]
 fn open_md_file_by_path(path: &str) -> Result<(String, String), String> {
+    let metadata = std::fs::metadata(path).map_err(|e| e.to_string())?;
+    if metadata.len() > 10 * 1024 * 1024 {
+        return Err(format!(
+            "File too large ({} MB). Max 10 MB.",
+            metadata.len() / 1024 / 1024
+        ));
+    }
     let content =
         fs::read_to_string(path).map_err(|e| format!("Failed to read file: {}", e))?;
     Ok((path.to_string(), content))

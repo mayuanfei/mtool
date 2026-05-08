@@ -225,12 +225,14 @@ export function MarkdownEditor() {
     }
   }, [handleContentChange]);
 
-  // Intercept link clicks in preview — open in system browser instead of navigating the webview
+  // Intercept link clicks in preview — open in system browser instead of navigating the webview.
+  // Only allow http/https to prevent file://, custom-app://, relative paths, etc.
   const handlePreviewClick = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
     const anchor = (e.target as HTMLElement).closest('a');
     if (!anchor) return;
     const href = anchor.getAttribute('href');
     if (!href) return;
+    if (!href.startsWith('http://') && !href.startsWith('https://')) return;
     e.preventDefault();
     openUrl(href).catch(console.error);
   }, []);

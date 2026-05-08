@@ -30,7 +30,7 @@ function syntaxHighlight(json: string): string {
     .replace(/>/g, '&gt;');
 
   return escaped.replace(
-    /("(?:\\u[a-fA-F0-9]{4}|\\[^u]|[^\\"])*"(?:\s*:)?|\b(?:true|false|null)\b|-?\d+(?:\.\d*)?(?:[eE][+-]?\d+)?|[{}\[\]])/g,
+    /("(?:\\u[a-fA-F0-9]{4}|\\[^u]|[^\\"])*"(?:\s*:)?|\b(?:true|false|null)\b|(?<!\d)-?\d+(?:\.\d*)?(?:[eE][+-]?\d+)?|[{}\[\]])/g,
     (match) => {
       if (match[0] === '"') {
         return /:$/.test(match)
