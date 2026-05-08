@@ -9,12 +9,18 @@ import { MarkdownEditor } from './pages/MarkdownEditor';
 import { FileSearch } from './pages/FileSearch';
 import { UserPage } from './pages/User';
 import { useI18n } from './i18n';
+import { useUpdater } from './updater';
 
 export default function App() {
   const [activePage, setActivePage] = useState(() => {
     return localStorage.getItem('mtool_active_page') || 'settings';
   });
   const { t } = useI18n();
+  const { hasUpdate, checkForUpdate, autoUpdate } = useUpdater();
+
+  useEffect(() => {
+    if (autoUpdate) checkForUpdate();
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const [jsonEnabled, setJsonEnabled] = useState(() => {
     const saved = localStorage.getItem('mtool_json_enabled');
@@ -85,6 +91,7 @@ export default function App() {
         sqlInEnabled={sqlInEnabled}
         mdEnabled={mdEnabled}
         fileSearchEnabled={fileSearchEnabled}
+        hasUpdate={hasUpdate}
       />
       
       <div className="flex-1 flex flex-col min-w-0 th-bg-main">

@@ -39,24 +39,85 @@ jobs:
 
       - run: npm install
 
-      - run: npm run tauri build -- ${{ matrix.args }}
+      - name: Build Tauri app
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: npm run tauri build -- ${{ matrix.args }}
 
-      - name: Rename artifacts
+      - name: Rename artifacts (macOS)
+        if: matrix.platform == 'macos-latest'
         shell: bash
         run: |
-          if [ "${{ matrix.platform }}" == "macos-latest" ]; then
-            cd src-tauri/target/universal-apple-darwin/release/bundle/dmg
-            mv *.dmg mtool_${{ github.ref_name }}.dmg
-          else
-            cd src-tauri/target/release/bundle/nsis
-            mv *-setup.exe mtool_${{ github.ref_name }}.exe
-            cd ../msi
-            mv *.msi mtool_${{ github.ref_name }}.msi
-          fi
+          cd src-tauri/target/universal-apple-darwin/release/bundle/dmg
+          mv *.dmg mtool_${{ github.ref_name }}.dmg
+          cd ../macos
+          mv *.app.tar.gz mtool_${{ github.ref_name }}.app.tar.gz
+          mv *.app.tar.gz.sig mtool_${{ github.ref_name }}.app.tar.gz.sig
+
+      - name: Rename artifacts (Windows)
+        if: matrix.platform == 'windows-latest'
+        shell: bash
+        run: |
+          cd src-tauri/target/release/bundle/nsis
+          mv *-setup.exe mtool_${{ github.ref_name }}.exe
+          mv *-setup.exe.sig mtool_${{ github.ref_name }}.exe.sig
+          cd ../msi
+          mv *.msi mtool_${{ github.ref_name }}.msi
+
+      - name: Upload macOS updater signature
+        if: matrix.platform == 'macos-latest'
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-sig
+          path: src-tauri/target/universal-apple-darwin/release/bundle/macos/*.app.tar.gz.sig
+
+      - name: Upload Windows updater signature
+        if: matrix.platform == 'windows-latest'
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-sig
+          path: src-tauri/target/release/bundle/nsis/*.exe.sig
 
       - uses: softprops/action-gh-release@v2
         with:
           files: |
             src-tauri/target/**/bundle/**/*.dmg
+            src-tauri/target/**/bundle/**/*.app.tar.gz
             src-tauri/target/**/bundle/**/*.msi
             src-tauri/target/**/bundle/**/*.exe
+
+  generate-update-json:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Download macOS signature
+        uses: actions/download-artifact@v4
+        with:
+          name: macos-sig
+          path: sigs/macos
+
+      - name: Download Windows signature
+        uses: actions/download-artifact@v4
+        with:
+          name: windows-sig
+          path: sigs/windows
+
+      - name: Generate latest.json
+        env:
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: node .github/scripts/gen-latest-json.js
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: latest.json

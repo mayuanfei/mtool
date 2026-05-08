@@ -22,6 +22,17 @@
       "dangerousDisableAssetCspModification": true
     }
   },
+  "plugins": {
+    "updater": {
+      "pubkey": "PLACEHOLDER_REPLACE_WITH_REAL_PUBKEY",
+      "endpoints": [
+        "https://github.com/mayuanfei/mtool/releases/latest/download/latest.json"
+      ],
+      "windows": {
+        "installMode": "passive"
+      }
+    }
+  },
   "bundle": {
     "active": true,
     "targets": "all",

@@ -11,9 +11,10 @@ interface SidebarProps {
   sqlInEnabled: boolean;
   mdEnabled: boolean;
   fileSearchEnabled: boolean;
+  hasUpdate: boolean;
 }
 
-export function Sidebar({ activePage, onNavigate, jsonEnabled, qrEnabled, pwdEnabled, sqlInEnabled, mdEnabled, fileSearchEnabled }: SidebarProps) {
+export function Sidebar({ activePage, onNavigate, jsonEnabled, qrEnabled, pwdEnabled, sqlInEnabled, mdEnabled, fileSearchEnabled, hasUpdate }: SidebarProps) {
   const { t } = useI18n();
 
   const [collapsed, setCollapsed] = useState(() => {
@@ -32,11 +33,6 @@ export function Sidebar({ activePage, onNavigate, jsonEnabled, qrEnabled, pwdEna
     ...(qrEnabled ? [{ id: 'qr', label: t('Text to QR'), icon: QrCode }] : []),
     ...(pwdEnabled ? [{ id: 'pwd', label: t('Password Generator'), icon: Key }] : []),
     ...(sqlInEnabled ? [{ id: 'sqlIn', label: t('SQL IN Builder'), icon: Database }] : []),
-  ];
-
-  const bottomItems = [
-    { id: 'settings', label: t('Settings'), icon: Settings },
-    { id: 'user', label: t('User'), icon: User },
   ];
 
   const NavItem = ({ item }: { item: { id: string; label: string; icon: React.ComponentType<{ className?: string; strokeWidth?: number }> } }) => {
@@ -111,9 +107,25 @@ export function Sidebar({ activePage, onNavigate, jsonEnabled, qrEnabled, pwdEna
         {!collapsed && (
           <div className="text-[10px] font-bold th-text-muted uppercase tracking-widest px-3 mb-2">{t('System')}</div>
         )}
-        {bottomItems.map((item) => (
-          <NavItem key={item.id} item={item} />
-        ))}
+        {/* Settings with optional update dot */}
+        <button
+          onClick={() => onNavigate('settings')}
+          title={collapsed ? t('Settings') : undefined}
+          className={`w-full flex items-center ${collapsed ? 'justify-center' : ''} gap-3 px-3 py-2 rounded-md font-medium transition-colors ${
+            activePage === 'settings'
+              ? 'bg-indigo-600/10 text-indigo-400 border border-indigo-500/20 shadow-sm'
+              : 'th-text-3 th-hover-surface border border-transparent'
+          }`}
+        >
+          <span className="relative flex-shrink-0">
+            <Settings className="w-[18px] h-[18px]" strokeWidth={2} />
+            {hasUpdate && (
+              <span className="absolute -top-1 -right-1 w-2 h-2 bg-amber-400 rounded-full" />
+            )}
+          </span>
+          {!collapsed && <span className="text-[13px] truncate">{t('Settings')}</span>}
+        </button>
+        <NavItem item={{ id: 'user', label: t('User'), icon: User }} />
       </div>
     </aside>
   );

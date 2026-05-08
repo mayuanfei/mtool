@@ -1,8 +1,10 @@
 import { useState } from 'react';
-import { Globe, Wrench, Palette } from 'lucide-react';
+import { Globe, Wrench, Palette, RefreshCw } from 'lucide-react';
 import { invoke } from '@tauri-apps/api/core';
 import { useI18n } from '../i18n';
 import { useTheme } from '../theme';
+import { useUpdater } from '../updater';
+import { UpdateModal } from '../components/UpdateModal';
 import type { Theme } from '../theme';
 
 const Toggle = ({ checked, onChange, disabled }: { checked: boolean; onChange: () => void; disabled?: boolean }) => {
@@ -44,6 +46,15 @@ export function SettingsPage({ jsonEnabled, setJsonEnabled, qrEnabled, setQrEnab
   const { t, language, setLanguage } = useI18n();
   const { theme, setTheme } = useTheme();
   const [isProcessing, setIsProcessing] = useState(false);
+  const { hasUpdate, updateInfo, checking, downloading, progress, error,
+          autoUpdate, setAutoUpdate, checkForUpdate, startInstall, dismissUpdate } = useUpdater();
+  const [showModal, setShowModal] = useState(false);
+  const [lastCheckDone, setLastCheckDone] = useState(false);
+
+  const handleCheck = async () => {
+    await checkForUpdate();
+    setLastCheckDone(true);
+  };
 
   return (
     <div className="max-w-4xl max-w-5xl mx-auto w-full">
@@ -216,7 +227,79 @@ export function SettingsPage({ jsonEnabled, setJsonEnabled, qrEnabled, setQrEnab
             </div>
           </div>
         </section>
+
+        {/* Updates Card */}
+        <section className="th-bg-card border th-border rounded-xl overflow-hidden shadow-2xl">
+          <div className="px-6 py-4 border-b th-border flex items-center gap-3 th-bg-surface-h">
+            <RefreshCw className="w-5 h-5 text-indigo-400" />
+            <h2 className="text-sm font-bold tracking-tighter th-text-2 uppercase">{t('Updates')}</h2>
+          </div>
+
+          <div className="divide-y th-divide">
+            {/* Auto-update toggle */}
+            <div className="px-6 py-5 flex items-center justify-between th-hover-surface transition-colors">
+              <div>
+                <p className="text-base font-medium th-text-2 mb-1">{t('Auto-update')}</p>
+                <p className="text-sm th-text-muted">{t('Automatically check for updates on startup.')}</p>
+              </div>
+              <Toggle checked={autoUpdate} onChange={() => setAutoUpdate(!autoUpdate)} />
+            </div>
+
+            {/* Current version */}
+            <div className="px-6 py-5 flex items-center justify-between th-hover-surface transition-colors">
+              <p className="text-base font-medium th-text-2">{t('Current version')}</p>
+              <span className="text-sm font-mono th-text-muted">v1.0.0</span>
+            </div>
+
+            {/* Check for updates */}
+            <div className="px-6 py-5 flex items-center justify-between th-hover-surface transition-colors">
+              <div>
+                <p className="text-base font-medium th-text-2 mb-1">{t('Check for Updates')}</p>
+                <p className="text-sm">
+                  {checking
+                    ? <span className="th-text-muted">{t('Checking...')}</span>
+                    : hasUpdate && updateInfo
+                    ? <span className="text-amber-400 font-medium">v{updateInfo.version} {t('available')}</span>
+                    : lastCheckDone
+                    ? <span className="text-emerald-400">{t('Up to date')}</span>
+                    : null}
+                </p>
+              </div>
+              <div className="flex items-center gap-3">
+                {hasUpdate && updateInfo && (
+                  <button
+                    onClick={() => setShowModal(true)}
+                    className="px-3 py-1.5 text-sm font-medium bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg transition-colors"
+                  >
+                    {t('Install & Restart')}
+                  </button>
+                )}
+                <button
+                  onClick={handleCheck}
+                  disabled={checking}
+                  className="px-3 py-1.5 text-sm th-text-3 th-bg-input-alt border th-border-subtle rounded-lg th-hover-surface transition-colors disabled:opacity-50 flex items-center gap-2"
+                >
+                  <RefreshCw className={`w-3.5 h-3.5 ${checking ? 'animate-spin' : ''}`} />
+                  {checking ? t('Checking...') : t('Check for Updates')}
+                </button>
+              </div>
+            </div>
+          </div>
+        </section>
       </div>
+
+      {/* Update install modal */}
+      {showModal && updateInfo && (
+        <UpdateModal
+          open={showModal}
+          updateInfo={updateInfo}
+          downloading={downloading}
+          progress={progress}
+          error={error}
+          onClose={() => { if (!downloading) { setShowModal(false); dismissUpdate(); } }}
+          onInstall={startInstall}
+        />
+      )}
     </div>
   );
 }

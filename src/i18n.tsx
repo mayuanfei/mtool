@@ -102,6 +102,21 @@ const translations = {
     'Dark': 'Dark',
     'Light': 'Light',
 
+    // Updates
+    'Updates': 'Updates',
+    'Auto-update': 'Auto-update',
+    'Automatically check for updates on startup.': 'Automatically check for updates on startup.',
+    'Current version': 'Current version',
+    'Check for Updates': 'Check for Updates',
+    'Up to date': 'Up to date',
+    'available': 'available',
+    'Install & Restart': 'Install & Restart',
+    'Checking...': 'Checking...',
+    'Downloading...': 'Downloading...',
+    'Update error': 'Update error',
+    "What's new in": "What's new in",
+    'Cancel': 'Cancel',
+
     // MarkdownEditor
     'Markdown Editor': 'Markdown Editor',
     'View and edit Markdown files with live preview.': 'View and edit Markdown files with live preview.',
@@ -263,6 +278,21 @@ const translations = {
     'Choose light or dark color scheme.': '选择明亮或暗黑色彩方案。',
     'Dark': '暗黑',
     'Light': '明亮',
+
+    // Updates
+    'Updates': '更新',
+    'Auto-update': '自动更新',
+    'Automatically check for updates on startup.': '启动时自动检查更新。',
+    'Current version': '当前版本',
+    'Check for Updates': '检查更新',
+    'Up to date': '已是最新版本',
+    'available': '可更新',
+    'Install & Restart': '安装并重启',
+    'Checking...': '检查中...',
+    'Downloading...': '下载中...',
+    'Update error': '更新出错',
+    "What's new in": '新版本内容',
+    'Cancel': '取消',
 
     // MarkdownEditor
     'Markdown Editor': 'Markdown 编辑器',
