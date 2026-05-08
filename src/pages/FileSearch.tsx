@@ -296,7 +296,7 @@ export function FileSearch() {
             &nbsp;{t('files indexed')}
           </span>
           {status.last_built_at && (
-            <span className="th-text-faint">
+            <span className="th-text-3">
               · {t('last built')} {formatDate(status.last_built_at)}
             </span>
           )}
@@ -367,6 +367,7 @@ export function FileSearch() {
             placeholder={t('Search file names...   e.g. *.yml   report draft   size:>100MB   content:"keyword"')}
             className="w-full pl-9 pr-10 py-2.5 th-bg-card border th-border-subtle
               rounded-lg text-sm th-text-2
+              placeholder:text-slate-400 dark:placeholder:text-slate-500
               focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500
               transition-colors font-mono"
           />
@@ -454,7 +455,7 @@ export function FileSearch() {
             <span className="text-[10px] th-text-muted font-mono">
               {results.length} {t('entries')}{results.length >= 200 && ` ${t('(first 200 shown)')}`}
               {searchElapsed !== null && (
-                <span className="ml-2 th-text-faint">
+                <span className="ml-2 th-text-muted">
                   · {searchElapsed < 1000
                     ? `${Math.round(searchElapsed)} ms`
                     : `${(searchElapsed / 1000).toFixed(2)} s`}
@@ -525,8 +526,8 @@ export function FileSearch() {
                       <HighlightedName name={entry.name} query={query} />
                     </span>
                     {entry.ext && (
-                      <span className="text-[10px] th-text-faint font-mono shrink-0 uppercase
-                        th-bg-card border th-border-subtle rounded px-1.5 py-0.5">
+                      <span className="text-[10px] th-text-3 font-mono shrink-0 uppercase
+                        th-bg-surface border th-border-subtle rounded px-1.5 py-0.5">
                         .{entry.ext}
                       </span>
                     )}

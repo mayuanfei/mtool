@@ -98,6 +98,9 @@ export function TextToQr() {
             <textarea
               value={payload}
               onChange={(e) => setPayload(e.target.value)}
+              autoCapitalize="none"
+              autoCorrect="off"
+              spellCheck={false}
               className="w-full th-bg-input-alt border th-border-muted rounded-md p-4 th-text-2 text-sm focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 resize-none h-32 mb-3 shadow-inner"
               placeholder={t('Enter URL, text, or JSON payload...')}
             />
@@ -125,11 +128,11 @@ export function TextToQr() {
                     onClick={() => setRedundancy(level)}
                     className={`text-xs py-2 rounded font-medium transition-colors ${
                       redundancy === level 
-                        ? 'th-bg-surface text-indigo-400 border border-indigo-500/30 shadow-sm' 
+                        ? 'bg-indigo-50 dark:bg-slate-700 text-indigo-600 dark:text-indigo-400 border border-indigo-400 dark:border-indigo-500/40 shadow-sm' 
                         : 'th-text-muted hover:th-text-2 border border-transparent'
                     }`}
                   >
-                    {level} <span className="opacity-50 text-[10px]">({
+                    {level} <span className={`text-[10px] ${redundancy === level ? 'opacity-70' : 'th-text-muted'}`}>({
                       level === 'L' ? '7%' : level === 'M' ? '15%' : level === 'Q' ? '25%' : '30%'
                     })</span>
                   </button>
@@ -148,13 +151,13 @@ export function TextToQr() {
                     type="range" min="0" max="3" step="1"
                     value={[256, 512, 1024, 2048].indexOf(resolution) !== -1 ? [256, 512, 1024, 2048].indexOf(resolution) : 1}
                     onChange={(e) => setResolution([256, 512, 1024, 2048][parseInt(e.target.value)])}
-                    className="w-full h-1.5 th-bg-surface rounded-lg appearance-none cursor-pointer accent-indigo-500"
+                    className="qr-slider w-full cursor-pointer"
                  />
                  <div className="flex justify-between text-[10px] th-text-muted mt-3 font-mono">
-                    <span className={resolution === 256 ? "text-indigo-400" : ""}>256px</span>
-                    <span className={resolution === 512 ? "text-indigo-400" : ""}>512px</span>
-                    <span className={resolution === 1024 ? "text-indigo-400" : ""}>1024px</span>
-                    <span className={resolution === 2048 ? "text-indigo-400" : ""}>2048px</span>
+                     <span className={resolution === 256 ? "text-indigo-600 dark:text-indigo-400 font-semibold" : ""}>256px</span>
+                     <span className={resolution === 512 ? "text-indigo-600 dark:text-indigo-400 font-semibold" : ""}>512px</span>
+                     <span className={resolution === 1024 ? "text-indigo-600 dark:text-indigo-400 font-semibold" : ""}>1024px</span>
+                     <span className={resolution === 2048 ? "text-indigo-600 dark:text-indigo-400 font-semibold" : ""}>2048px</span>
                  </div>
               </div>
             </div>

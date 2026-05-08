@@ -19,23 +19,42 @@ function escapeHtml(ch: string): string {
   return ch;
 }
 
-function highlightBraces(json: string): string {
+// Full JSON syntax highlighter: keys=blue, strings=green, numbers=red,
+// bools=violet, null=slate, braces=rainbow by depth.
+function syntaxHighlight(json: string): string {
   let depth = 0;
-  let result = '';
 
-  for (const char of json) {
-    if (char === '{' || char === '[') {
-      result += `<span class="${BRACE_COLORS[depth % BRACE_COLORS.length]}">${char}</span>`;
-      depth++;
-    } else if (char === '}' || char === ']') {
-      depth--;
-      result += `<span class="${BRACE_COLORS[depth % BRACE_COLORS.length]}">${char}</span>`;
-    } else {
-      result += escapeHtml(char);
+  const escaped = json
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
+
+  return escaped.replace(
+    /("(?:\\u[a-fA-F0-9]{4}|\\[^u]|[^\\"])*"(?:\s*:)?|\b(?:true|false|null)\b|-?\d+(?:\.\d*)?(?:[eE][+-]?\d+)?|[{}\[\]])/g,
+    (match) => {
+      if (match[0] === '"') {
+        return /:$/.test(match)
+          ? `<span class="json-key">${match}</span>`
+          : `<span class="json-string">${match}</span>`;
+      }
+      if (match === 'true' || match === 'false') {
+        return `<span class="json-bool">${match}</span>`;
+      }
+      if (match === 'null') {
+        return `<span class="json-null">${match}</span>`;
+      }
+      if (match === '{' || match === '[') {
+        const cls = BRACE_COLORS[depth % BRACE_COLORS.length];
+        depth++;
+        return `<span class="${cls}">${match}</span>`;
+      }
+      if (match === '}' || match === ']') {
+        depth = Math.max(0, depth - 1);
+        return `<span class="${BRACE_COLORS[depth % BRACE_COLORS.length]}">${match}</span>`;
+      }
+      return `<span class="json-number">${match}</span>`;
     }
-  }
-
-  return result;
+  );
 }
 
 export function JsonFormatter() {
@@ -53,7 +72,7 @@ export function JsonFormatter() {
         text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
       );
     } else {
-      setFormattedHtml(highlightBraces(text));
+      setFormattedHtml(syntaxHighlight(text));
     }
     setIsError(false);
   }, []);

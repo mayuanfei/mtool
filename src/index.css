@@ -543,3 +543,90 @@ body {
 [data-theme="dark"] .pwd-slider::-moz-range-track {
   background-color: #334155;
 }
+
+/* ========================================
+   QR Matrix Resolution Slider
+   ======================================== */
+
+.qr-slider {
+  -webkit-appearance: none;
+  appearance: none;
+  height: 6px;
+  border-radius: 9999px;
+  background-color: #cbd5e1; /* slate-300 */
+  outline: none;
+}
+
+[data-theme="dark"] .qr-slider {
+  background-color: #334155; /* slate-700 */
+}
+
+.qr-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 16px;
+  height: 16px;
+  border-radius: 9999px;
+  background-color: #6366f1;
+  border: 2px solid #ffffff;
+  box-shadow: 0 1px 4px rgba(0,0,0,0.25);
+  cursor: pointer;
+  transition: background-color 0.15s, transform 0.1s;
+}
+
+[data-theme="dark"] .qr-slider::-webkit-slider-thumb {
+  border-color: #1e293b;
+}
+
+.qr-slider::-webkit-slider-thumb:hover {
+  background-color: #4f46e5;
+  transform: scale(1.15);
+}
+
+.qr-slider::-moz-range-thumb {
+  width: 16px;
+  height: 16px;
+  border-radius: 9999px;
+  background-color: #6366f1;
+  border: 2px solid #ffffff;
+  box-shadow: 0 1px 4px rgba(0,0,0,0.25);
+  cursor: pointer;
+}
+
+[data-theme="dark"] .qr-slider::-moz-range-thumb {
+  border-color: #1e293b;
+}
+
+.qr-slider::-moz-range-track {
+  height: 6px;
+  border-radius: 9999px;
+  background-color: #cbd5e1;
+}
+
+[data-theme="dark"] .qr-slider::-moz-range-track {
+  background-color: #334155;
+}
+
+/* ========================================
+   JSON Syntax Highlight
+   ======================================== */
+
+/* Keys — light: blue-700, dark: blue-300 */
+.json-key   { color: #1d4ed8; }
+[data-theme="dark"] .json-key   { color: #93c5fd; }
+
+/* String values — light: green-700, dark: green-300 */
+.json-string { color: #15803d; }
+[data-theme="dark"] .json-string { color: #86efac; }
+
+/* Number values — light: red-700, dark: red-300 */
+.json-number { color: #b91c1c; }
+[data-theme="dark"] .json-number { color: #fca5a5; }
+
+/* Boolean — light: violet-700, dark: violet-300 */
+.json-bool   { color: #6d28d9; }
+[data-theme="dark"] .json-bool   { color: #c4b5fd; }
+
+/* Null — light: slate-500, dark: slate-400 */
+.json-null   { color: #64748b; }
+[data-theme="dark"] .json-null   { color: #94a3b8; }
