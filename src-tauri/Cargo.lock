@@ -2704,7 +2704,7 @@ dependencies = [
 
 [[package]]
 name = "mtool"
-version = "1.0.5"
+version = "1.0.13"
 dependencies = [
  "arboard",
  "base64 0.22.1",

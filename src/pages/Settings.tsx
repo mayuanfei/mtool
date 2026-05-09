@@ -281,6 +281,8 @@ export function SettingsPage({ jsonEnabled, setJsonEnabled, qrEnabled, setQrEnab
                     ? <span className="th-text-muted">{t('Checking...')}</span>
                     : hasUpdate && updateInfo
                     ? <span className="text-amber-400 font-medium">v{updateInfo.version} {t('available')}</span>
+                    : error && lastCheckDone
+                    ? <span className="text-red-400 text-xs break-all">{error}</span>
                     : lastCheckDone
                     ? <span className="text-emerald-400">{t('Up to date')}</span>
                     : null}
