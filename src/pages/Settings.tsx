@@ -1,6 +1,7 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Globe, Wrench, Palette, RefreshCw } from 'lucide-react';
 import { invoke } from '@tauri-apps/api/core';
+import { getVersion } from '@tauri-apps/api/app';
 import { useI18n } from '../i18n';
 import { useTheme } from '../theme';
 import { UpdateModal } from '../components/UpdateModal';
@@ -53,6 +54,11 @@ export function SettingsPage({ jsonEnabled, setJsonEnabled, qrEnabled, setQrEnab
           autoUpdate, setAutoUpdate, checkForUpdate, startInstall, doRelaunch, dismissUpdate } = updater;
   const [showModal, setShowModal] = useState(false);
   const [lastCheckDone, setLastCheckDone] = useState(false);
+  const [appVersion, setAppVersion] = useState<string>('...');
+
+  useEffect(() => {
+    getVersion().then(v => setAppVersion(v)).catch(() => setAppVersion('?'));
+  }, []);
 
   const handleCheck = async () => {
     await checkForUpdate();
@@ -263,7 +269,7 @@ export function SettingsPage({ jsonEnabled, setJsonEnabled, qrEnabled, setQrEnab
             {/* Current version */}
             <div className="px-6 py-5 flex items-center justify-between th-hover-surface transition-colors">
               <p className="text-base font-medium th-text-2">{t('Current version')}</p>
-              <span className="text-sm font-mono th-text-muted">v1.0.0</span>
+              <span className="text-sm font-mono th-text-muted">v{appVersion}</span>
             </div>
 
             {/* Check for updates */}
