@@ -323,7 +323,11 @@ function FilePanel({ side, fileName, content, onFileOpen, hasContent }: FilePane
       {!hasContent ? (
         <div className="flex-1 flex items-center justify-center th-bg-input p-6">
           <div className="text-center">
-            <div className="w-12 h-12 mx-auto mb-3 rounded-xl th-bg-surface flex items-center justify-center">
+            <div
+              className="w-12 h-12 mx-auto mb-3 rounded-xl th-bg-surface flex items-center justify-center cursor-pointer hover:th-bg-surface-h transition-colors"
+              onClick={handleOpenFile}
+              title={t('Open File')}
+            >
               <FileUp className="w-5 h-5 th-text-muted" />
             </div>
             <p className="text-sm th-text-muted mb-1">{t('Drop file here')}</p>
