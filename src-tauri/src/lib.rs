@@ -208,6 +208,49 @@ fn open_md_file_by_path(path: &str) -> Result<(String, String), String> {
     Ok((path.to_string(), content))
 }
 
+#[tauri::command]
+fn open_text_file() -> Result<(String, String), String> {
+    if let Some(path) = rfd::FileDialog::new()
+        .add_filter("Text Files", &[
+            "txt", "md", "markdown", "yaml", "yml", "json", "jsonc", "json5",
+            "xml", "html", "htm", "css", "scss", "less", "js", "jsx", "ts",
+            "tsx", "csv", "tsv", "log", "ini", "cfg", "conf", "toml", "env",
+            "sh", "bash", "zsh", "bat", "cmd", "ps1", "py", "rb", "java",
+            "c", "cpp", "h", "hpp", "go", "rs", "swift", "kt", "sql", "graphql",
+            "properties", "vue", "svelte",
+        ])
+        .pick_file()
+    {
+        let metadata = std::fs::metadata(&path).map_err(|e| e.to_string())?;
+        if metadata.len() > 10 * 1024 * 1024 {
+            return Err(format!(
+                "File too large ({} MB). Max 10 MB.",
+                metadata.len() / 1024 / 1024
+            ));
+        }
+        let content = fs::read_to_string(&path)
+            .map_err(|e| format!("Failed to read file: {}", e))?;
+        let path_str = path.to_string_lossy().to_string();
+        Ok((path_str, content))
+    } else {
+        Err("No file selected".to_string())
+    }
+}
+
+#[tauri::command]
+fn read_text_file_by_path(path: &str) -> Result<(String, String), String> {
+    let metadata = std::fs::metadata(path).map_err(|e| e.to_string())?;
+    if metadata.len() > 10 * 1024 * 1024 {
+        return Err(format!(
+            "File too large ({} MB). Max 10 MB.",
+            metadata.len() / 1024 / 1024
+        ));
+    }
+    let content = fs::read_to_string(path)
+        .map_err(|e| format!("Failed to read file: {}", e))?;
+    Ok((path.to_string(), content))
+}
+
 // ---------------------------------------------------------------------------
 // 文件搜索命令
 // ---------------------------------------------------------------------------
@@ -660,6 +703,8 @@ pub fn run() {
             disable_file_search,
             reveal_in_explorer,
             open_file,
+            open_text_file,
+            read_text_file_by_path,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")

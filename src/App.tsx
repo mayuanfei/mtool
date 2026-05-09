@@ -7,6 +7,7 @@ import { PasswordGenerator } from './pages/PasswordGenerator';
 import { SqlInBuilder } from './pages/SqlInBuilder';
 import { MarkdownEditor } from './pages/MarkdownEditor';
 import { FileSearch } from './pages/FileSearch';
+import { FileDiff } from './pages/FileDiff';
 import { UserPage } from './pages/User';
 import { useI18n } from './i18n';
 import { useUpdater } from './updater';
@@ -53,6 +54,11 @@ export default function App() {
     return saved !== null ? saved === 'true' : true;
   });
 
+  const [fileDiffEnabled, setFileDiffEnabled] = useState(() => {
+    const saved = localStorage.getItem('mtool_filediff_enabled');
+    return saved !== null ? saved === 'true' : true;
+  });
+
   useEffect(() => {
     localStorage.setItem('mtool_json_enabled', jsonEnabled.toString());
   }, [jsonEnabled]);
@@ -78,6 +84,10 @@ export default function App() {
   }, [fileSearchEnabled]);
 
   useEffect(() => {
+    localStorage.setItem('mtool_filediff_enabled', fileDiffEnabled.toString());
+  }, [fileDiffEnabled]);
+
+  useEffect(() => {
     localStorage.setItem('mtool_active_page', activePage);
   }, [activePage]);
 
@@ -92,6 +102,7 @@ export default function App() {
         sqlInEnabled={sqlInEnabled}
         mdEnabled={mdEnabled}
         fileSearchEnabled={fileSearchEnabled}
+        fileDiffEnabled={fileDiffEnabled}
         hasUpdate={hasUpdate}
       />
       
@@ -104,6 +115,7 @@ export default function App() {
           {activePage === 'sqlIn' && sqlInEnabled && <SqlInBuilder />}
           {activePage === 'md' && mdEnabled && <MarkdownEditor />}
           {activePage === 'fileSearch' && fileSearchEnabled && <FileSearch />}
+          {activePage === 'fileDiff' && fileDiffEnabled && <FileDiff />}
           {activePage === 'user' && <UserPage />}
           {activePage === 'settings' && (
             <SettingsPage 
@@ -119,6 +131,8 @@ export default function App() {
               setMdEnabled={setMdEnabled}
               fileSearchEnabled={fileSearchEnabled}
               setFileSearchEnabled={setFileSearchEnabled}
+              fileDiffEnabled={fileDiffEnabled}
+              setFileDiffEnabled={setFileDiffEnabled}
               activePage={activePage}
               setActivePage={setActivePage}
               updater={updater}
@@ -130,7 +144,8 @@ export default function App() {
            !(activePage === 'pwd' && pwdEnabled) && 
            !(activePage === 'sqlIn' && sqlInEnabled) && 
            !(activePage === 'md' && mdEnabled) && 
-           !(activePage === 'fileSearch' && fileSearchEnabled) && (
+           !(activePage === 'fileSearch' && fileSearchEnabled) &&
+           !(activePage === 'fileDiff' && fileDiffEnabled) && (
              <div className="flex items-center justify-center h-full th-text-muted font-medium">{t('Select a tool from the sidebar')}</div>
           )}
         </main>

@@ -38,12 +38,14 @@ interface SettingsPageProps {
   setMdEnabled: (v: boolean) => void;
   fileSearchEnabled: boolean;
   setFileSearchEnabled: (v: boolean) => void;
+  fileDiffEnabled: boolean;
+  setFileDiffEnabled: (v: boolean) => void;
   activePage: string;
   setActivePage: (page: string) => void;
   updater: UseUpdaterReturn;
 }
 
-export function SettingsPage({ jsonEnabled, setJsonEnabled, qrEnabled, setQrEnabled, pwdEnabled, setPwdEnabled, sqlInEnabled, setSqlInEnabled, mdEnabled, setMdEnabled, fileSearchEnabled, setFileSearchEnabled, activePage, setActivePage, updater }: SettingsPageProps) {
+export function SettingsPage({ jsonEnabled, setJsonEnabled, qrEnabled, setQrEnabled, pwdEnabled, setPwdEnabled, sqlInEnabled, setSqlInEnabled, mdEnabled, setMdEnabled, fileSearchEnabled, setFileSearchEnabled, fileDiffEnabled, setFileDiffEnabled, activePage, setActivePage, updater }: SettingsPageProps) {
   const { t, language, setLanguage } = useI18n();
   const { theme, setTheme } = useTheme();
   const [isProcessing, setIsProcessing] = useState(false);
@@ -98,6 +100,18 @@ export function SettingsPage({ jsonEnabled, setJsonEnabled, qrEnabled, setQrEnab
                   }
                 }}
               />
+            </div>
+
+            <div className="px-6 py-5 flex items-center justify-between th-hover-surface transition-colors">
+              <div>
+                <p className="text-base font-medium th-text-2 mb-1">{t('File Compare')}</p>
+                <p className="text-sm th-text-muted">{t('Compare two text files and highlight differences.')}</p>
+              </div>
+              <Toggle checked={fileDiffEnabled} onChange={() => {
+                const next = !fileDiffEnabled;
+                setFileDiffEnabled(next);
+                if (!next && activePage === 'fileDiff') setActivePage('settings');
+              }} />
             </div>
 
             <div className="px-6 py-5 flex items-center justify-between th-hover-surface transition-colors">

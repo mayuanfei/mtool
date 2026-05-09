@@ -630,3 +630,111 @@ body {
 /* Null — light: slate-500, dark: slate-400 */
 .json-null   { color: #64748b; }
 [data-theme="dark"] .json-null   { color: #94a3b8; }
+
+/* ========================================
+   File Diff Viewer
+   ======================================== */
+
+/* Layout: diff table + minimap side by side */
+.diff-view-wrapper {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  position: relative;
+}
+.diff-scroll-area {
+  flex: 1;
+  overflow: auto;
+  min-width: 0;
+}
+
+/* Line backgrounds — strong, opaque tints like professional diff tools */
+.diff-line-eq    { background-color: transparent; }
+.diff-line-del   { background-color: #3d1a1e; }
+.diff-line-ins   { background-color: #1a3d1e; }
+.diff-line-empty { background-color: var(--bg-surface-hover); }
+
+[data-theme="light"] .diff-line-del   { background-color: #fde8e8; }
+[data-theme="light"] .diff-line-ins   { background-color: #e6f9ea; }
+
+/* Gutter (line numbers) */
+.diff-gutter {
+  color: var(--text-faint);
+  background-color: var(--bg-surface-hover);
+  font-size: 11px;
+  line-height: 20px;
+  user-select: none;
+  white-space: nowrap;
+}
+.diff-gutter-del   { background-color: #4c1d21; color: #f87171; }
+.diff-gutter-ins   { background-color: #1d4c24; color: #4ade80; }
+.diff-gutter-empty { background-color: var(--bg-surface-hover); }
+
+[data-theme="light"] .diff-gutter-del { background-color: #fcd6d6; color: #dc2626; }
+[data-theme="light"] .diff-gutter-ins { background-color: #d0f5d7; color: #16a34a; }
+
+/* Word-level highlights — very vivid inline markers */
+.diff-word-del {
+  background-color: rgba(248, 113, 113, 0.35);
+  border-radius: 2px;
+  padding: 0 1px;
+}
+.diff-word-ins {
+  background-color: rgba(74, 222, 128, 0.35);
+  border-radius: 2px;
+  padding: 0 1px;
+}
+
+[data-theme="light"] .diff-word-del {
+  background-color: rgba(220, 38, 38, 0.25);
+}
+[data-theme="light"] .diff-word-ins {
+  background-color: rgba(22, 163, 74, 0.25);
+}
+
+/* Current diff row indicator — left border highlight */
+.diff-current-row td {
+  box-shadow: inset 3px 0 0 0 rgba(99, 102, 241, 0.7);
+}
+
+[data-theme="light"] .diff-current-row td {
+  box-shadow: inset 3px 0 0 0 rgba(99, 102, 241, 0.6);
+}
+
+/* ---- Minimap (vertical navigation bar on right edge) ---- */
+.diff-minimap {
+  width: 14px;
+  flex-shrink: 0;
+  position: relative;
+  background-color: var(--bg-surface-hover);
+  border-left: 1px solid var(--border-default);
+  cursor: default;
+}
+
+.diff-minimap-block {
+  position: absolute;
+  left: 2px;
+  right: 2px;
+  min-height: 3px;
+  background-color: #4ade80;
+  border-radius: 1px;
+  cursor: pointer;
+  opacity: 0.7;
+  transition: opacity 0.15s;
+}
+.diff-minimap-block:hover {
+  opacity: 1;
+}
+.diff-minimap-current {
+  opacity: 1;
+  background-color: #818cf8;
+  box-shadow: 0 0 4px rgba(129, 140, 248, 0.6);
+}
+
+[data-theme="light"] .diff-minimap-block {
+  background-color: #22c55e;
+}
+[data-theme="light"] .diff-minimap-current {
+  background-color: #6366f1;
+  box-shadow: 0 0 4px rgba(99, 102, 241, 0.4);
+}

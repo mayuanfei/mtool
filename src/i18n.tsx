@@ -181,6 +181,26 @@ const translations = {
     'size filter': 'size filter',
     'file content search': 'file content search',
     'Reveal in file manager': 'Reveal in file manager',
+
+    // FileDiff
+    'File Compare': 'File Compare',
+    'Compare two text files and highlight differences.': 'Compare two text files and highlight differences.',
+    'Original File': 'Original File',
+    'Modified File': 'Modified File',
+    'Open File': 'Open File',
+    'Paste from Clipboard': 'Paste from Clipboard',
+    'Drop file here': 'Drop file here',
+    'or open / paste content': 'or open / paste content',
+    'Pasted Text': 'Pasted Text',
+    'Identical': 'Identical',
+    'differences': 'differences',
+    'Hide Input': 'Hide Input',
+    'Show Input': 'Show Input',
+    'Previous Difference': 'Previous Difference',
+    'Next Difference': 'Next Difference',
+    'Swap Files': 'Swap Files',
+    'Reset': 'Reset',
+    'Load two files to compare': 'Load two files to compare',
   },
   zh: {
     // Sidebar
@@ -360,6 +380,26 @@ const translations = {
     'size filter': '大小过滤',
     'file content search': '文件内容搜索',
     'Reveal in file manager': '在文件管理器中定位',
+
+    // FileDiff
+    'File Compare': '文件对比',
+    'Compare two text files and highlight differences.': '对比两个文本文件并高亮显示差异。',
+    'Original File': '原始文件',
+    'Modified File': '修改后文件',
+    'Open File': '打开文件',
+    'Paste from Clipboard': '从剪贴板粘贴',
+    'Drop file here': '拖拽文件到此处',
+    'or open / paste content': '或打开文件 / 粘贴内容',
+    'Pasted Text': '粘贴的文本',
+    'Identical': '完全一致',
+    'differences': '处差异',
+    'Hide Input': '隐藏输入',
+    'Show Input': '显示输入',
+    'Previous Difference': '上一个差异',
+    'Next Difference': '下一个差异',
+    'Swap Files': '交换文件',
+    'Reset': '重置',
+    'Load two files to compare': '加载两个文件进行对比',
   }
 };
 
