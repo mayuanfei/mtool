@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "mtool",
-  "version": "1.0.3",
+  "version": "1.0.4",
   "identifier": "com.mayuanfei.mtool",
   "build": {
     "beforeDevCommand": "npm run dev",
@@ -24,7 +24,7 @@
   },
   "plugins": {
     "updater": {
-      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IENERDY1NDY4NTU0N0VCNApSV1MwZmxTRlJtWGREQXBvMU4ya3dOMjZwZERzUDlnc2M0dUV4VmNaZE0yM1YzNkxseTl5TWNWUAo=",
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEU4OUM4MDI0QjJDOTUyNDMKUldSRFVzbXlKSUNjNkUwN21aRG1vWFR5OVBBaHAxaUlXdkRQK2Fkc2p0T2cvU1lUaVAramdMMkUK",
       "endpoints": [
         "https://github.com/mayuanfei/mtool/releases/latest/download/latest.json"
       ],
