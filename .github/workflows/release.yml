@@ -73,8 +73,6 @@ jobs:
           else
             echo "WARNING: No .exe.sig found — signing key may not be working"
           fi
-          cd ../msi
-          mv *.msi mtool_${{ github.ref_name }}.msi
 
       - name: Upload macOS updater signature
         if: matrix.platform == 'macos-latest'
@@ -97,7 +95,6 @@ jobs:
           files: |
             src-tauri/target/**/bundle/**/*.dmg
             src-tauri/target/**/bundle/**/*.app.tar.gz
-            src-tauri/target/**/bundle/**/*.msi
             src-tauri/target/**/bundle/**/*.exe
 
   generate-update-json:

@@ -8,11 +8,13 @@ interface UpdateModalProps {
   downloading: boolean;
   progress: number;
   error: string | null;
+  installed: boolean;
   onClose: () => void;
   onInstall: () => void;
+  onRelaunch: () => void;
 }
 
-export function UpdateModal({ open, updateInfo, downloading, progress, error, onClose, onInstall }: UpdateModalProps) {
+export function UpdateModal({ open, updateInfo, downloading, progress, error, installed, onClose, onInstall, onRelaunch }: UpdateModalProps) {
   const { t } = useI18n();
   if (!open) return null;
 
@@ -24,7 +26,7 @@ export function UpdateModal({ open, updateInfo, downloading, progress, error, on
           <h2 className="text-base font-semibold th-text">
             {t("What's new in")} v{updateInfo.version}
           </h2>
-          {!downloading && (
+          {!downloading && !installed && (
             <button
               onClick={onClose}
               className="th-text-muted hover:th-text-2 transition-colors rounded p-1 th-hover-surface"
@@ -46,7 +48,7 @@ export function UpdateModal({ open, updateInfo, downloading, progress, error, on
         </div>
 
         {/* Progress bar */}
-        {downloading && (
+        {(downloading || installed) && (
           <div className="px-6 pb-4">
             <div className="w-full bg-slate-200 dark:bg-slate-700 rounded-full h-2 overflow-hidden">
               <div
@@ -55,7 +57,7 @@ export function UpdateModal({ open, updateInfo, downloading, progress, error, on
               />
             </div>
             <p className="text-xs th-text-muted mt-2 text-center">
-              {t('Downloading...')} {progress}%
+              {installed ? t('Ready to restart') : `${t('Downloading...')} ${progress}%`}
             </p>
           </div>
         )}
@@ -69,7 +71,7 @@ export function UpdateModal({ open, updateInfo, downloading, progress, error, on
 
         {/* Actions */}
         <div className="px-6 py-4 border-t th-border flex justify-end gap-3 th-bg-surface-h">
-          {!downloading && (
+          {!downloading && !installed && (
             <button
               onClick={onClose}
               className="px-4 py-2 text-sm th-text-3 th-bg-input-alt border th-border-subtle rounded-lg th-hover-surface transition-colors"
@@ -77,13 +79,22 @@ export function UpdateModal({ open, updateInfo, downloading, progress, error, on
               {t('Cancel')}
             </button>
           )}
-          <button
-            onClick={onInstall}
-            disabled={downloading}
-            className="px-4 py-2 text-sm font-medium bg-indigo-600 hover:bg-indigo-700 disabled:opacity-60 disabled:cursor-not-allowed text-white rounded-lg transition-colors"
-          >
-            {downloading ? `${t('Downloading...')} ${progress}%` : t('Install & Restart')}
-          </button>
+          {installed ? (
+            <button
+              onClick={onRelaunch}
+              className="px-4 py-2 text-sm font-medium bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg transition-colors"
+            >
+              {t('Restart Now')}
+            </button>
+          ) : (
+            <button
+              onClick={onInstall}
+              disabled={downloading}
+              className="px-4 py-2 text-sm font-medium bg-indigo-600 hover:bg-indigo-700 disabled:opacity-60 disabled:cursor-not-allowed text-white rounded-lg transition-colors"
+            >
+              {downloading ? `${t('Downloading...')} ${progress}%` : t('Install & Restart')}
+            </button>
+          )}
         </div>
       </div>
     </div>

@@ -3,9 +3,9 @@ import { Globe, Wrench, Palette, RefreshCw } from 'lucide-react';
 import { invoke } from '@tauri-apps/api/core';
 import { useI18n } from '../i18n';
 import { useTheme } from '../theme';
-import { useUpdater } from '../updater';
 import { UpdateModal } from '../components/UpdateModal';
 import type { Theme } from '../theme';
+import type { UseUpdaterReturn } from '../updater';
 
 const Toggle = ({ checked, onChange, disabled }: { checked: boolean; onChange: () => void; disabled?: boolean }) => {
   return (
@@ -40,14 +40,15 @@ interface SettingsPageProps {
   setFileSearchEnabled: (v: boolean) => void;
   activePage: string;
   setActivePage: (page: string) => void;
+  updater: UseUpdaterReturn;
 }
 
-export function SettingsPage({ jsonEnabled, setJsonEnabled, qrEnabled, setQrEnabled, pwdEnabled, setPwdEnabled, sqlInEnabled, setSqlInEnabled, mdEnabled, setMdEnabled, fileSearchEnabled, setFileSearchEnabled, activePage, setActivePage }: SettingsPageProps) {
+export function SettingsPage({ jsonEnabled, setJsonEnabled, qrEnabled, setQrEnabled, pwdEnabled, setPwdEnabled, sqlInEnabled, setSqlInEnabled, mdEnabled, setMdEnabled, fileSearchEnabled, setFileSearchEnabled, activePage, setActivePage, updater }: SettingsPageProps) {
   const { t, language, setLanguage } = useI18n();
   const { theme, setTheme } = useTheme();
   const [isProcessing, setIsProcessing] = useState(false);
-  const { hasUpdate, updateInfo, checking, downloading, progress, error,
-          autoUpdate, setAutoUpdate, checkForUpdate, startInstall, dismissUpdate } = useUpdater();
+  const { hasUpdate, updateInfo, checking, downloading, progress, error, installed,
+          autoUpdate, setAutoUpdate, checkForUpdate, startInstall, doRelaunch, dismissUpdate } = updater;
   const [showModal, setShowModal] = useState(false);
   const [lastCheckDone, setLastCheckDone] = useState(false);
 
@@ -296,8 +297,10 @@ export function SettingsPage({ jsonEnabled, setJsonEnabled, qrEnabled, setQrEnab
           downloading={downloading}
           progress={progress}
           error={error}
-          onClose={() => { if (!downloading) { setShowModal(false); dismissUpdate(); } }}
+          installed={installed}
+          onClose={() => { if (!downloading && !installed) { setShowModal(false); dismissUpdate(); } }}
           onInstall={startInstall}
+          onRelaunch={doRelaunch}
         />
       )}
     </div>

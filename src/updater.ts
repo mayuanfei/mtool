@@ -15,10 +15,12 @@ export interface UseUpdaterReturn {
   downloading: boolean;
   progress: number;
   error: string | null;
+  installed: boolean;
   autoUpdate: boolean;
   setAutoUpdate: (v: boolean) => void;
   checkForUpdate: () => Promise<void>;
   startInstall: () => Promise<void>;
+  doRelaunch: () => Promise<void>;
   dismissUpdate: () => void;
 }
 
@@ -29,6 +31,7 @@ export function useUpdater(): UseUpdaterReturn {
   const [downloading, setDownloading] = useState(false);
   const [progress, setProgress] = useState(0);
   const [error, setError] = useState<string | null>(null);
+  const [installed, setInstalled] = useState(false);
   const [pendingUpdate, setPendingUpdate] = useState<Update | null>(null);
 
   const [autoUpdate, setAutoUpdateState] = useState<boolean>(() => {
@@ -84,21 +87,26 @@ export function useUpdater(): UseUpdaterReturn {
         }
       });
       setProgress(100);
-      await relaunch();
+      setInstalled(true);
     } catch (e) {
       setError(String(e));
       setDownloading(false);
     }
   }, [pendingUpdate]);
 
+  const doRelaunch = useCallback(async () => {
+    await relaunch();
+  }, []);
+
   const dismissUpdate = useCallback(() => {
     setHasUpdate(false);
     setUpdateInfo(null);
     setPendingUpdate(null);
+    setInstalled(false);
   }, []);
 
   return {
-    hasUpdate, updateInfo, checking, downloading, progress, error,
-    autoUpdate, setAutoUpdate, checkForUpdate, startInstall, dismissUpdate,
+    hasUpdate, updateInfo, checking, downloading, progress, error, installed,
+    autoUpdate, setAutoUpdate, checkForUpdate, startInstall, doRelaunch, dismissUpdate,
   };
 }

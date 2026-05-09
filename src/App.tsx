@@ -16,7 +16,8 @@ export default function App() {
     return localStorage.getItem('mtool_active_page') || 'settings';
   });
   const { t } = useI18n();
-  const { hasUpdate, checkForUpdate, autoUpdate } = useUpdater();
+  const updater = useUpdater();
+  const { hasUpdate, checkForUpdate, autoUpdate } = updater;
 
   useEffect(() => {
     if (autoUpdate) checkForUpdate();
@@ -120,6 +121,7 @@ export default function App() {
               setFileSearchEnabled={setFileSearchEnabled}
               activePage={activePage}
               setActivePage={setActivePage}
+              updater={updater}
             />
           )}
           {activePage !== 'settings' && activePage !== 'user' &&
