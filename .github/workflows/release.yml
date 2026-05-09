@@ -109,10 +109,8 @@ jobs:
           TAR_PATH="$KNOWN_DIR/mtool_${TAG}.app.tar.gz"
           echo "Created: $TAR_PATH ($(du -sh "$TAR_PATH" | cut -f1))"
 
-          # Sign
-          echo "$TAURI_SIGNING_PRIVATE_KEY" > /tmp/signer.key
-          npm run tauri -- signer sign -f /tmp/signer.key -p "" "$TAR_PATH"
-          rm -f /tmp/signer.key
+          # Sign using env var directly — avoids --private-key-path vs --private-key conflict
+          npm run tauri -- signer sign --private-key "$TAURI_SIGNING_PRIVATE_KEY" --password "" "$TAR_PATH"
           echo "Signed: ${TAR_PATH}.sig"
 
           ls -la "${TAR_PATH}"*
