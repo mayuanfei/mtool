@@ -46,48 +46,51 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ""
         run: |
           if [ -z "$TAURI_SIGNING_PRIVATE_KEY" ]; then
-            echo "::error::TAURI_SIGNING_PRIVATE_KEY is EMPTY! Please check your GitHub Secrets."
-          else
-            echo "TAURI_SIGNING_PRIVATE_KEY is set (length: ${#TAURI_SIGNING_PRIVATE_KEY})"
+            echo "::error::TAURI_SIGNING_PRIVATE_KEY is EMPTY!"
+            exit 1
           fi
+          echo "TAURI_SIGNING_PRIVATE_KEY is set (length: ${#TAURI_SIGNING_PRIVATE_KEY})"
           npm run tauri build -- ${{ matrix.args }}
 
       - name: List bundle output (debug)
         shell: bash
         run: find src-tauri/target -path "*/bundle/*" -type f | sort
 
-      - name: Rename artifacts (macOS)
+      # macOS: manually create and sign the updater archive
+      # createUpdaterArtifacts does not generate .app.tar.gz for universal builds
+      - name: Create and sign macOS updater archive
         if: matrix.platform == 'macos-latest'
         shell: bash
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.MTOOL_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ""
         run: |
           TAG="${{ github.ref_name }}"
+          BUNDLE_DIR="src-tauri/target/universal-apple-darwin/release/bundle/macos"
 
-          # 用 find 定位文件，不依赖硬编码路径
-          DMG=$(find src-tauri/target -path "*/bundle/dmg/*.dmg" | head -1)
-          TAR=$(find src-tauri/target -path "*/bundle/macos/*.app.tar.gz" ! -name "*.sig" | head -1)
-          SIG=$(find src-tauri/target -path "*/bundle/macos/*.app.tar.gz.sig" | head -1)
-
-          echo "DMG: $DMG"
-          echo "TAR: $TAR"
-          echo "SIG: $SIG"
-
-          if [ -n "$DMG" ]; then
-            mv "$DMG" "$(dirname "$DMG")/mtool_${TAG}.dmg"
-          fi
-
-          if [ -n "$TAR" ]; then
-            TAR_DIR=$(dirname "$TAR")
-            mv "$TAR" "${TAR_DIR}/mtool_${TAG}.app.tar.gz"
-          fi
-
-          if [ -n "$SIG" ]; then
-            SIG_DIR=$(dirname "$SIG")
-            mv "$SIG" "${SIG_DIR}/mtool_${TAG}.app.tar.gz.sig"
-          else
-            echo "::error::No .app.tar.gz.sig found! Signing failed."
+          # Find the .app bundle (it's a directory)
+          APP=$(find "$BUNDLE_DIR" -maxdepth 1 -name "*.app" -type d | head -1)
+          if [ -z "$APP" ]; then
+            echo "::error::No .app bundle found in $BUNDLE_DIR"
             exit 1
           fi
+          APP_NAME=$(basename "$APP")
+          echo "Found app bundle: $APP_NAME"
 
+          # Create .app.tar.gz
+          cd "$BUNDLE_DIR"
+          tar czf "mtool_${TAG}.app.tar.gz" "$APP_NAME"
+          echo "Created: mtool_${TAG}.app.tar.gz"
+
+          # Write key to temp file and sign
+          echo "$TAURI_SIGNING_PRIVATE_KEY" > /tmp/signer.key
+          npm run tauri -- signer sign -f /tmp/signer.key -p "" "mtool_${TAG}.app.tar.gz"
+          rm -f /tmp/signer.key
+
+          echo "Signed: mtool_${TAG}.app.tar.gz.sig"
+          ls -la "mtool_${TAG}.app.tar.gz"*
+
+      # Windows: rename the NSIS artifacts
       - name: Rename artifacts (Windows)
         if: matrix.platform == 'windows-latest'
         shell: bash
@@ -101,23 +104,24 @@ jobs:
           echo "EXE: $EXE"
           echo "SIG: $SIG"
 
-          if [ -n "$EXE" ]; then
-            mv "$EXE" "${NSIS_DIR}/mtool_${TAG}.exe"
-          fi
-
-          if [ -n "$SIG" ]; then
-            mv "$SIG" "${NSIS_DIR}/mtool_${TAG}.exe.sig"
-          else
-            echo "::error::No .exe.sig found! Signing failed."
+          if [ -z "$EXE" ]; then
+            echo "::error::No -setup.exe found"
             exit 1
           fi
+          mv "$EXE" "${NSIS_DIR}/mtool_${TAG}.exe"
+
+          if [ -z "$SIG" ]; then
+            echo "::error::No -setup.exe.sig found — signing failed"
+            exit 1
+          fi
+          mv "$SIG" "${NSIS_DIR}/mtool_${TAG}.exe.sig"
 
       - name: Upload macOS updater signature
         if: matrix.platform == 'macos-latest'
         uses: actions/upload-artifact@v4
         with:
           name: macos-sig
-          path: src-tauri/target/**/bundle/macos/mtool_${{ github.ref_name }}.app.tar.gz.sig
+          path: src-tauri/target/universal-apple-darwin/release/bundle/macos/mtool_${{ github.ref_name }}.app.tar.gz.sig
           if-no-files-found: error
 
       - name: Upload Windows updater signature
@@ -132,7 +136,7 @@ jobs:
         with:
           files: |
             src-tauri/target/**/bundle/**/*.dmg
-            src-tauri/target/**/bundle/**/*.app.tar.gz
+            src-tauri/target/universal-apple-darwin/release/bundle/macos/mtool_${{ github.ref_name }}.app.tar.gz
             src-tauri/target/**/bundle/**/*.exe
 
   generate-update-json:
