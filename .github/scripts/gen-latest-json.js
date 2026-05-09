@@ -36,15 +36,18 @@ const macosSig = readSig('sigs/macos', '.app.tar.gz.sig');
 const windowsSig = readSig('sigs/windows', '.exe.sig');
 const notes = extractChangelog(version);
 
+const macosEntry = {
+  signature: macosSig,
+  url: `${baseUrl}/mtool_${tag}.app.tar.gz`,
+};
+
 const payload = {
   version,
   notes,
   pub_date: new Date().toISOString(),
   platforms: {
-    'darwin-universal': {
-      signature: macosSig,
-      url: `${baseUrl}/mtool_${tag}.app.tar.gz`,
-    },
+    'darwin-aarch64': macosEntry,
+    'darwin-x86_64': macosEntry,
     'windows-x86_64': {
       signature: windowsSig,
       url: `${baseUrl}/mtool_${tag}.exe`,
