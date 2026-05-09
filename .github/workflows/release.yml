@@ -207,7 +207,7 @@ jobs:
         env:
           GITHUB_REPOSITORY: ${{ github.repository }}
           RELEASE_TAG: ${{ github.ref_name }}
-        run: node .github/scripts/gen-latest-json.js
+        run: node .github/scripts/gen-latest-json.cjs
 
       - name: Upload latest.json to release
         if: steps.check-sigs.outputs.has_sigs == 'true'
