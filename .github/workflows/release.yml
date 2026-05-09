@@ -42,7 +42,13 @@ jobs:
       - name: Build Tauri app
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.MTOOL_PRIVATE_KEY }}
-        run: npm run tauri build -- ${{ matrix.args }}
+        run: |
+          if [ -z "$TAURI_SIGNING_PRIVATE_KEY" ]; then
+            echo "::error::TAURI_SIGNING_PRIVATE_KEY is EMPTY! Please check your GitHub Secrets."
+          else
+            echo "TAURI_SIGNING_PRIVATE_KEY is set (length: ${#TAURI_SIGNING_PRIVATE_KEY})"
+          fi
+          npm run tauri build -- ${{ matrix.args }}
 
       - name: List bundle output (debug)
         shell: bash
@@ -52,14 +58,21 @@ jobs:
         if: matrix.platform == 'macos-latest'
         shell: bash
         run: |
+          # 检查并重命名 DMG
           cd src-tauri/target/universal-apple-darwin/release/bundle/dmg
-          mv *.dmg mtool_${{ github.ref_name }}.dmg
+          if ls *.dmg 1> /dev/null 2>&1; then
+            mv *.dmg mtool_${{ github.ref_name }}.dmg
+          fi
+          
+          # 检查并重命名 Updater 资源
           cd ../macos
-          if ls *.app.tar.gz 2>/dev/null; then
+          if ls *.app.tar.gz 1> /dev/null 2>&1; then
             mv *.app.tar.gz mtool_${{ github.ref_name }}.app.tar.gz
+          fi
+          if ls *.app.tar.gz.sig 1> /dev/null 2>&1; then
             mv *.app.tar.gz.sig mtool_${{ github.ref_name }}.app.tar.gz.sig
           else
-            echo "WARNING: No .app.tar.gz found — signing key may not be working"
+            echo "::warning::No .sig file found! Signing may have failed."
           fi
 
       - name: Rename artifacts (Windows)
