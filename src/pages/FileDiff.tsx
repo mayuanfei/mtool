@@ -177,16 +177,18 @@ function buildRows(diff: DiffLine[]): DiffRow[] {
 interface WordSpan { text: string; highlighted: boolean }
 
 function wordDiff(oldLine: string, newLine: string): { oldSpans: WordSpan[]; newSpans: WordSpan[] } {
-  // Tokenize by word boundaries
+  // Tokenize by word boundaries: split on non-alphanumeric chars so that
+  // identifiers like "zaxxer" and "zaxxeir" are compared as individual tokens.
   const tokenize = (s: string): string[] => {
     const tokens: string[] = [];
     let current = '';
     for (const ch of s) {
-      if (/\s/.test(ch)) {
+      // Letters, digits, CJK characters stay together
+      if (/[\w\u4e00-\u9fff]/.test(ch)) {
+        current += ch;
+      } else {
         if (current) { tokens.push(current); current = ''; }
         tokens.push(ch);
-      } else {
-        current += ch;
       }
     }
     if (current) tokens.push(current);
@@ -374,10 +376,14 @@ function DiffMinimap({ rows, diffIndices, currentDiffIdx, onNavigate, containerR
 
   const handleClick = (groupIndex: number) => {
     onNavigate(groupIndex);
-    // Also scroll the main view
+    const container = containerRef.current;
+    if (!container) return;
     const rowIdx = diffIndices[groupIndex];
-    const el = containerRef.current?.querySelector(`[data-row="${rowIdx}"]`);
-    if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    const el = container.querySelector(`[data-row="${rowIdx}"]`) as HTMLElement | null;
+    if (!el) return;
+    const elAbsTop = el.getBoundingClientRect().top - container.getBoundingClientRect().top + container.scrollTop;
+    const targetScrollTop = Math.max(0, elAbsTop - container.clientHeight / 2 + el.clientHeight / 2);
+    container.scrollTo({ top: targetScrollTop, behavior: 'smooth' });
   };
 
   return (
@@ -408,20 +414,27 @@ interface DiffViewProps {
   diffIndices: number[];
   currentDiffIdx: number;
   onNavigate: (idx: number) => void;
+  userNavRef: React.RefObject<boolean>;
 }
 
-function DiffView({ rows, diffIndices, currentDiffIdx, onNavigate }: DiffViewProps) {
+function DiffView({ rows, diffIndices, currentDiffIdx, onNavigate, userNavRef }: DiffViewProps) {
   const containerRef = useRef<HTMLDivElement>(null);
 
-  // Scroll to current diff
+  // Scroll within the diff-scroll-area only when user explicitly navigates
   useEffect(() => {
+    if (!userNavRef.current) return;
+    userNavRef.current = false;
     if (currentDiffIdx < 0 || currentDiffIdx >= diffIndices.length) return;
+    const container = containerRef.current;
+    if (!container) return;
     const rowIdx = diffIndices[currentDiffIdx];
-    const el = containerRef.current?.querySelector(`[data-row="${rowIdx}"]`);
-    if (el) {
-      el.scrollIntoView({ behavior: 'smooth', block: 'center' });
-    }
-  }, [currentDiffIdx, diffIndices]);
+    const el = container.querySelector(`[data-row="${rowIdx}"]`) as HTMLElement | null;
+    if (!el) return;
+    // Absolute scroll position: convert viewport-relative coords to scroll offset
+    const elAbsTop = el.getBoundingClientRect().top - container.getBoundingClientRect().top + container.scrollTop;
+    const targetScrollTop = Math.max(0, elAbsTop - container.clientHeight / 2 + el.clientHeight / 2);
+    container.scrollTo({ top: targetScrollTop, behavior: 'smooth' });
+  }, [currentDiffIdx, diffIndices, userNavRef]);
 
   const gutterWidth = Math.max(String(rows.length).length * 8 + 16, 40);
 
@@ -518,6 +531,7 @@ export function FileDiff() {
   const [rightContent, setRightContent] = useState('');
   const [showInput, setShowInput] = useState(true);
   const [currentDiffIdx, setCurrentDiffIdx] = useState(0);
+  const userNavRef = useRef(false);
 
   const handleLeftFile = useCallback((name: string, content: string) => {
     setLeftName(name);
@@ -618,6 +632,7 @@ export function FileDiff() {
 
   const goToDiff = useCallback((direction: 'prev' | 'next') => {
     if (totalDiffs === 0) return;
+    userNavRef.current = true;
     setCurrentDiffIdx(prev => {
       if (direction === 'next') return (prev + 1) % totalDiffs;
       return (prev - 1 + totalDiffs) % totalDiffs;
@@ -646,9 +661,9 @@ export function FileDiff() {
   const hasBothContent = leftContent.length > 0 && rightContent.length > 0;
 
   return (
-    <div className="flex flex-col h-full -m-6">
+    <div className="flex flex-col h-full -m-6 overflow-hidden">
       {/* Toolbar — opaque sticky header */}
-      <div className="flex items-center justify-between px-4 py-2 border-b th-border th-bg-surface flex-shrink-0 sticky top-0 z-10">
+      <div className="flex items-center justify-between px-4 py-2 border-b th-border th-bg-surface flex-shrink-0">
         <div className="flex items-center gap-2">
           <h1 className="text-sm font-bold th-text tracking-tight">{t('File Compare')}</h1>
           {hasBothContent && (
@@ -742,12 +757,13 @@ export function FileDiff() {
 
       {/* Diff view */}
       {hasBothContent ? (
-        <div className="flex-1 min-h-0 border-t th-border">
+        <div className="flex-1 min-h-0 border-t th-border flex flex-col">
           <DiffView
             rows={rows}
             diffIndices={diffIndices}
             currentDiffIdx={currentDiffIdx}
             onNavigate={setCurrentDiffIdx}
+            userNavRef={userNavRef}
           />
         </div>
       ) : (
