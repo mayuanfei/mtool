@@ -54,7 +54,11 @@ jobs:
 
       - name: List bundle output (debug)
         shell: bash
-        run: find src-tauri/target -path "*/bundle/*" -type f | sort
+        run: |
+          echo "=== Files in bundle ==="
+          find src-tauri/target -path "*/bundle/*" -type f | sort
+          echo "=== Directories in bundle ==="
+          find src-tauri/target -path "*/bundle/*" -type d | sort
 
       # macOS: manually create and sign the updater archive
       # createUpdaterArtifacts does not generate .app.tar.gz for universal builds
@@ -66,29 +70,39 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ""
         run: |
           TAG="${{ github.ref_name }}"
-          BUNDLE_DIR="src-tauri/target/universal-apple-darwin/release/bundle/macos"
+          KNOWN_DIR="src-tauri/target/universal-apple-darwin/release/bundle/macos"
 
-          # Find the .app bundle (it's a directory)
-          APP=$(find "$BUNDLE_DIR" -maxdepth 1 -name "*.app" -type d | head -1)
+          # Search entire target tree for .app (handles any Tauri output path variation)
+          APP=$(find src-tauri/target -name "*.app" -type d | grep -v "\.dSYM" | head -1)
           if [ -z "$APP" ]; then
-            echo "::error::No .app bundle found in $BUNDLE_DIR"
+            echo "::error::No .app bundle found anywhere in src-tauri/target"
+            echo "All bundle dirs:"
+            find src-tauri/target -path "*/bundle/*" -type d | sort || true
             exit 1
           fi
           APP_NAME=$(basename "$APP")
-          echo "Found app bundle: $APP_NAME"
+          ACTUAL_BUNDLE_DIR=$(dirname "$APP")
+          echo "Found: $APP at $ACTUAL_BUNDLE_DIR"
 
-          # Create .app.tar.gz
-          cd "$BUNDLE_DIR"
-          tar czf "mtool_${TAG}.app.tar.gz" "$APP_NAME"
-          echo "Created: mtool_${TAG}.app.tar.gz"
+          # Create .app.tar.gz next to the .app
+          (cd "$ACTUAL_BUNDLE_DIR" && tar czf "mtool_${TAG}.app.tar.gz" "$APP_NAME")
+          TAR_PATH="$ACTUAL_BUNDLE_DIR/mtool_${TAG}.app.tar.gz"
+          echo "Created: $TAR_PATH"
 
           # Write key to temp file and sign
           echo "$TAURI_SIGNING_PRIVATE_KEY" > /tmp/signer.key
-          npm run tauri -- signer sign -f /tmp/signer.key -p "" "mtool_${TAG}.app.tar.gz"
+          npm run tauri -- signer sign -f /tmp/signer.key -p "" "$TAR_PATH"
           rm -f /tmp/signer.key
+          echo "Signed: ${TAR_PATH}.sig"
 
-          echo "Signed: mtool_${TAG}.app.tar.gz.sig"
-          ls -la "mtool_${TAG}.app.tar.gz"*
+          # Ensure artifacts are at the expected path for subsequent upload steps
+          if [ "$ACTUAL_BUNDLE_DIR" != "$KNOWN_DIR" ]; then
+            mkdir -p "$KNOWN_DIR"
+            cp "$TAR_PATH" "$KNOWN_DIR/"
+            cp "${TAR_PATH}.sig" "$KNOWN_DIR/"
+            echo "Copied artifacts to $KNOWN_DIR"
+          fi
+          ls -la "$KNOWN_DIR/mtool_${TAG}.app.tar.gz"*
 
       # Windows: rename the NSIS artifacts
       - name: Rename artifacts (Windows)
