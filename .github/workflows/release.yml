@@ -60,8 +60,9 @@ jobs:
           echo "=== Directories in bundle ==="
           find src-tauri/target -path "*/bundle/*" -type d | sort
 
-      # macOS: manually create and sign the updater archive
-      # createUpdaterArtifacts does not generate .app.tar.gz for universal builds
+      # macOS: extract .app from DMG, then manually create and sign the updater archive.
+      # Root cause: Tauri's bundler removes the .app directory after DMG creation.
+      # The DMG always contains the .app, so we mount it to extract.
       - name: Create and sign macOS updater archive
         if: matrix.platform == 'macos-latest'
         shell: bash
@@ -69,45 +70,52 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.MTOOL_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ""
         run: |
-          set -x
+          set -euo pipefail
           TAG="${{ github.ref_name }}"
           KNOWN_DIR="src-tauri/target/universal-apple-darwin/release/bundle/macos"
 
-          # Search entire target tree for .app
-          # NOTE: avoid grep in pipeline - grep exits 1 on no match, which
-          # kills the script under set -e -o pipefail before we can report it
-          APP=$(find src-tauri/target -name "*.app" -type d 2>/dev/null | head -1 || true)
-          if [ -z "$APP" ]; then
-            echo "::error::No .app bundle found anywhere in src-tauri/target"
-            echo "All bundle dirs:"
-            find src-tauri/target -path "*/bundle/*" -type d | sort || true
-            echo "All target files (bundle):"
+          # Find the DMG (always produced, even when .app is cleaned up)
+          DMG=$(find src-tauri/target -name "*.dmg" | head -1 || true)
+          if [ -z "$DMG" ]; then
+            echo "::error::No DMG found in src-tauri/target"
             find src-tauri/target -path "*/bundle/*" | sort || true
             exit 1
           fi
+          echo "Found DMG: $DMG"
+
+          # Mount at a fixed path
+          MOUNT_POINT="/tmp/mtool_dmg_mount"
+          hdiutil attach "$DMG" -readonly -nobrowse -mountpoint "$MOUNT_POINT"
+
+          # Find .app inside the mounted DMG
+          APP=$(find "$MOUNT_POINT" -name "*.app" -type d -maxdepth 2 | head -1 || true)
+          if [ -z "$APP" ]; then
+            echo "::error::No .app found in mounted DMG"
+            ls -la "$MOUNT_POINT"
+            hdiutil detach "$MOUNT_POINT" || true
+            exit 1
+          fi
+          echo "Found .app in DMG: $APP"
           APP_NAME=$(basename "$APP")
-          ACTUAL_BUNDLE_DIR=$(dirname "$APP")
-          echo "Found: $APP at $ACTUAL_BUNDLE_DIR"
 
-          # Create .app.tar.gz next to the .app
-          (cd "$ACTUAL_BUNDLE_DIR" && tar czf "mtool_${TAG}.app.tar.gz" "$APP_NAME")
-          TAR_PATH="$ACTUAL_BUNDLE_DIR/mtool_${TAG}.app.tar.gz"
-          echo "Created: $TAR_PATH"
+          # Copy .app out of DMG to known location
+          mkdir -p "$KNOWN_DIR"
+          cp -r "$APP" "$KNOWN_DIR/"
+          hdiutil detach "$MOUNT_POINT" || true
+          echo "Copied $APP_NAME to $KNOWN_DIR"
 
-          # Write key to temp file and sign
+          # Create .app.tar.gz
+          (cd "$KNOWN_DIR" && tar czf "mtool_${TAG}.app.tar.gz" "$APP_NAME")
+          TAR_PATH="$KNOWN_DIR/mtool_${TAG}.app.tar.gz"
+          echo "Created: $TAR_PATH ($(du -sh "$TAR_PATH" | cut -f1))"
+
+          # Sign
           echo "$TAURI_SIGNING_PRIVATE_KEY" > /tmp/signer.key
           npm run tauri -- signer sign -f /tmp/signer.key -p "" "$TAR_PATH"
           rm -f /tmp/signer.key
           echo "Signed: ${TAR_PATH}.sig"
 
-          # Ensure artifacts are at the expected path for subsequent upload steps
-          if [ "$ACTUAL_BUNDLE_DIR" != "$KNOWN_DIR" ]; then
-            mkdir -p "$KNOWN_DIR"
-            cp "$TAR_PATH" "$KNOWN_DIR/"
-            cp "${TAR_PATH}.sig" "$KNOWN_DIR/"
-            echo "Copied artifacts to $KNOWN_DIR"
-          fi
-          ls -la "$KNOWN_DIR/mtool_${TAG}.app.tar.gz"*
+          ls -la "${TAR_PATH}"*
 
       # Windows: rename the NSIS artifacts
       - name: Rename artifacts (Windows)
