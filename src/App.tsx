@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { Sidebar } from './components/Sidebar';
+import { UpdateModal } from './components/UpdateModal';
 import { JsonFormatter } from './pages/JsonFormatter';
 import { SettingsPage } from './pages/Settings';
 import { TextToQr } from './pages/TextToQr';
@@ -20,9 +21,15 @@ export default function App() {
   const updater = useUpdater();
   const { hasUpdate, checkForUpdate, autoUpdate } = updater;
 
+  const [showUpdateModal, setShowUpdateModal] = useState(false);
+
   useEffect(() => {
     if (autoUpdate) checkForUpdate();
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    if (hasUpdate) setShowUpdateModal(true);
+  }, [hasUpdate]);
 
   const [jsonEnabled, setJsonEnabled] = useState(() => {
     const saved = localStorage.getItem('mtool_json_enabled');
@@ -136,7 +143,7 @@ export default function App() {
               activePage={activePage}
               setActivePage={setActivePage}
               updater={updater}
-            />
+              setShowModal={setShowUpdateModal}            />
           )}
           {activePage !== 'settings' && activePage !== 'user' &&
            !(activePage === 'json' && jsonEnabled) && 
@@ -150,6 +157,25 @@ export default function App() {
           )}
         </main>
       </div>
+
+      {showUpdateModal && updater.updateInfo && (
+        <UpdateModal
+          open={showUpdateModal}
+          updateInfo={updater.updateInfo}
+          downloading={updater.downloading}
+          progress={updater.progress}
+          error={updater.error}
+          installed={updater.installed}
+          onClose={() => {
+            if (!updater.downloading && !updater.installed) {
+              setShowUpdateModal(false);
+              updater.dismissUpdate();
+            }
+          }}
+          onInstall={updater.startInstall}
+          onRelaunch={updater.doRelaunch}
+        />
+      )}
     </div>
   );
 }

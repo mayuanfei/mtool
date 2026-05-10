@@ -4,7 +4,6 @@ import { invoke } from '@tauri-apps/api/core';
 import { getVersion } from '@tauri-apps/api/app';
 import { useI18n } from '../i18n';
 import { useTheme } from '../theme';
-import { UpdateModal } from '../components/UpdateModal';
 import type { Theme } from '../theme';
 import type { UseUpdaterReturn } from '../updater';
 
@@ -44,15 +43,15 @@ interface SettingsPageProps {
   activePage: string;
   setActivePage: (page: string) => void;
   updater: UseUpdaterReturn;
+  setShowModal: (v: boolean) => void;
 }
 
-export function SettingsPage({ jsonEnabled, setJsonEnabled, qrEnabled, setQrEnabled, pwdEnabled, setPwdEnabled, sqlInEnabled, setSqlInEnabled, mdEnabled, setMdEnabled, fileSearchEnabled, setFileSearchEnabled, fileDiffEnabled, setFileDiffEnabled, activePage, setActivePage, updater }: SettingsPageProps) {
+export function SettingsPage({ jsonEnabled, setJsonEnabled, qrEnabled, setQrEnabled, pwdEnabled, setPwdEnabled, sqlInEnabled, setSqlInEnabled, mdEnabled, setMdEnabled, fileSearchEnabled, setFileSearchEnabled, fileDiffEnabled, setFileDiffEnabled, activePage, setActivePage, updater, setShowModal }: SettingsPageProps) {
   const { t, language, setLanguage } = useI18n();
   const { theme, setTheme } = useTheme();
   const [isProcessing, setIsProcessing] = useState(false);
-  const { hasUpdate, updateInfo, checking, downloading, progress, error, installed,
-          autoUpdate, setAutoUpdate, checkForUpdate, startInstall, doRelaunch, dismissUpdate } = updater;
-  const [showModal, setShowModal] = useState(false);
+  const { hasUpdate, updateInfo, checking, error,
+          autoUpdate, setAutoUpdate, checkForUpdate } = updater;
   const [lastCheckDone, setLastCheckDone] = useState(false);
   const [appVersion, setAppVersion] = useState<string>('...');
 
@@ -310,21 +309,6 @@ export function SettingsPage({ jsonEnabled, setJsonEnabled, qrEnabled, setQrEnab
           </div>
         </section>
       </div>
-
-      {/* Update install modal */}
-      {showModal && updateInfo && (
-        <UpdateModal
-          open={showModal}
-          updateInfo={updateInfo}
-          downloading={downloading}
-          progress={progress}
-          error={error}
-          installed={installed}
-          onClose={() => { if (!downloading && !installed) { setShowModal(false); dismissUpdate(); } }}
-          onInstall={startInstall}
-          onRelaunch={doRelaunch}
-        />
-      )}
     </div>
   );
 }
