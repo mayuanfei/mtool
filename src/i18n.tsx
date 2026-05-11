@@ -202,6 +202,10 @@ const translations = {
     'Swap Files': 'Swap Files',
     'Reset': 'Reset',
     'Load two files to compare': 'Load two files to compare',
+    'File size exceeds 10MB limit': 'File size exceeds 10MB limit',
+    'Pasted text exceeds 10MB limit': 'Pasted text exceeds 10MB limit',
+    'Text exceeds 10MB limit': 'Text exceeds 10MB limit',
+    'Files exceed 10000 lines. Diff is approximate.': 'Files exceed 10000 lines. Diff is approximate.',
   },
   zh: {
     // Sidebar
@@ -402,6 +406,10 @@ const translations = {
     'Swap Files': '交换文件',
     'Reset': '重置',
     'Load two files to compare': '加载两个文件进行对比',
+    'File size exceeds 10MB limit': '文件超过 10MB 限制',
+    'Pasted text exceeds 10MB limit': '粘贴的文本超过 10MB 限制',
+    'Text exceeds 10MB limit': '文本超过 10MB 限制',
+    'Files exceed 10000 lines. Diff is approximate.': '文件超过 10000 行，仅显示粗略差异结果',
   }
 };
 

@@ -34,7 +34,7 @@ export default function App() {
         setShowUpdateModal(true);
       }
     }
-  }, [hasUpdate]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [hasUpdate, updater.updateInfo?.version]);
 
   const handleSkip = () => {
     if (updater.updateInfo) {

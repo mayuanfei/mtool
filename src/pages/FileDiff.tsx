@@ -260,7 +260,7 @@ function FilePanel({ side, fileName, content, onFileOpen, hasContent }: FilePane
       const file = files[0];
       if (!isTextFile(file.name)) return;
       if (file.size > 10 * 1024 * 1024) {
-        alert('File size exceeds 10MB limit');
+        alert(t('File size exceeds 10MB limit'));
         return;
       }
       const reader = new FileReader();
@@ -288,7 +288,7 @@ function FilePanel({ side, fileName, content, onFileOpen, hasContent }: FilePane
       const text = await navigator.clipboard.readText();
       if (text) {
         if (text.length > 10 * 1024 * 1024) {
-          alert('Pasted text exceeds 10MB limit');
+          alert(t('Pasted text exceeds 10MB limit'));
           return;
         }
         onFileOpen(t('Pasted Text'), text);
@@ -350,7 +350,7 @@ function FilePanel({ side, fileName, content, onFileOpen, hasContent }: FilePane
           value={content}
           onChange={(e) => {
             if (e.target.value.length > 10 * 1024 * 1024) {
-              alert('Text exceeds 10MB limit');
+              alert(t('Text exceeds 10MB limit'));
               return;
             }
             onFileOpen(fileName || t('Pasted Text'), e.target.value);
@@ -616,8 +616,8 @@ export function FileDiff() {
   }, [handleLeftFile, handleRightFile, leftContent, leftName, rightContent, rightName]);
 
   // Compute diff
-  const { rows, diffIndices, totalDiffs } = useMemo(() => {
-    if (!leftContent && !rightContent) return { rows: [], diffIndices: [], totalDiffs: 0 };
+  const { rows, diffIndices, totalDiffs, isTruncated } = useMemo(() => {
+    if (!leftContent && !rightContent) return { rows: [], diffIndices: [], totalDiffs: 0, isTruncated: false };
     const leftLines = leftContent.split('\n');
     const rightLines = rightContent.split('\n');
     const MAX_LINES = 10000;
@@ -626,8 +626,17 @@ export function FileDiff() {
     let skipWordDiff = false;
     if (leftLines.length > MAX_LINES || rightLines.length > MAX_LINES) {
       diff = [];
-      for (let i = 0; i < leftLines.length; i++) diff.push({ op: 'delete' as DiffOp, oldIdx: i, newIdx: -1, text: leftLines[i] });
-      for (let i = 0; i < rightLines.length; i++) diff.push({ op: 'insert' as DiffOp, oldIdx: -1, newIdx: i, text: rightLines[i] });
+      const maxL = Math.max(leftLines.length, rightLines.length);
+      for (let i = 0; i < maxL; i++) {
+        const l = leftLines[i];
+        const r = rightLines[i];
+        if (l === r) {
+          diff.push({ op: 'equal' as DiffOp, oldIdx: i, newIdx: i, text: l || '' });
+        } else {
+          if (i < leftLines.length) diff.push({ op: 'delete' as DiffOp, oldIdx: i, newIdx: -1, text: l });
+          if (i < rightLines.length) diff.push({ op: 'insert' as DiffOp, oldIdx: -1, newIdx: i, text: r });
+        }
+      }
       skipWordDiff = true;
     } else {
       diff = myersDiff(leftLines, rightLines);
@@ -651,7 +660,7 @@ export function FileDiff() {
       }
     });
 
-    return { rows, diffIndices: indices, totalDiffs: indices.length };
+    return { rows, diffIndices: indices, totalDiffs: indices.length, isTruncated: skipWordDiff };
   }, [leftContent, rightContent]);
 
   // Reset current diff index when diff changes
@@ -786,7 +795,12 @@ export function FileDiff() {
 
       {/* Diff view */}
       {hasBothContent ? (
-        <div className="flex-1 min-h-0 border-t th-border flex flex-col">
+        <div className="flex-1 min-h-0 border-t th-border flex flex-col relative">
+          {isTruncated && (
+            <div className="bg-amber-500/10 text-amber-500 text-xs px-4 py-2 border-b border-amber-500/20 text-center z-10 font-medium">
+              {t('Files exceed 10000 lines. Diff is approximate.')}
+            </div>
+          )}
           <DiffView
             rows={rows}
             diffIndices={diffIndices}
