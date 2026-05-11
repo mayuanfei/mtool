@@ -121,6 +121,7 @@ interface DiffRow {
   rightText: string;
   rightType: 'equal' | 'insert' | 'empty';
   isDiff: boolean;
+  wdiff?: { oldSpans: { text: string; highlighted: boolean }[]; newSpans: { text: string; highlighted: boolean }[] } | null;
 }
 
 function buildRows(diff: DiffLine[]): DiffRow[] {
@@ -258,6 +259,10 @@ function FilePanel({ side, fileName, content, onFileOpen, hasContent }: FilePane
     if (files.length > 0) {
       const file = files[0];
       if (!isTextFile(file.name)) return;
+      if (file.size > 10 * 1024 * 1024) {
+        alert('File size exceeds 10MB limit');
+        return;
+      }
       const reader = new FileReader();
       reader.onload = () => {
         if (typeof reader.result === 'string') {
@@ -282,6 +287,10 @@ function FilePanel({ side, fileName, content, onFileOpen, hasContent }: FilePane
     try {
       const text = await navigator.clipboard.readText();
       if (text) {
+        if (text.length > 10 * 1024 * 1024) {
+          alert('Pasted text exceeds 10MB limit');
+          return;
+        }
         onFileOpen(t('Pasted Text'), text);
       }
     } catch {
@@ -339,7 +348,13 @@ function FilePanel({ side, fileName, content, onFileOpen, hasContent }: FilePane
       ) : (
         <textarea
           value={content}
-          onChange={(e) => onFileOpen(fileName || t('Pasted Text'), e.target.value)}
+          onChange={(e) => {
+            if (e.target.value.length > 10 * 1024 * 1024) {
+              alert('Text exceeds 10MB limit');
+              return;
+            }
+            onFileOpen(fileName || t('Pasted Text'), e.target.value);
+          }}
           className="flex-1 p-3 text-xs font-mono th-bg-input th-text-2 resize-none outline-none leading-relaxed"
           spellCheck={false}
         />
@@ -451,9 +466,7 @@ function DiffView({ rows, diffIndices, currentDiffIdx, onNavigate, userNavRef }:
           <tbody>
             {rows.map((row, i) => {
               const isCurrentDiff = diffIndices[currentDiffIdx] === i;
-              const wdiff = (row.isDiff && row.leftType === 'delete' && row.rightType === 'insert')
-                ? wordDiff(row.leftText, row.rightText)
-                : null;
+              const wdiff = row.wdiff;
 
               return (
                 <tr
@@ -607,7 +620,19 @@ export function FileDiff() {
     if (!leftContent && !rightContent) return { rows: [], diffIndices: [], totalDiffs: 0 };
     const leftLines = leftContent.split('\n');
     const rightLines = rightContent.split('\n');
-    const diff = myersDiff(leftLines, rightLines);
+    const MAX_LINES = 10000;
+    
+    let diff: DiffLine[];
+    let skipWordDiff = false;
+    if (leftLines.length > MAX_LINES || rightLines.length > MAX_LINES) {
+      diff = [];
+      for (let i = 0; i < leftLines.length; i++) diff.push({ op: 'delete' as DiffOp, oldIdx: i, newIdx: -1, text: leftLines[i] });
+      for (let i = 0; i < rightLines.length; i++) diff.push({ op: 'insert' as DiffOp, oldIdx: -1, newIdx: i, text: rightLines[i] });
+      skipWordDiff = true;
+    } else {
+      diff = myersDiff(leftLines, rightLines);
+    }
+    
     const rows = buildRows(diff);
 
     // Collect diff group start indices
@@ -619,6 +644,10 @@ export function FileDiff() {
         inDiff = true;
       } else if (!row.isDiff) {
         inDiff = false;
+      }
+      
+      if (!skipWordDiff && row.isDiff && row.leftType === 'delete' && row.rightType === 'insert') {
+        row.wdiff = wordDiff(row.leftText, row.rightText);
       }
     });
 
