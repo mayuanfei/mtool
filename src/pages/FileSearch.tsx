@@ -418,7 +418,7 @@ export function FileSearch() {
             { label: "*.md", tip: t('glob match') },
             { label: "*.yml", tip: t('glob match') },
             { label: "size:>100MB", tip: t('size filter') },
-            { label: 'content:"关键词"', tip: t('file content search') },
+            { label: `content:"${t('keyword')}"`, tip: t('file content search') },
           ].map((item) => (
             <button
               key={item.label}

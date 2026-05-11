@@ -546,6 +546,16 @@ export function FileDiff() {
   const [currentDiffIdx, setCurrentDiffIdx] = useState(0);
   const userNavRef = useRef(false);
 
+  const leftContentRef = useRef(leftContent);
+  const rightContentRef = useRef(rightContent);
+  const leftNameRef = useRef(leftName);
+  const rightNameRef = useRef(rightName);
+
+  useEffect(() => { leftContentRef.current = leftContent; }, [leftContent]);
+  useEffect(() => { rightContentRef.current = rightContent; }, [rightContent]);
+  useEffect(() => { leftNameRef.current = leftName; }, [leftName]);
+  useEffect(() => { rightNameRef.current = rightName; }, [rightName]);
+
   const handleLeftFile = useCallback((name: string, content: string) => {
     setLeftName(name);
     setLeftContent(content);
@@ -591,10 +601,10 @@ export function FileDiff() {
             const [fullPath, content] = await invoke<[string, string]>('read_text_file_by_path', { path: droppedPath });
             const name = fullPath.split(/[/\\]/).pop() || fullPath;
 
-            if (!leftContent && leftName === '') {
+            if (!leftContentRef.current && leftNameRef.current === '') {
               handleLeftFile(name, content);
               dropSide = 'right';
-            } else if (!rightContent && rightName === '') {
+            } else if (!rightContentRef.current && rightNameRef.current === '') {
               handleRightFile(name, content);
               dropSide = 'left';
             } else if (dropSide === 'left') {
@@ -613,7 +623,7 @@ export function FileDiff() {
     };
     const cleanup = setup();
     return () => { cleanup.then(fn => fn()); };
-  }, [handleLeftFile, handleRightFile, leftContent, leftName, rightContent, rightName]);
+  }, [handleLeftFile, handleRightFile]);
 
   // Compute diff
   const { rows, diffIndices, totalDiffs, isTruncated } = useMemo(() => {

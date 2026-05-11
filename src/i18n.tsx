@@ -183,6 +183,7 @@ const translations = {
     'size filter': 'size filter',
     'file content search': 'file content search',
     'Reveal in file manager': 'Reveal in file manager',
+    'keyword': 'keyword',
 
     // FileDiff
     'File Compare': 'File Compare',
@@ -388,6 +389,7 @@ const translations = {
     'size filter': '大小过滤',
     'file content search': '文件内容搜索',
     'Reveal in file manager': '在文件管理器中定位',
+    'keyword': '关键词',
 
     // FileDiff
     'File Compare': '文件对比',
