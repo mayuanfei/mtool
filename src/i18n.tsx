@@ -118,6 +118,7 @@ const translations = {
     'Update error': 'Update error',
     "What's new in": "What's new in",
     'Cancel': 'Cancel',
+    'Skip this version': 'Skip this version',
 
     // MarkdownEditor
     'Markdown Editor': 'Markdown Editor',
@@ -317,6 +318,7 @@ const translations = {
     'Update error': '更新出错',
     "What's new in": '新版本内容',
     'Cancel': '取消',
+    'Skip this version': '跳过此版本',
 
     // MarkdownEditor
     'Markdown Editor': 'Markdown 编辑器',

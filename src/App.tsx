@@ -28,8 +28,21 @@ export default function App() {
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
-    if (hasUpdate) setShowUpdateModal(true);
-  }, [hasUpdate]);
+    if (hasUpdate && updater.updateInfo) {
+      const skipped = localStorage.getItem('mtool_skipped_version');
+      if (skipped !== updater.updateInfo.version) {
+        setShowUpdateModal(true);
+      }
+    }
+  }, [hasUpdate]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const handleSkip = () => {
+    if (updater.updateInfo) {
+      localStorage.setItem('mtool_skipped_version', updater.updateInfo.version);
+    }
+    setShowUpdateModal(false);
+    updater.dismissUpdate();
+  };
 
   const [jsonEnabled, setJsonEnabled] = useState(() => {
     const saved = localStorage.getItem('mtool_json_enabled');
@@ -172,6 +185,7 @@ export default function App() {
               updater.dismissUpdate();
             }
           }}
+          onSkip={handleSkip}
           onInstall={updater.startInstall}
           onRelaunch={updater.doRelaunch}
         />

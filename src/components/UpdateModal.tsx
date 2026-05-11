@@ -10,11 +10,12 @@ interface UpdateModalProps {
   error: string | null;
   installed: boolean;
   onClose: () => void;
+  onSkip: () => void;
   onInstall: () => void;
   onRelaunch: () => void;
 }
 
-export function UpdateModal({ open, updateInfo, downloading, progress, error, installed, onClose, onInstall, onRelaunch }: UpdateModalProps) {
+export function UpdateModal({ open, updateInfo, downloading, progress, error, installed, onClose, onSkip, onInstall, onRelaunch }: UpdateModalProps) {
   const { t } = useI18n();
   if (!open) return null;
 
@@ -70,31 +71,41 @@ export function UpdateModal({ open, updateInfo, downloading, progress, error, in
         )}
 
         {/* Actions */}
-        <div className="px-6 py-4 border-t th-border flex justify-end gap-3 th-bg-surface-h">
+        <div className="px-6 py-4 border-t th-border flex justify-between gap-3 th-bg-surface-h">
           {!downloading && !installed && (
             <button
-              onClick={onClose}
-              className="px-4 py-2 text-sm th-text-3 th-bg-input-alt border th-border-subtle rounded-lg th-hover-surface transition-colors"
+              onClick={onSkip}
+              className="px-4 py-2 text-sm th-text-muted th-bg-input-alt border th-border-subtle rounded-lg th-hover-surface transition-colors"
             >
-              {t('Cancel')}
+              {t('Skip this version')}
             </button>
           )}
-          {installed ? (
-            <button
-              onClick={onRelaunch}
-              className="px-4 py-2 text-sm font-medium bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg transition-colors"
-            >
-              {t('Restart Now')}
-            </button>
-          ) : (
-            <button
-              onClick={onInstall}
-              disabled={downloading}
-              className="px-4 py-2 text-sm font-medium bg-indigo-600 hover:bg-indigo-700 disabled:opacity-60 disabled:cursor-not-allowed text-white rounded-lg transition-colors"
-            >
-              {downloading ? `${t('Downloading...')} ${progress}%` : t('Install & Restart')}
-            </button>
-          )}
+          <div className="flex gap-3 ml-auto">
+            {!downloading && !installed && (
+              <button
+                onClick={onClose}
+                className="px-4 py-2 text-sm th-text-3 th-bg-input-alt border th-border-subtle rounded-lg th-hover-surface transition-colors"
+              >
+                {t('Cancel')}
+              </button>
+            )}
+            {installed ? (
+              <button
+                onClick={onRelaunch}
+                className="px-4 py-2 text-sm font-medium bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg transition-colors"
+              >
+                {t('Restart Now')}
+              </button>
+            ) : (
+              <button
+                onClick={onInstall}
+                disabled={downloading}
+                className="px-4 py-2 text-sm font-medium bg-indigo-600 hover:bg-indigo-700 disabled:opacity-60 disabled:cursor-not-allowed text-white rounded-lg transition-colors"
+              >
+                {downloading ? `${t('Downloading...')} ${progress}%` : t('Install & Restart')}
+              </button>
+            )}
+          </div>
         </div>
       </div>
     </div>
