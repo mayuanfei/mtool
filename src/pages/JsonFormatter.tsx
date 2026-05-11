@@ -107,6 +107,8 @@ function buildCollapsibleHtml(text: string, highlightedHtml: string): string {
   return render(0, plainLines.length - 1);
 }
 
+const MAX_LINE_NUMBER_ROWS = 2000;
+
 export function JsonFormatter() {
   const { t } = useI18n();
   const [rawInput, setRawInput] = useState('');
@@ -122,6 +124,7 @@ export function JsonFormatter() {
 
   const inputLinesCount = useMemo(() => {
     const count = rawInput.split('\n').length;
+    if (count > MAX_LINE_NUMBER_ROWS) return null;
     return Array.from({ length: Math.max(1, count) }, (_, i) => i + 1);
   }, [rawInput]);
 
@@ -267,13 +270,23 @@ export function JsonFormatter() {
               ref={lineNumbersRef}
               className="w-12 flex-shrink-0 py-4 pr-3 border-r th-border th-bg-surface-h th-text-faint text-sm leading-relaxed font-mono text-right overflow-hidden select-none"
             >
-              {inputLinesCount.map(num => (
-                <div key={num}>{num}</div>
-              ))}
+              {inputLinesCount ? (
+                inputLinesCount.map(num => (
+                  <div key={num}>{num}</div>
+                ))
+              ) : (
+                <div className="h-full flex items-center justify-center text-xs opacity-50">•••</div>
+              )}
             </div>
             <textarea
               value={rawInput}
-              onChange={(e) => setRawInput(e.target.value)}
+              onChange={(e) => {
+                if (e.target.value.length > 5 * 1024 * 1024) {
+                  showError(t('Input exceeds 5MB limit. Please provide a smaller JSON.'));
+                  return;
+                }
+                setRawInput(e.target.value);
+              }}
               onScroll={handleScroll}
               className="flex-1 w-full bg-transparent py-4 px-4 th-text-2 text-sm leading-relaxed font-mono focus:outline-none resize-none placeholder:text-slate-400 dark:placeholder:text-slate-500 whitespace-pre overflow-auto"
               placeholder={t('Paste raw JSON here...')}

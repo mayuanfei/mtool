@@ -28,6 +28,7 @@ const translations = {
     'Lines': 'Lines',
     'Length': 'Length',
     'chars': 'chars',
+    'Input exceeds 5MB limit. Please provide a smaller JSON.': 'Input exceeds 5MB limit. Please provide a smaller JSON.',
     
     // TextToQr
     'Raw Payload': 'Raw Payload',
@@ -232,6 +233,7 @@ const translations = {
     'Lines': '行数',
     'Length': '长度',
     'chars': '字符',
+    'Input exceeds 5MB limit. Please provide a smaller JSON.': '输入超过 5MB 限制。请提供较小的 JSON。',
     
     // TextToQr
     'Raw Payload': '原始文本',
