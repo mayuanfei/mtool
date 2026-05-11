@@ -608,8 +608,50 @@ body {
 }
 
 /* ========================================
-   JSON Syntax Highlight
+   JSON Syntax Highlight & Collapsible Tree
    ======================================== */
+
+details.json-collapse {
+  display: inline;
+}
+
+details.json-collapse > summary.json-summary {
+  display: inline;
+  list-style: none;
+  cursor: pointer;
+}
+
+details.json-collapse > summary.json-summary::-webkit-details-marker {
+  display: none;
+}
+
+details.json-collapse:not([open]) > summary.json-summary::after {
+  content: ' ... ' attr(data-suffix);
+  color: var(--text-muted);
+}
+
+.json-toggle {
+  display: inline-block;
+  width: 14px;
+  margin-left: -14px;
+  text-align: center;
+  color: var(--text-muted);
+  font-size: 9px;
+  user-select: none;
+  vertical-align: middle;
+}
+
+.json-toggle:hover {
+  color: var(--text-primary);
+}
+
+details.json-collapse[open] > summary.json-summary .json-toggle::after {
+  content: '▼';
+}
+
+details.json-collapse:not([open]) > summary.json-summary .json-toggle::after {
+  content: '▶';
+}
 
 /* Keys — light: blue-700, dark: blue-300 */
 .json-key   { color: #1d4ed8; }

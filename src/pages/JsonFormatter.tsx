@@ -12,11 +12,8 @@ const BRACE_COLORS = [
   'text-violet-400',
 ];
 
-function escapeHtml(ch: string): string {
-  if (ch === '&') return '&amp;';
-  if (ch === '<') return '&lt;';
-  if (ch === '>') return '&gt;';
-  return ch;
+function escapeHtml(str: string): string {
+  return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 
 // Full JSON syntax highlighter: keys=blue, strings=green, numbers=red,
@@ -57,6 +54,59 @@ function syntaxHighlight(json: string): string {
   );
 }
 
+function buildCollapsibleHtml(text: string, highlightedHtml: string): string {
+  const plainLines = text.split('\n');
+  const htmlLines = highlightedHtml.split('\n');
+  
+  const blockEnds = new Map<number, number>();
+  const stack: number[] = [];
+  for (let i = 0; i < plainLines.length; i++) {
+    const trimmed = plainLines[i].trim();
+    if (trimmed.endsWith('{') || trimmed.endsWith('[')) {
+      stack.push(i);
+    } else if (trimmed.startsWith('}') || trimmed.startsWith(']')) {
+      if (stack.length > 0) {
+        const start = stack.pop()!;
+        blockEnds.set(start, i);
+      }
+    }
+  }
+
+  function render(start: number, end: number): string {
+    const result = [];
+    let i = start;
+    while (i <= end) {
+      if (blockEnds.has(i)) {
+        const blockEnd = blockEnds.get(i)!;
+        const startHtml = htmlLines[i];
+        const match = startHtml.match(/^( *)/);
+        const spaces = match ? match[1] : '';
+        const rest = startHtml.slice(spaces.length);
+        const suffix = plainLines[blockEnd].trim();
+        
+        const summary = `<summary class="json-summary" data-suffix="${escapeHtml(suffix)}">${spaces}<span class="json-toggle"></span>${rest}</summary>`;
+        
+        const inner = render(i + 1, blockEnd - 1);
+        const endLineHtml = htmlLines[blockEnd];
+        
+        const detailsContent = [summary];
+        if (inner) detailsContent.push(inner);
+        detailsContent.push(endLineHtml);
+        
+        result.push(`<details class="json-collapse" open>${detailsContent.join('\n')}</details>`);
+        
+        i = blockEnd + 1;
+      } else {
+        result.push(htmlLines[i]);
+        i++;
+      }
+    }
+    return result.join('\n');
+  }
+
+  return render(0, plainLines.length - 1);
+}
+
 export function JsonFormatter() {
   const { t } = useI18n();
   const [rawInput, setRawInput] = useState('');
@@ -86,7 +136,8 @@ export function JsonFormatter() {
         text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
       );
     } else {
-      setFormattedHtml(syntaxHighlight(text));
+      const highlighted = syntaxHighlight(text);
+      setFormattedHtml(buildCollapsibleHtml(text, highlighted));
     }
     setIsError(false);
   }, []);
