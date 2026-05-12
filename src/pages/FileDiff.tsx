@@ -594,8 +594,8 @@ export function FileDiff() {
 
           // Single file: assign to whichever side is empty, or alternate
           const droppedPath = paths[0];
-          const ext = droppedPath.split('.').pop()?.toLowerCase() || '';
-          if (!isTextFile(`f.${ext}`) && !droppedPath.startsWith('.')) return;
+          const fileName = droppedPath.split(/[/\\]/).pop() || droppedPath;
+          if (!isTextFile(fileName)) return;
 
           try {
             const [fullPath, content] = await invoke<[string, string]>('read_text_file_by_path', { path: droppedPath });

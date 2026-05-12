@@ -24,6 +24,12 @@ export function MarkdownEditor() {
   const scrollSourceRef = useRef<'editor' | 'preview' | null>(null);
   const scrollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  useEffect(() => {
+    return () => {
+      if (scrollTimerRef.current) clearTimeout(scrollTimerRef.current);
+    };
+  }, []);
+
   // Configure marked with GFM + highlight.js
   const marked = useMemo(() => {
     const m = new Marked(
@@ -123,7 +129,7 @@ export function MarkdownEditor() {
     setIsDragOver(false);
   }, []);
 
-  // Copy rendered HTML
+  // Copy Markdown source
   const handleCopy = useCallback(async () => {
     if (!content) return;
     try {
