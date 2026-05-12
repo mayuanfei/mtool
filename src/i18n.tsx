@@ -415,10 +415,12 @@ const translations = {
   }
 };
 
+export type TranslationKey = keyof typeof translations.en;
+
 type I18nContextType = {
   language: Language;
   setLanguage: (lang: Language) => void;
-  t: (key: keyof typeof translations.en) => string;
+  t: (key: TranslationKey) => string;
 };
 
 const I18nContext = createContext<I18nContextType | undefined>(undefined);
@@ -433,7 +435,7 @@ export function I18nProvider({ children }: { children: React.ReactNode }) {
     localStorage.setItem('mtool_language', language);
   }, [language]);
 
-  const t = useCallback((key: keyof typeof translations.en) => {
+  const t = useCallback((key: TranslationKey) => {
     return translations[language][key] || key;
   }, [language]);
 

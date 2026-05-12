@@ -1,6 +1,6 @@
 import { Copy, RefreshCcw, Check, Key } from 'lucide-react';
 import { useState, useEffect, useCallback } from 'react';
-import { useI18n } from '../i18n';
+import { useI18n, TranslationKey } from '../i18n';
 
 const Toggle = ({ checked, onChange }: { checked: boolean; onChange: () => void }) => {
   return (
@@ -275,7 +275,7 @@ export function PasswordGenerator() {
             <div className="flex items-center">
               {getStrengthBars()}
               <span className={`text-[11px] font-bold tracking-widest uppercase ${getStrengthTextColor(strength)}`}>
-                {t(strength as any)}
+                {t(strength as TranslationKey)}
               </span>
             </div>
           </div>
@@ -401,7 +401,7 @@ export function PasswordGenerator() {
                           item.strength === 'FAIR' ? 'bg-amber-500/10 text-amber-400' :
                           'bg-rose-500/10 text-rose-400'
                         }`}>
-                          {t(item.strength as any)}
+                          {t(item.strength as TranslationKey)}
                         </span>
                       </td>
                       <td className="px-6 py-4 text-right">
