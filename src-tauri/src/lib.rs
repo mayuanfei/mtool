@@ -679,19 +679,39 @@ pub fn run() {
 
 #[cfg(test)]
 mod tests {
-    #[test]
-    fn setup_checks_existing_index_before_starting_watcher() {
-        let source = include_str!("lib.rs");
-        let setup_start = source.find(".setup(|app| {").unwrap();
-        let setup = &source[setup_start..];
-        let count_pos = setup.find("let has_data = count_entries(&db_path) > 0;").unwrap();
-        let watcher_pos = setup
-            .find("maybe_start_watcher(&engine, has_data, index_disabled);")
-            .unwrap();
+    use super::*;
+    use std::sync::atomic::Ordering;
 
-        assert!(
-            count_pos < watcher_pos,
-            "setup 应先判断是否已有索引，再决定是否启动 watcher"
-        );
+    #[test]
+    fn test_maybe_start_watcher_conditions() {
+        let engine = file_search::IndexEngine::new_with_db(":memory:".to_string());
+        
+        // Ensure watcher_stopped is initially true
+        engine.watcher_stopped.store(true, Ordering::Relaxed);
+        
+        // Case 1: index_disabled = true, has_data = true
+        // Watcher should NOT start
+        maybe_start_watcher(&engine, true, true);
+        assert!(engine.watcher_stopped.load(Ordering::Relaxed), "Watcher should not start if disabled");
+        
+        // Case 2: index_disabled = false, has_data = false
+        // Watcher should NOT start
+        maybe_start_watcher(&engine, false, false);
+        assert!(engine.watcher_stopped.load(Ordering::Relaxed), "Watcher should not start if no data");
+        
+        // Case 3: index_disabled = false, has_data = true
+        // Watcher SHOULD start. We set shutdown=true beforehand so the thread exits quickly.
+        engine.shutdown.store(true, Ordering::Relaxed);
+        maybe_start_watcher(&engine, true, false);
+        
+        // start_fs_watcher immediately sets watcher_stopped to false before spawning thread
+        assert!(!engine.watcher_stopped.load(Ordering::Relaxed), "Watcher should start");
+        
+        // Wait for the watcher thread to gracefully exit to avoid panics on test end
+        let mut attempts = 0;
+        while !engine.watcher_stopped.load(Ordering::Relaxed) && attempts < 500 {
+            std::thread::sleep(std::time::Duration::from_millis(10));
+            attempts += 1;
+        }
     }
 }

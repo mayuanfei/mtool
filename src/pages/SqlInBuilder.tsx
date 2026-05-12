@@ -1,5 +1,5 @@
 import { Copy, Check, Database, Trash2, ChevronDown, ChevronUp } from 'lucide-react';
-import { useState, useCallback, useMemo } from 'react';
+import { useState, useMemo } from 'react';
 import { useI18n } from '../i18n';
 
 type QuoteStyle = 'single' | 'double' | 'none';
@@ -11,8 +11,8 @@ export function SqlInBuilder() {
   const [isCopied, setIsCopied] = useState(false);
   const [showDuplicates, setShowDuplicates] = useState(false);
 
-  const buildOutput = useCallback(() => {
-    if (!input.trim()) return '';
+  const { output, inputCount, outputCount } = useMemo(() => {
+    if (!input.trim()) return { output: '', inputCount: 0, outputCount: 0 };
 
     const lines = input
       .split(/[\n\r]+/)
@@ -22,7 +22,7 @@ export function SqlInBuilder() {
     // Deduplicate while preserving order
     const unique = [...new Set(lines)];
 
-    if (unique.length === 0) return '';
+    if (unique.length === 0) return { output: '', inputCount: lines.length, outputCount: 0 };
 
     let formatted: string;
     switch (quoteStyle) {
@@ -37,24 +37,12 @@ export function SqlInBuilder() {
         break;
     }
 
-    return `(${formatted})`;
+    return { 
+      output: `(${formatted})`, 
+      inputCount: lines.length, 
+      outputCount: unique.length 
+    };
   }, [input, quoteStyle]);
-
-  const output = buildOutput();
-
-  const inputCount = input
-    .split(/[\n\r]+/)
-    .map(l => l.trim())
-    .filter(l => l.length > 0).length;
-
-  const outputCount = output
-    ? [...new Set(
-        input
-          .split(/[\n\r]+/)
-          .map(l => l.trim())
-          .filter(l => l.length > 0)
-      )].length
-    : 0;
 
   const duplicateCount = inputCount - outputCount;
 
