@@ -140,10 +140,7 @@ export function PasswordGenerator() {
     }
   }, [length, useUpper, useLower, useNumbers, useSymbols, customSymbols, excludeChars, generateCount, calculateStrength]);
 
-  // Initial generation
-  useEffect(() => {
-    generatePassword(false);
-  }, [generatePassword]);
+
 
   // Save history to localStorage
   useEffect(() => {
