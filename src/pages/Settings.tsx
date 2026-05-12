@@ -6,6 +6,7 @@ import { useI18n } from '../i18n';
 import { useTheme } from '../theme';
 import type { Theme } from '../theme';
 import type { UseUpdaterReturn } from '../updater';
+import type { ToolKey, ToolsEnabled } from '../App';
 
 const Toggle = ({ checked, onChange, disabled }: { checked: boolean; onChange: () => void; disabled?: boolean }) => {
   return (
@@ -26,8 +27,8 @@ const Toggle = ({ checked, onChange, disabled }: { checked: boolean; onChange: (
 };
 
 interface SettingsPageProps {
-  toolsEnabled: Record<string, boolean>;
-  toggleTool: (tool: string, enabled: boolean) => void;
+  toolsEnabled: ToolsEnabled;
+  toggleTool: (tool: ToolKey, enabled: boolean) => void;
   activePage: string;
   setActivePage: (page: string) => void;
   updater: UseUpdaterReturn;

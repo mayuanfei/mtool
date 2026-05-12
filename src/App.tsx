@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { Sidebar } from './components/Sidebar';
 import { UpdateModal } from './components/UpdateModal';
 import { JsonFormatter } from './pages/JsonFormatter';
@@ -13,6 +13,11 @@ import { UserPage } from './pages/User';
 import { useI18n } from './i18n';
 import { useUpdater } from './updater';
 
+export type ToolKey = 'json' | 'qr' | 'pwd' | 'sqlIn' | 'md' | 'fileSearch' | 'fileDiff';
+export type ToolsEnabled = Record<ToolKey, boolean>;
+
+const DEFAULT_TOOLS: ToolsEnabled = { json: true, qr: true, pwd: true, sqlIn: true, md: true, fileSearch: true, fileDiff: true };
+
 export default function App() {
   const [activePage, setActivePage] = useState(() => {
     return localStorage.getItem('mtool_active_page') || 'settings';
@@ -23,8 +28,12 @@ export default function App() {
 
   const [showUpdateModal, setShowUpdateModal] = useState(false);
 
+  const didCheck = useRef(false);
   useEffect(() => {
-    if (autoUpdate) checkForUpdate();
+    if (!didCheck.current && autoUpdate) {
+      didCheck.current = true;
+      checkForUpdate();
+    }
   }, [autoUpdate, checkForUpdate]);
 
   useEffect(() => {
@@ -44,13 +53,14 @@ export default function App() {
     updater.dismissUpdate();
   };
 
-  const [toolsEnabled, setToolsEnabled] = useState(() => {
+  const [toolsEnabled, setToolsEnabled] = useState<ToolsEnabled>(() => {
     try {
       const saved = localStorage.getItem('mtool_tools_enabled');
-      if (saved) return JSON.parse(saved);
+      if (saved) return { ...DEFAULT_TOOLS, ...JSON.parse(saved) };
     } catch (e) {}
-    const getOld = (key: string) => {
+    const getOld = (key: string): boolean => {
       const v = localStorage.getItem(key);
+      localStorage.removeItem(key);
       return v !== null ? v === 'true' : true;
     };
     return {
@@ -68,8 +78,8 @@ export default function App() {
     localStorage.setItem('mtool_tools_enabled', JSON.stringify(toolsEnabled));
   }, [toolsEnabled]);
 
-  const toggleTool = (tool: string, enabled: boolean) => {
-    setToolsEnabled((prev: any) => ({ ...prev, [tool]: enabled }));
+  const toggleTool = (tool: ToolKey, enabled: boolean) => {
+    setToolsEnabled((prev) => ({ ...prev, [tool]: enabled }));
   };
 
   useEffect(() => {

@@ -420,10 +420,15 @@ async fn disable_file_search(
             std::thread::sleep(Duration::from_millis(10));
             attempts += 1;
         }
+        if attempts >= 500 {
+            eprintln!("[mtool] disable_file_search: timeout waiting for watcher to stop");
+        }
         let _ = std::fs::remove_file(&db_path);
         let _ = std::fs::remove_file(format!("{}-wal", db_path));
         let _ = std::fs::remove_file(format!("{}-shm", db_path));
-        let _ = file_search::init_db(&db_path);
+        if let Err(e) = file_search::init_db(&db_path) {
+            eprintln!("[mtool] failed to init db in disable_file_search: {}", e);
+        }
         // 持久化禁用状态，下次启动时跳过自动建索引和 watcher
         if let Ok(conn) = rusqlite::Connection::open(&db_path) {
             conn.execute(
@@ -499,7 +504,6 @@ fn open_file(path: String) -> Result<(), String> {
     Ok(())
 }
 
-// ---------------------------------------------------------------------------
 // ---------------------------------------------------------------------------
 // 文件系统监听器（增量更新索引）
 // ---------------------------------------------------------------------------
@@ -614,7 +618,9 @@ pub fn run() {
        .plugin(tauri_plugin_process::init())
         .setup(|app| {
             let db_path = get_db_path();
-            let _ = init_db(&db_path);
+            if let Err(e) = init_db(&db_path) {
+                eprintln!("[mtool] failed to init db in setup: {}", e);
+            }
 
             let engine = IndexEngine::new_with_db(db_path.clone());
             engine.load_from_db();
