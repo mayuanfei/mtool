@@ -1175,7 +1175,7 @@ mod tests {
     #[test]
     fn search_in_db_treats_underscore_as_literal_in_name_terms() {
         let db_path = temp_db_path("underscore");
-        init_db(&db_path);
+        let _ = init_db(&db_path);
         let conn = Connection::open(&db_path).unwrap();
 
         insert_entry(&conn, "my_file", "/tmp/my_file");
@@ -1195,7 +1195,7 @@ mod tests {
     #[test]
     fn search_in_db_treats_percent_as_literal_in_name_terms() {
         let db_path = temp_db_path("percent");
-        init_db(&db_path);
+        let _ = init_db(&db_path);
         let conn = Connection::open(&db_path).unwrap();
 
         insert_entry(&conn, "100%", "/tmp/100pct");
@@ -1233,5 +1233,25 @@ mod tests {
         let _ = std::fs::remove_file(db_path);
         let _ = std::fs::remove_file(format!("{}-wal", db_path));
         let _ = std::fs::remove_file(format!("{}-shm", db_path));
+    }
+
+    #[test]
+    fn test_parse_query() {
+        let q = parse_query("hello world *.yml size:>100mb content:\"test phrase\"");
+        assert_eq!(q.name_terms, vec!["hello".to_string(), "world".to_string()]);
+        assert_eq!(q.glob_pattern, Some("*.yml".to_string()));
+        assert!(q.size_filter.is_some());
+        assert_eq!(q.size_filter.as_ref().unwrap().bytes, 104857600);
+        assert!(matches!(q.size_filter.as_ref().unwrap().op, SizeOp::Gt));
+        assert_eq!(q.content_filter, Some("test phrase".to_string()));
+
+        let q2 = parse_query("content:'single quote phrase'");
+        assert_eq!(q2.content_filter, Some("single quote phrase".to_string()));
+
+        let q3 = parse_query("size:>5kb just text");
+        assert!(q3.size_filter.is_some());
+        assert_eq!(q3.size_filter.as_ref().unwrap().bytes, 5120);
+        assert!(matches!(q3.size_filter.as_ref().unwrap().op, SizeOp::Gt));
+        assert_eq!(q3.name_terms, vec!["just".to_string(), "text".to_string()]);
     }
 }
