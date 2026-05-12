@@ -143,8 +143,7 @@ export function PasswordGenerator() {
   // Initial generation
   useEffect(() => {
     generatePassword(false);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [generatePassword]);
 
   // Save history to localStorage
   useEffect(() => {

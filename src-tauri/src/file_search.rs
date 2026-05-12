@@ -1175,6 +1175,7 @@ mod tests {
     #[test]
     fn search_in_db_treats_underscore_as_literal_in_name_terms() {
         let db_path = temp_db_path("underscore");
+        let _guard = TempDb(db_path.clone());
         let _ = init_db(&db_path);
         let conn = Connection::open(&db_path).unwrap();
 
@@ -1189,12 +1190,12 @@ mod tests {
 
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].name, "my_file");
-        cleanup_db_files(&db_path);
     }
 
     #[test]
     fn search_in_db_treats_percent_as_literal_in_name_terms() {
         let db_path = temp_db_path("percent");
+        let _guard = TempDb(db_path.clone());
         let _ = init_db(&db_path);
         let conn = Connection::open(&db_path).unwrap();
 
@@ -1209,7 +1210,6 @@ mod tests {
 
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].name, "100%");
-        cleanup_db_files(&db_path);
     }
 
     fn temp_db_path(tag: &str) -> String {
@@ -1218,6 +1218,11 @@ mod tests {
             .join(format!("mtool-{tag}-{nanos}.db"))
             .to_string_lossy()
             .to_string()
+    }
+
+    struct TempDb(String);
+    impl Drop for TempDb {
+        fn drop(&mut self) { cleanup_db_files(&self.0); }
     }
 
     fn insert_entry(conn: &Connection, name: &str, path: &str) {

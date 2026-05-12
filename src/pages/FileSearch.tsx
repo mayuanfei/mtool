@@ -170,6 +170,9 @@ export function FileSearch() {
     };
   }, []);
 
+  const tRef = useRef(t);
+  useEffect(() => { tRef.current = t; }, [t]);
+
   // 搜索（带 300ms 防抖）
   const doSearch = useCallback((q: string) => {
     if (debounceRef.current) clearTimeout(debounceRef.current);
@@ -202,14 +205,14 @@ export function FileSearch() {
         if (searchIdRef.current !== id) return;
         const errStr = String(e);
         setError(errStr === 'ERR_CONTENT_REQUIRES_FILENAME'
-          ? t('Content search requires a filename or glob pattern, e.g. *.yml content:xxx')
+          ? tRef.current('Content search requires a filename or glob pattern, e.g. *.yml content:xxx')
           : errStr);
         setResults([]);
       } finally {
         if (searchIdRef.current === id) setIsSearching(false);
       }
     }, 300);
-  }, [t]);
+  }, []);
 
   useEffect(() => {
     doSearch(query);

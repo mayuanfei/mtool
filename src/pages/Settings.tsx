@@ -188,7 +188,10 @@ export function SettingsPage({ toolsEnabled, toggleTool, activePage, setActivePa
               <div className="relative">
                 <select 
                   value={language}
-                  onChange={(e) => setLanguage(e.target.value as any)}
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    if (v === 'en' || v === 'zh') setLanguage(v);
+                  }}
                   className="appearance-none th-bg-input border th-border-subtle th-text-2 text-sm rounded-lg focus:ring-indigo-500 focus:border-indigo-500 focus:outline-none block w-40 p-2.5 pr-8 transition-colors cursor-pointer shadow-inner"
                 >
                   <option value="en">English</option>
