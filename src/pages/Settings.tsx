@@ -26,27 +26,15 @@ const Toggle = ({ checked, onChange, disabled }: { checked: boolean; onChange: (
 };
 
 interface SettingsPageProps {
-  jsonEnabled: boolean;
-  setJsonEnabled: (v: boolean) => void;
-  qrEnabled: boolean;
-  setQrEnabled: (v: boolean) => void;
-  pwdEnabled: boolean;
-  setPwdEnabled: (v: boolean) => void;
-  sqlInEnabled: boolean;
-  setSqlInEnabled: (v: boolean) => void;
-  mdEnabled: boolean;
-  setMdEnabled: (v: boolean) => void;
-  fileSearchEnabled: boolean;
-  setFileSearchEnabled: (v: boolean) => void;
-  fileDiffEnabled: boolean;
-  setFileDiffEnabled: (v: boolean) => void;
+  toolsEnabled: Record<string, boolean>;
+  toggleTool: (tool: string, enabled: boolean) => void;
   activePage: string;
   setActivePage: (page: string) => void;
   updater: UseUpdaterReturn;
   setShowModal: (v: boolean) => void;
 }
 
-export function SettingsPage({ jsonEnabled, setJsonEnabled, qrEnabled, setQrEnabled, pwdEnabled, setPwdEnabled, sqlInEnabled, setSqlInEnabled, mdEnabled, setMdEnabled, fileSearchEnabled, setFileSearchEnabled, fileDiffEnabled, setFileDiffEnabled, activePage, setActivePage, updater, setShowModal }: SettingsPageProps) {
+export function SettingsPage({ toolsEnabled, toggleTool, activePage, setActivePage, updater, setShowModal }: SettingsPageProps) {
   const { t, language, setLanguage } = useI18n();
   const { theme, setTheme } = useTheme();
   const [isProcessing, setIsProcessing] = useState(false);
@@ -86,20 +74,20 @@ export function SettingsPage({ jsonEnabled, setJsonEnabled, qrEnabled, setQrEnab
                 <p className="text-sm th-text-muted">{t('Search and find files by name, size, or content.')}</p>
               </div>
               <Toggle
-                checked={fileSearchEnabled}
+                checked={toolsEnabled.fileSearch}
                 disabled={isProcessing}
                 onChange={async () => {
                   if (isProcessing) return;
                   setIsProcessing(true);
-                  const next = !fileSearchEnabled;
-                  setFileSearchEnabled(next);
+                  const next = !toolsEnabled.fileSearch;
+                  toggleTool('fileSearch', next);
                   if (!next && activePage === 'fileSearch') setActivePage('settings');
                   try {
                     if (!next) await invoke('disable_file_search');
                     else await invoke('build_index');
                   } catch (e) {
                     console.error(e);
-                    setFileSearchEnabled(!next);
+                    toggleTool('fileSearch', !next);
                   } finally {
                     setIsProcessing(false);
                   }
@@ -112,9 +100,9 @@ export function SettingsPage({ jsonEnabled, setJsonEnabled, qrEnabled, setQrEnab
                 <p className="text-base font-medium th-text-2 mb-1">{t('File Compare')}</p>
                 <p className="text-sm th-text-muted">{t('Compare two text files and highlight differences.')}</p>
               </div>
-              <Toggle checked={fileDiffEnabled} onChange={() => {
-                const next = !fileDiffEnabled;
-                setFileDiffEnabled(next);
+              <Toggle checked={toolsEnabled.fileDiff} onChange={() => {
+                const next = !toolsEnabled.fileDiff;
+                toggleTool('fileDiff', next);
                 if (!next && activePage === 'fileDiff') setActivePage('settings');
               }} />
             </div>
@@ -124,9 +112,9 @@ export function SettingsPage({ jsonEnabled, setJsonEnabled, qrEnabled, setQrEnab
                 <p className="text-base font-medium th-text-2 mb-1">{t('Markdown Editor')}</p>
                 <p className="text-sm th-text-muted">{t('View and edit Markdown files with live preview.')}</p>
               </div>
-              <Toggle checked={mdEnabled} onChange={() => {
-                const next = !mdEnabled;
-                setMdEnabled(next);
+              <Toggle checked={toolsEnabled.md} onChange={() => {
+                const next = !toolsEnabled.md;
+                toggleTool('md', next);
                 if (!next && activePage === 'md') setActivePage('settings');
               }} />
             </div>
@@ -136,9 +124,9 @@ export function SettingsPage({ jsonEnabled, setJsonEnabled, qrEnabled, setQrEnab
                 <p className="text-base font-medium th-text-2 mb-1">{t('JSON Formatter')}</p>
                 <p className="text-sm th-text-muted">{t('Parse, validate, and beautify raw JSON payloads.')}</p>
               </div>
-              <Toggle checked={jsonEnabled} onChange={() => {
-                const next = !jsonEnabled;
-                setJsonEnabled(next);
+              <Toggle checked={toolsEnabled.json} onChange={() => {
+                const next = !toolsEnabled.json;
+                toggleTool('json', next);
                 if (!next && activePage === 'json') setActivePage('settings');
               }} />
             </div>
@@ -148,9 +136,9 @@ export function SettingsPage({ jsonEnabled, setJsonEnabled, qrEnabled, setQrEnab
                 <p className="text-base font-medium th-text-2 mb-1">{t('Text to QR')}</p>
                 <p className="text-sm th-text-muted">{t('Generate scannable QR codes from string inputs.')}</p>
               </div>
-              <Toggle checked={qrEnabled} onChange={() => {
-                const next = !qrEnabled;
-                setQrEnabled(next);
+              <Toggle checked={toolsEnabled.qr} onChange={() => {
+                const next = !toolsEnabled.qr;
+                toggleTool('qr', next);
                 if (!next && activePage === 'qr') setActivePage('settings');
               }} />
             </div>
@@ -160,9 +148,9 @@ export function SettingsPage({ jsonEnabled, setJsonEnabled, qrEnabled, setQrEnab
                 <p className="text-base font-medium th-text-2 mb-1">{t('Password Generator')}</p>
                 <p className="text-sm th-text-muted">{t('Create secure passwords.')}</p>
               </div>
-              <Toggle checked={pwdEnabled} onChange={() => {
-                const next = !pwdEnabled;
-                setPwdEnabled(next);
+              <Toggle checked={toolsEnabled.pwd} onChange={() => {
+                const next = !toolsEnabled.pwd;
+                toggleTool('pwd', next);
                 if (!next && activePage === 'pwd') setActivePage('settings');
               }} />
             </div>
@@ -172,9 +160,9 @@ export function SettingsPage({ jsonEnabled, setJsonEnabled, qrEnabled, setQrEnab
                 <p className="text-base font-medium th-text-2 mb-1">{t('SQL IN Builder')}</p>
                 <p className="text-sm th-text-muted">{t('Build SQL IN clause from column values.')}</p>
               </div>
-              <Toggle checked={sqlInEnabled} onChange={() => {
-                const next = !sqlInEnabled;
-                setSqlInEnabled(next);
+              <Toggle checked={toolsEnabled.sqlIn} onChange={() => {
+                const next = !toolsEnabled.sqlIn;
+                toggleTool('sqlIn', next);
                 if (!next && activePage === 'sqlIn') setActivePage('settings');
               }} />
             </div>

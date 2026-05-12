@@ -9,7 +9,7 @@
 - UI is a single app shell with local `activePage` state in `src/App.tsx`; there is no router.
 - Main frontend areas live in `src/pages/` and shared chrome is in `src/components/`.
 - Tauri entry is `src-tauri/src/main.rs`, which delegates to `src-tauri/src/lib.rs`.
-- Current Rust side is minimal: one `greet` command plus `tauri-plugin-opener`; do not assume more native APIs exist.
+- Current Rust side has multiple native APIs (e.g. `format_json`, `minify_json`, `generate_qr`, `build_index`, `search_files`, `disable_file_search`, `reveal_in_explorer`, etc.) plus `tauri-plugin-opener`; consult `src-tauri/src/lib.rs` for the full list.
 
 ## Commands
 - Install deps: `npm install`

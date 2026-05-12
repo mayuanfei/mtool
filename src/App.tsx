@@ -25,7 +25,7 @@ export default function App() {
 
   useEffect(() => {
     if (autoUpdate) checkForUpdate();
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [autoUpdate, checkForUpdate]);
 
   useEffect(() => {
     if (hasUpdate && updater.updateInfo) {
@@ -44,68 +44,33 @@ export default function App() {
     updater.dismissUpdate();
   };
 
-  const [jsonEnabled, setJsonEnabled] = useState(() => {
-    const saved = localStorage.getItem('mtool_json_enabled');
-    return saved !== null ? saved === 'true' : true;
-  });
-  
-  const [qrEnabled, setQrEnabled] = useState(() => {
-    const saved = localStorage.getItem('mtool_qr_enabled');
-    return saved !== null ? saved === 'true' : true;
-  });
-
-  const [pwdEnabled, setPwdEnabled] = useState(() => {
-    const saved = localStorage.getItem('mtool_pwd_enabled');
-    return saved !== null ? saved === 'true' : true;
-  });
-
-  const [sqlInEnabled, setSqlInEnabled] = useState(() => {
-    const saved = localStorage.getItem('mtool_sqlin_enabled');
-    return saved !== null ? saved === 'true' : true;
-  });
-
-  const [mdEnabled, setMdEnabled] = useState(() => {
-    const saved = localStorage.getItem('mtool_md_enabled');
-    return saved !== null ? saved === 'true' : true;
-  });
-
-  const [fileSearchEnabled, setFileSearchEnabled] = useState(() => {
-    const saved = localStorage.getItem('mtool_filesearch_enabled');
-    return saved !== null ? saved === 'true' : true;
-  });
-
-  const [fileDiffEnabled, setFileDiffEnabled] = useState(() => {
-    const saved = localStorage.getItem('mtool_filediff_enabled');
-    return saved !== null ? saved === 'true' : true;
+  const [toolsEnabled, setToolsEnabled] = useState(() => {
+    try {
+      const saved = localStorage.getItem('mtool_tools_enabled');
+      if (saved) return JSON.parse(saved);
+    } catch (e) {}
+    const getOld = (key: string) => {
+      const v = localStorage.getItem(key);
+      return v !== null ? v === 'true' : true;
+    };
+    return {
+      json: getOld('mtool_json_enabled'),
+      qr: getOld('mtool_qr_enabled'),
+      pwd: getOld('mtool_pwd_enabled'),
+      sqlIn: getOld('mtool_sqlin_enabled'),
+      md: getOld('mtool_md_enabled'),
+      fileSearch: getOld('mtool_filesearch_enabled'),
+      fileDiff: getOld('mtool_filediff_enabled'),
+    };
   });
 
   useEffect(() => {
-    localStorage.setItem('mtool_json_enabled', jsonEnabled.toString());
-  }, [jsonEnabled]);
+    localStorage.setItem('mtool_tools_enabled', JSON.stringify(toolsEnabled));
+  }, [toolsEnabled]);
 
-  useEffect(() => {
-    localStorage.setItem('mtool_qr_enabled', qrEnabled.toString());
-  }, [qrEnabled]);
-
-  useEffect(() => {
-    localStorage.setItem('mtool_pwd_enabled', pwdEnabled.toString());
-  }, [pwdEnabled]);
-
-  useEffect(() => {
-    localStorage.setItem('mtool_sqlin_enabled', sqlInEnabled.toString());
-  }, [sqlInEnabled]);
-
-  useEffect(() => {
-    localStorage.setItem('mtool_md_enabled', mdEnabled.toString());
-  }, [mdEnabled]);
-
-  useEffect(() => {
-    localStorage.setItem('mtool_filesearch_enabled', fileSearchEnabled.toString());
-  }, [fileSearchEnabled]);
-
-  useEffect(() => {
-    localStorage.setItem('mtool_filediff_enabled', fileDiffEnabled.toString());
-  }, [fileDiffEnabled]);
+  const toggleTool = (tool: string, enabled: boolean) => {
+    setToolsEnabled((prev: any) => ({ ...prev, [tool]: enabled }));
+  };
 
   useEffect(() => {
     localStorage.setItem('mtool_active_page', activePage);
@@ -116,56 +81,44 @@ export default function App() {
       <Sidebar 
         activePage={activePage} 
         onNavigate={setActivePage} 
-        jsonEnabled={jsonEnabled}
-        qrEnabled={qrEnabled}
-        pwdEnabled={pwdEnabled}
-        sqlInEnabled={sqlInEnabled}
-        mdEnabled={mdEnabled}
-        fileSearchEnabled={fileSearchEnabled}
-        fileDiffEnabled={fileDiffEnabled}
+        jsonEnabled={toolsEnabled.json}
+        qrEnabled={toolsEnabled.qr}
+        pwdEnabled={toolsEnabled.pwd}
+        sqlInEnabled={toolsEnabled.sqlIn}
+        mdEnabled={toolsEnabled.md}
+        fileSearchEnabled={toolsEnabled.fileSearch}
+        fileDiffEnabled={toolsEnabled.fileDiff}
         hasUpdate={hasUpdate}
       />
       
       <div className="flex-1 flex flex-col min-w-0 th-bg-main">
         
         <main className="flex-1 overflow-y-auto p-6">
-          {activePage === 'json' && jsonEnabled && <JsonFormatter />}
-          {activePage === 'qr' && qrEnabled && <TextToQr />}
-          {activePage === 'pwd' && pwdEnabled && <PasswordGenerator />}
-          {activePage === 'sqlIn' && sqlInEnabled && <SqlInBuilder />}
-          {activePage === 'md' && mdEnabled && <MarkdownEditor />}
-          {activePage === 'fileSearch' && fileSearchEnabled && <FileSearch />}
-          {activePage === 'fileDiff' && fileDiffEnabled && <FileDiff />}
+          {activePage === 'json' && toolsEnabled.json && <JsonFormatter />}
+          {activePage === 'qr' && toolsEnabled.qr && <TextToQr />}
+          {activePage === 'pwd' && toolsEnabled.pwd && <PasswordGenerator />}
+          {activePage === 'sqlIn' && toolsEnabled.sqlIn && <SqlInBuilder />}
+          {activePage === 'md' && toolsEnabled.md && <MarkdownEditor />}
+          {activePage === 'fileSearch' && toolsEnabled.fileSearch && <FileSearch />}
+          {activePage === 'fileDiff' && toolsEnabled.fileDiff && <FileDiff />}
           {activePage === 'user' && <UserPage />}
           {activePage === 'settings' && (
             <SettingsPage 
-              jsonEnabled={jsonEnabled} 
-              setJsonEnabled={setJsonEnabled}
-              qrEnabled={qrEnabled}
-              setQrEnabled={setQrEnabled}
-              pwdEnabled={pwdEnabled}
-              setPwdEnabled={setPwdEnabled}
-              sqlInEnabled={sqlInEnabled}
-              setSqlInEnabled={setSqlInEnabled}
-              mdEnabled={mdEnabled}
-              setMdEnabled={setMdEnabled}
-              fileSearchEnabled={fileSearchEnabled}
-              setFileSearchEnabled={setFileSearchEnabled}
-              fileDiffEnabled={fileDiffEnabled}
-              setFileDiffEnabled={setFileDiffEnabled}
+              toolsEnabled={toolsEnabled}
+              toggleTool={toggleTool}
               activePage={activePage}
               setActivePage={setActivePage}
               updater={updater}
               setShowModal={setShowUpdateModal}            />
           )}
           {activePage !== 'settings' && activePage !== 'user' &&
-           !(activePage === 'json' && jsonEnabled) && 
-           !(activePage === 'qr' && qrEnabled) && 
-           !(activePage === 'pwd' && pwdEnabled) && 
-           !(activePage === 'sqlIn' && sqlInEnabled) && 
-           !(activePage === 'md' && mdEnabled) && 
-           !(activePage === 'fileSearch' && fileSearchEnabled) &&
-           !(activePage === 'fileDiff' && fileDiffEnabled) && (
+           !(activePage === 'json' && toolsEnabled.json) && 
+           !(activePage === 'qr' && toolsEnabled.qr) && 
+           !(activePage === 'pwd' && toolsEnabled.pwd) && 
+           !(activePage === 'sqlIn' && toolsEnabled.sqlIn) && 
+           !(activePage === 'md' && toolsEnabled.md) && 
+           !(activePage === 'fileSearch' && toolsEnabled.fileSearch) &&
+           !(activePage === 'fileDiff' && toolsEnabled.fileDiff) && (
              <div className="flex items-center justify-center h-full th-text-muted font-medium">{t('Select a tool from the sidebar')}</div>
           )}
         </main>

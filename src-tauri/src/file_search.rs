@@ -99,14 +99,15 @@ pub fn get_db_path() -> String {
 // SQLite 操作
 // ---------------------------------------------------------------------------
 
-pub fn init_db(db_path: &str) {
-    let conn = Connection::open(db_path).expect("open db");
+pub fn init_db(db_path: &str) -> Result<(), String> {
+    let conn = Connection::open(db_path).map_err(|e| format!("Failed to open db: {}", e))?;
     conn.execute_batch(
         "PRAGMA journal_mode=WAL;
          PRAGMA cache_size=-8192;",
     )
     .ok();
-    conn.execute_batch(SCHEMA_SQL).expect("init db schema");
+    conn.execute_batch(SCHEMA_SQL).map_err(|e| format!("Failed to init db schema: {}", e))?;
+    Ok(())
 }
 
 /// 仅 file_index + file_fts 表的 Schema（不含 index_meta，避免 DROP 时误删退出时间戳）

@@ -5,7 +5,7 @@ export function UserPage() {
   const { t } = useI18n();
 
   return (
-    <div className="max-w-4xl max-w-5xl mx-auto w-full">
+    <div className="max-w-5xl mx-auto w-full">
       <div className="mb-10">
         <h1 className="text-4xl font-bold tracking-tight th-text mb-2">{t('User')}</h1>
         <p className="th-text-3">{t('User profile and preferences.')}</p>
