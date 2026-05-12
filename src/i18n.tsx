@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect } from 'react';
+import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
 
 type Language = 'en' | 'zh';
 
@@ -435,9 +435,9 @@ export function I18nProvider({ children }: { children: React.ReactNode }) {
     localStorage.setItem('mtool_language', language);
   }, [language]);
 
-  const t = (key: keyof typeof translations.en) => {
+  const t = useCallback((key: keyof typeof translations.en) => {
     return translations[language][key] || key;
-  };
+  }, [language]);
 
   return (
     <I18nContext.Provider value={{ language, setLanguage, t }}>

@@ -276,6 +276,9 @@ async fn build_index(
             std::thread::sleep(Duration::from_millis(10));
             attempts += 1;
         }
+        if attempts >= 500 {
+            eprintln!("[mtool] build_index: timeout waiting for watcher to stop");
+        }
     }).await;
 
     {
@@ -287,7 +290,7 @@ async fn build_index(
     let app_clone = app.clone();
     let status_ref_clone = status_ref.clone();
     let db_fts = db_path.clone();
-    let total = tauri::async_runtime::spawn_blocking(move || -> Result<usize, String> {
+    let total = match tauri::async_runtime::spawn_blocking(move || -> Result<usize, String> {
         // 物理删除旧库文件，避免 SQLite DROP TABLE 耗时阻塞
         let _ = std::fs::remove_file(&db_path);
         let _ = std::fs::remove_file(format!("{}-wal", db_path));
@@ -308,8 +311,19 @@ async fn build_index(
         set_last_built_at(&db_path, now_ts);
         Ok(total)
     })
-    .await
-    .map_err(|e| e.to_string())??;
+    .await {
+        Ok(Ok(t)) => t,
+        Ok(Err(e)) => {
+            let mut s = status_ref.write().unwrap();
+            s.is_indexing = false;
+            return Err(e);
+        }
+        Err(e) => {
+            let mut s = status_ref.write().unwrap();
+            s.is_indexing = false;
+            return Err(e.to_string());
+        }
+    };
 
     {
         let mut s = status_ref.write().unwrap();

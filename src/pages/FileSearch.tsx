@@ -209,7 +209,7 @@ export function FileSearch() {
         if (searchIdRef.current === id) setIsSearching(false);
       }
     }, 300);
-  }, []);
+  }, [t]);
 
   useEffect(() => {
     doSearch(query);
@@ -577,11 +577,23 @@ export function FileSearch() {
       <footer className="h-8 border-t th-border mt-4 px-4 th-bg-card
         flex items-center justify-between text-[10px] th-text-muted rounded-b-xl shadow-inner" style={{ opacity: 0.8 }}>
         <div className="flex items-center gap-4">
-          <span className="flex items-center gap-1.5">
-            <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
-            {t('System Ready')}
-          </span>
-          {query.trim() && (
+          {error ? (
+            <span className="flex items-center gap-1.5 text-rose-500">
+              <span className="w-1.5 h-1.5 rounded-full bg-rose-500" />
+              {t('Failed')}
+            </span>
+          ) : isIndexing || isSearching ? (
+            <span className="flex items-center gap-1.5 text-indigo-400">
+              <span className="w-1.5 h-1.5 rounded-full bg-indigo-400 animate-pulse" />
+              {isSearching ? t('Searching...') : t('Indexing...')}
+            </span>
+          ) : (
+            <span className="flex items-center gap-1.5">
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+              {t('System Ready')}
+            </span>
+          )}
+          {query.trim() && !error && (
             <span>{t('Results')}: {results.length}</span>
           )}
         </div>
