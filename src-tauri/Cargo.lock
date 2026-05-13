@@ -2957,6 +2957,7 @@ dependencies = [
  "base64 0.22.1",
  "dirs 5.0.1",
  "image",
+ "libc",
  "notify",
  "qrcode",
  "rand 0.10.1",
