@@ -2,6 +2,7 @@ use std::fs::{self, File};
 use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use sha2::{Sha256, Digest};
 use zip::ZipArchive;
@@ -50,7 +51,7 @@ pub fn ensure_cfr() -> Result<PathBuf, String> {
 pub fn decompile_class(class_file_path: &Path) -> Result<String, String> {
     let cfr_path = ensure_cfr()?;
     
-    let mut child = Command::new("java")
+    let child = Command::new("java")
         .arg("-jar")
         .arg(&cfr_path)
         .arg(class_file_path)
@@ -59,9 +60,17 @@ pub fn decompile_class(class_file_path: &Path) -> Result<String, String> {
         .spawn()
         .map_err(|e| format!("Failed to execute java (is it installed?): {}", e))?;
 
+    // Share child via Arc<Mutex<Option<Child>>> so the main thread can kill it on timeout.
+    let child = Arc::new(Mutex::new(Some(child)));
+    let child_for_thread = Arc::clone(&child);
+
     let (tx, rx) = std::sync::mpsc::channel();
     std::thread::spawn(move || {
-        let _ = tx.send(child.wait_with_output());
+        // Take ownership of the child; if the main thread already killed it, this is None.
+        let taken = child_for_thread.lock().ok().and_then(|mut guard| guard.take());
+        if let Some(c) = taken {
+            let _ = tx.send(c.wait_with_output());
+        }
     });
 
     match rx.recv_timeout(Duration::from_secs(30)) {
@@ -73,7 +82,15 @@ pub fn decompile_class(class_file_path: &Path) -> Result<String, String> {
             }
         }
         Ok(Err(e)) => Err(e.to_string()),
-        Err(_) => Err("Decompilation timed out (30s)".to_string()),
+        Err(_) => {
+            // Timeout: kill the child process to prevent resource leak.
+            if let Ok(mut guard) = child.lock() {
+                if let Some(ref mut c) = *guard {
+                    let _ = c.kill();
+                }
+            }
+            Err("Decompilation timed out (30s)".to_string())
+        }
     }
 }
 

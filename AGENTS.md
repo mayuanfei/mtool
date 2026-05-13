@@ -10,6 +10,7 @@
 - Main frontend areas live in `src/pages/` and shared chrome is in `src/components/`.
 - Tauri entry is `src-tauri/src/main.rs`, which delegates to `src-tauri/src/lib.rs`.
 - Current Rust side has multiple native APIs (e.g. `format_json`, `minify_json`, `generate_qr`, `build_index`, `search_files`, `disable_file_search`, `reveal_in_explorer`, etc.) plus `tauri-plugin-opener`; consult `src-tauri/src/lib.rs` for the full list.
+- JAR Viewer module (`src-tauri/src/jar_viewer.rs`) exposes `list_jar_entries`, `read_jar_entry`, `read_local_class`, and `open_jar_or_class` commands for browsing JAR/ZIP archives and decompiling `.class` files via CFR.
 
 ## Commands
 - Install deps: `npm install`
