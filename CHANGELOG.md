@@ -4,8 +4,13 @@
 
 - **JAR 查看器 (JarViewer)**：
   - 修复反编译 `.class` 文件时 Java 进程无超时限制的问题，现在最多等待 30 秒后自动终止并报错，避免 UI 永久转圈。
+  - 修复超时后 Java 子进程未被杀死的资源泄漏问题，通过 PID 旁路 kill 方案实现无锁、无死锁的进程终止。
+  - 新增 Windows 平台超时终止支持，通过 `TerminateProcess` API 杀死超时的 Java 进程（之前 Windows 侧存在资源泄漏）。
   - 将 `list_jar_entries` 改为异步执行，打开大型 Spring Boot fat JAR（5000+ 条目）时不再短暂冻结 UI。
+  - 将 `open_jar_or_class` 改为 `async` + `spawn_blocking`，文件选择对话框不再占用异步线程，与其他命令风格一致。
   - 清理 `highlightedContent` 计算逻辑中无用的中间变量，代码更清晰。
+- **文档同步**：
+  - 在 `AGENTS.md` 中补充记录 JAR Viewer 模块及其四个 Tauri 命令。
 - **版本同步修复**：
   - 补齐 `src-tauri/Cargo.toml` 版本号（历史遗漏，从 1.0.0 同步至 1.0.3）。
 
