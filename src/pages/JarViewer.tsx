@@ -249,7 +249,7 @@ export function JarViewer() {
   // Memoize tree rendering to prevent lag on large jars during sidebar resize
   const renderedTree = useMemo(() => {
     return tree ? renderTree(tree) : null;
-  }, [tree, expandedDirs, selectedEntry]);
+  }, [tree, expandedDirs, selectedEntry, filePath, isJar]);
 
   if (!filePath) {
     return (

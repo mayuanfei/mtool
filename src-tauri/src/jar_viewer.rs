@@ -59,23 +59,21 @@ pub fn decompile_class(class_file_path: &Path) -> Result<String, String> {
         .spawn()
         .map_err(|e| format!("Failed to execute java (is it installed?): {}", e))?;
 
-    let deadline = std::time::Instant::now() + Duration::from_secs(30);
-    loop {
-        if child.try_wait().map_err(|e| e.to_string())?.is_some() {
-            break;
-        }
-        if std::time::Instant::now() > deadline {
-            let _ = child.kill();
-            return Err("Decompilation timed out (30s)".to_string());
-        }
-        std::thread::sleep(Duration::from_millis(100));
-    }
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let _ = tx.send(child.wait_with_output());
+    });
 
-    let output = child.wait_with_output().map_err(|e| e.to_string())?;
-    if output.status.success() {
-        Ok(String::from_utf8_lossy(&output.stdout).to_string())
-    } else {
-        Err(format!("Decompile failed: {}", String::from_utf8_lossy(&output.stderr)))
+    match rx.recv_timeout(Duration::from_secs(30)) {
+        Ok(Ok(output)) => {
+            if output.status.success() {
+                Ok(String::from_utf8_lossy(&output.stdout).to_string())
+            } else {
+                Err(format!("Decompile failed: {}", String::from_utf8_lossy(&output.stderr)))
+            }
+        }
+        Ok(Err(e)) => Err(e.to_string()),
+        Err(_) => Err("Decompilation timed out (30s)".to_string()),
     }
 }
 
