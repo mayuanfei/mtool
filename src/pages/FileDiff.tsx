@@ -223,10 +223,9 @@ interface FilePanelProps {
   fileName: string;
   content: string;
   onFileOpen: (name: string, content: string) => void;
-  hasContent: boolean;
 }
 
-function FilePanel({ side, fileName, content, onFileOpen, hasContent }: FilePanelProps) {
+function FilePanel({ side, fileName, content, onFileOpen }: FilePanelProps) {
   const { t } = useI18n();
   const [dragOver, setDragOver] = useState(false);
 
@@ -331,34 +330,19 @@ function FilePanel({ side, fileName, content, onFileOpen, hasContent }: FilePane
       </div>
 
       {/* Content */}
-      {!hasContent ? (
-        <div className="flex-1 flex items-center justify-center th-bg-input p-6">
-          <div className="text-center">
-            <div
-              className="w-12 h-12 mx-auto mb-3 rounded-xl th-bg-surface flex items-center justify-center cursor-pointer hover:th-bg-surface-h transition-colors"
-              onClick={handleOpenFile}
-              title={t('Open File')}
-            >
-              <FileUp className="w-5 h-5 th-text-muted" />
-            </div>
-            <p className="text-sm th-text-muted mb-1">{t('Drop file here')}</p>
-            <p className="text-xs th-text-faint">{t('or open / paste content')}</p>
-          </div>
-        </div>
-      ) : (
-        <textarea
-          value={content}
-          onChange={(e) => {
-            if (e.target.value.length > 10 * 1024 * 1024) {
-              alert(t('Text exceeds 10MB limit'));
-              return;
-            }
-            onFileOpen(fileName || t('Pasted Text'), e.target.value);
-          }}
-          className="flex-1 p-3 text-xs font-mono th-bg-input th-text-2 resize-none outline-none leading-relaxed"
-          spellCheck={false}
-        />
-      )}
+      <textarea
+        value={content}
+        onChange={(e) => {
+          if (e.target.value.length > 10 * 1024 * 1024) {
+            alert(t('Text exceeds 10MB limit'));
+            return;
+          }
+          onFileOpen(fileName || t('Pasted Text'), e.target.value);
+        }}
+        placeholder={t('Paste text here, or drop a file')}
+        className="flex-1 p-3 text-xs font-mono th-bg-input th-text-2 resize-none outline-none leading-relaxed"
+        spellCheck={false}
+      />
     </div>
   );
 }
@@ -783,7 +767,6 @@ export function FileDiff() {
         </div>
       </div>
 
-      {/* Input panels */}
       {showInput && (
         <div className="flex gap-3 p-3 flex-shrink-0" style={{ height: hasAnyContent && hasBothContent ? '200px' : '280px' }}>
           <FilePanel
@@ -791,14 +774,12 @@ export function FileDiff() {
             fileName={leftName}
             content={leftContent}
             onFileOpen={handleLeftFile}
-            hasContent={leftContent.length > 0}
           />
           <FilePanel
             side="right"
             fileName={rightName}
             content={rightContent}
             onFileOpen={handleRightFile}
-            hasContent={rightContent.length > 0}
           />
         </div>
       )}

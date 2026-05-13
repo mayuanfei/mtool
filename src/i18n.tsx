@@ -207,6 +207,7 @@ const translations = {
     'Pasted text exceeds 10MB limit': 'Pasted text exceeds 10MB limit',
     'Text exceeds 10MB limit': 'Text exceeds 10MB limit',
     'Files exceed 10000 lines. Diff is approximate.': 'Files exceed 10000 lines. Diff is approximate.',
+    'Paste text here, or drop a file': 'Paste text here, or drop a file',
   },
   zh: {
     // Sidebar
@@ -412,6 +413,7 @@ const translations = {
     'Pasted text exceeds 10MB limit': '粘贴的文本超过 10MB 限制',
     'Text exceeds 10MB limit': '文本超过 10MB 限制',
     'Files exceed 10000 lines. Diff is approximate.': '文件超过 10000 行，仅显示粗略差异结果',
+    'Paste text here, or drop a file': '在此粘贴文本，或拖拽文件到此处',
   }
 };
 
