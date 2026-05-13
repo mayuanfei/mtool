@@ -231,16 +231,27 @@ export function JarViewer() {
     });
   };
 
-  const highlightedContent = useMemo(() => {
-    if (!content) return '';
+  const { highlightedContent, lineCount } = useMemo(() => {
+    let resultContent = content || '';
+    let lineCount = resultContent ? resultContent.split('\n').length : 0;
+    
+    if (!content) return { highlightedContent: '', lineCount: 0 };
+    
     const lang = getLanguage(selectedEntry || filePath);
     try {
-      if (lang === 'plaintext') return content;
-      return hljs.highlight(content, { language: lang, ignoreIllegals: true }).value;
+      if (lang === 'plaintext') {
+        return { highlightedContent: content, lineCount };
+      }
+      return { highlightedContent: hljs.highlight(content, { language: lang, ignoreIllegals: true }).value, lineCount };
     } catch {
-      return content;
+      return { highlightedContent: content, lineCount };
     }
   }, [content, selectedEntry, filePath]);
+
+  // Memoize tree rendering to prevent lag on large jars during sidebar resize
+  const renderedTree = useMemo(() => {
+    return tree ? renderTree(tree) : null;
+  }, [tree, expandedDirs, selectedEntry]);
 
   if (!filePath) {
     return (
@@ -298,7 +309,7 @@ export function JarViewer() {
             {isJar ? t('Archive Contents') : t('File')}
           </div>
           <div className="flex-1 overflow-y-auto py-1">
-            {tree && renderTree(tree)}
+            {renderedTree}
           </div>
         </div>
 
@@ -323,7 +334,7 @@ export function JarViewer() {
                 <div 
                   className="select-none text-right px-3 py-4 border-r th-border text-slate-400 dark:text-slate-600 bg-slate-50 dark:bg-[#0d1117] min-w-[3rem] whitespace-pre"
                 >
-                  {Array.from({ length: content.split('\n').length }, (_, i) => i + 1).join('\n')}
+                  {Array.from({ length: lineCount }, (_, i) => i + 1).join('\n')}
                 </div>
                 <pre className="m-0 flex-1 overflow-x-auto p-4 text-slate-900 dark:text-slate-200">
                   <code dangerouslySetInnerHTML={{ __html: highlightedContent }} className="hljs" style={{ background: 'transparent', padding: 0 }} />

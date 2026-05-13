@@ -1,5 +1,6 @@
 mod file_search;
-mod jar_viewer;use base64::prelude::*;
+mod jar_viewer;
+use base64::prelude::*;
 use std::fs;
 use std::io::Cursor;
 use std::sync::atomic::{AtomicBool, Ordering};
