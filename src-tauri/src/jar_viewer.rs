@@ -2,7 +2,6 @@ use std::fs::{self, File};
 use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
-use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use sha2::{Sha256, Digest};
 use zip::ZipArchive;
@@ -51,7 +50,7 @@ pub fn ensure_cfr() -> Result<PathBuf, String> {
 pub fn decompile_class(class_file_path: &Path) -> Result<String, String> {
     let cfr_path = ensure_cfr()?;
     
-    let mut child = Command::new("java")
+    let child = Command::new("java")
         .arg("-jar")
         .arg(&cfr_path)
         .arg(class_file_path)
@@ -60,50 +59,28 @@ pub fn decompile_class(class_file_path: &Path) -> Result<String, String> {
         .spawn()
         .map_err(|e| format!("Failed to execute java (is it installed?): {}", e))?;
 
-    // Extract pipe handles BEFORE wrapping child in Arc.
-    // These are independent owned handles; reading them doesn't need the child lock.
-    let stdout_pipe = child.stdout.take();
-    let stderr_pipe = child.stderr.take();
-
-    // Child stays inside the Mutex at all times so the main thread can always kill it.
-    let child = Arc::new(Mutex::new(child));
-    let child_for_thread = Arc::clone(&child);
+    // Save PID before moving child into the thread.
+    // On timeout we kill via OS signal using the PID — no shared state, no locks.
+    let pid = child.id();
 
     let (tx, rx) = std::sync::mpsc::channel();
     std::thread::spawn(move || {
-        // Read pipes (no lock needed — these are separate owned handles).
-        let mut stdout_buf = Vec::new();
-        let mut stderr_buf = Vec::new();
-        if let Some(mut out) = stdout_pipe {
-            let _ = out.read_to_end(&mut stdout_buf);
-        }
-        if let Some(mut err) = stderr_pipe {
-            let _ = err.read_to_end(&mut stderr_buf);
-        }
-
-        // Wait for process exit through the Mutex (child is NOT taken out).
-        let status = child_for_thread
-            .lock()
-            .ok()
-            .and_then(|mut guard| guard.wait().ok());
-
-        let _ = tx.send((status, stdout_buf, stderr_buf));
+        let _ = tx.send(child.wait_with_output());
     });
 
     match rx.recv_timeout(Duration::from_secs(30)) {
-        Ok((Some(status), stdout_buf, stderr_buf)) => {
-            if status.success() {
-                Ok(String::from_utf8_lossy(&stdout_buf).to_string())
+        Ok(Ok(output)) => {
+            if output.status.success() {
+                Ok(String::from_utf8_lossy(&output.stdout).to_string())
             } else {
-                Err(format!("Decompile failed: {}", String::from_utf8_lossy(&stderr_buf)))
+                Err(format!("Decompile failed: {}", String::from_utf8_lossy(&output.stderr)))
             }
         }
-        Ok((None, _, _)) => Err("Failed to wait for decompilation process".to_string()),
+        Ok(Err(e)) => Err(e.to_string()),
         Err(_) => {
-            // Timeout: child is still inside the Mutex, kill is guaranteed to reach it.
-            if let Ok(mut guard) = child.lock() {
-                let _ = guard.kill();
-            }
+            // Timeout: kill the java process via PID (lock-free, no deadlock risk).
+            #[cfg(unix)]
+            unsafe { libc::kill(pid as i32, libc::SIGKILL); }
             Err("Decompilation timed out (30s)".to_string())
         }
     }
