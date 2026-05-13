@@ -81,6 +81,16 @@ pub fn decompile_class(class_file_path: &Path) -> Result<String, String> {
             // Timeout: kill the java process via PID (lock-free, no deadlock risk).
             #[cfg(unix)]
             unsafe { libc::kill(pid as i32, libc::SIGKILL); }
+            #[cfg(windows)]
+            unsafe {
+                use windows_sys::Win32::System::Threading::{OpenProcess, TerminateProcess, PROCESS_TERMINATE};
+                use windows_sys::Win32::Foundation::CloseHandle;
+                let handle = OpenProcess(PROCESS_TERMINATE, 0, pid);
+                if handle != 0 {
+                    TerminateProcess(handle, 1);
+                    CloseHandle(handle);
+                }
+            }
             Err("Decompilation timed out (30s)".to_string())
         }
     }
@@ -151,21 +161,25 @@ pub async fn read_local_class(path: String) -> Result<String, String> {
 }
 
 #[tauri::command]
-pub fn open_jar_or_class() -> Result<(String, String), String> {
-    if let Some(path) = rfd::FileDialog::new()
-        .add_filter("Archive/Class/Text Files", &[
-            "jar", "zip", "class", "txt", "md", "markdown", "yaml", "yml", "json", "jsonc", "json5",
-            "xml", "html", "htm", "css", "scss", "less", "js", "jsx", "ts",
-            "tsx", "csv", "tsv", "log", "ini", "cfg", "conf", "toml", "env",
-            "sh", "bash", "zsh", "bat", "cmd", "ps1", "py", "rb", "java",
-            "c", "cpp", "h", "hpp", "go", "rs", "swift", "kt", "sql", "graphql",
-            "properties", "vue", "svelte",
-        ])
-        .pick_file()
-    {
-        let ext = path.extension().unwrap_or_default().to_string_lossy().to_string();
-        Ok((path.to_string_lossy().to_string(), ext))
-    } else {
-        Err("No file selected".to_string())
-    }
+pub async fn open_jar_or_class() -> Result<(String, String), String> {
+    tauri::async_runtime::spawn_blocking(|| {
+        if let Some(path) = rfd::FileDialog::new()
+            .add_filter("Archive/Class/Text Files", &[
+                "jar", "zip", "class", "txt", "md", "markdown", "yaml", "yml", "json", "jsonc", "json5",
+                "xml", "html", "htm", "css", "scss", "less", "js", "jsx", "ts",
+                "tsx", "csv", "tsv", "log", "ini", "cfg", "conf", "toml", "env",
+                "sh", "bash", "zsh", "bat", "cmd", "ps1", "py", "rb", "java",
+                "c", "cpp", "h", "hpp", "go", "rs", "swift", "kt", "sql", "graphql",
+                "properties", "vue", "svelte",
+            ])
+            .pick_file()
+        {
+            let ext = path.extension().unwrap_or_default().to_string_lossy().to_string();
+            Ok((path.to_string_lossy().to_string(), ext))
+        } else {
+            Err("No file selected".to_string())
+        }
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }

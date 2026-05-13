@@ -2974,6 +2974,7 @@ dependencies = [
  "tauri-plugin-process",
  "tauri-plugin-updater",
  "tauri-plugin-window-state",
+ "windows-sys 0.61.2",
  "zip 2.4.2",
 ]
 
