@@ -1,0 +1,305 @@
+import { useState, useEffect, useMemo } from 'react';
+import { FileUp, FileArchive, Folder, File as FileIcon, FileJson, FileCode2, ChevronRight, ChevronDown, Package } from 'lucide-react';
+import { invoke } from '@tauri-apps/api/core';
+import { getCurrentWebview } from '@tauri-apps/api/webview';
+import { useI18n } from '../i18n';
+import hljs from 'highlight.js';
+
+interface TreeNode {
+  name: string;
+  path: string;
+  isDir: boolean;
+  children: Record<string, TreeNode>;
+}
+
+function buildTree(paths: string[]): TreeNode {
+  const root: TreeNode = { name: '', path: '', isDir: true, children: {} };
+  
+  for (const p of paths) {
+    if (!p) continue;
+    const parts = p.split('/').filter(Boolean);
+    let current = root;
+    let currentPath = '';
+    
+    for (let i = 0; i < parts.length; i++) {
+      const part = parts[i];
+      const isDir = i < parts.length - 1 || p.endsWith('/');
+      currentPath = currentPath ? `${currentPath}/${part}` : part;
+      
+      if (!current.children[part]) {
+        current.children[part] = {
+          name: part,
+          path: isDir ? currentPath + '/' : currentPath,
+          isDir,
+          children: {}
+        };
+      }
+      current = current.children[part];
+    }
+  }
+  return root;
+}
+
+function getLanguage(fileName: string): string {
+  const ext = fileName.split('.').pop()?.toLowerCase() || '';
+  if (ext === 'class' || ext === 'java') return 'java';
+  if (ext === 'json') return 'json';
+  if (ext === 'yaml' || ext === 'yml') return 'yaml';
+  if (ext === 'xml') return 'xml';
+  if (ext === 'md') return 'markdown';
+  if (['js', 'jsx', 'ts', 'tsx'].includes(ext)) return 'javascript';
+  return 'plaintext';
+}
+
+function getIconForFile(name: string) {
+  const ext = name.split('.').pop()?.toLowerCase() || '';
+  if (ext === 'class' || ext === 'java') return <FileCode2 className="w-4 h-4 text-emerald-500" />;
+  if (ext === 'json' || ext === 'yaml' || ext === 'yml') return <FileJson className="w-4 h-4 text-amber-500" />;
+  return <FileIcon className="w-4 h-4 text-slate-400" />;
+}
+
+export function JarViewer() {
+  const { t } = useI18n();
+  const [filePath, setFilePath] = useState('');
+  const [isJar, setIsJar] = useState(false);
+  const [tree, setTree] = useState<TreeNode | null>(null);
+  const [selectedEntry, setSelectedEntry] = useState<string | null>(null);
+  const [content, setContent] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [dragOver, setDragOver] = useState(false);
+  const [expandedDirs, setExpandedDirs] = useState<Set<string>>(new Set());
+
+  const handleOpenFile = async () => {
+    try {
+      const result = await invoke<[string, string]>('open_jar_or_class');
+      const [path, ext] = result;
+      await loadFile(path, ext);
+    } catch {
+      // User cancelled or error
+    }
+  };
+
+  const loadFile = async (path: string, ext: string) => {
+    setFilePath(path);
+    const isArchive = ['jar', 'zip'].includes(ext.toLowerCase());
+    setIsJar(isArchive);
+    setSelectedEntry(null);
+    setContent('');
+    setExpandedDirs(new Set());
+    
+    if (isArchive) {
+      try {
+        setLoading(true);
+        const entries = await invoke<string[]>('list_jar_entries', { path });
+        const root = buildTree(entries);
+        setTree(root);
+      } catch (err) {
+        setContent(`Error: ${err}`);
+      } finally {
+        setLoading(false);
+      }
+    } else {
+      const fileName = path.split(/[/\\]/).pop() || path;
+      const root = buildTree([fileName]);
+      setTree(root);
+      // Automatically load the single file
+      await loadEntryContent(path, '', false);
+    }
+  };
+
+  useEffect(() => {
+    const setup = async () => {
+      const unlisten = await getCurrentWebview().onDragDropEvent(async (event) => {
+        if (event.payload.type === 'drop') {
+          setDragOver(false);
+          const paths = event.payload.paths;
+          if (!paths || paths.length === 0) return;
+          const path = paths[0];
+          const ext = path.split('.').pop()?.toLowerCase() || '';
+          await loadFile(path, ext);
+        } else if (event.payload.type === 'enter' || event.payload.type === 'over') {
+          setDragOver(true);
+        } else if (event.payload.type === 'leave') {
+          setDragOver(false);
+        }
+      });
+      return unlisten;
+    };
+    const cleanup = setup();
+    return () => { cleanup.then(fn => fn()); };
+  }, []);
+
+  const loadEntryContent = async (basePath: string, entryPath: string, isJarEntry: boolean) => {
+    setSelectedEntry(entryPath || basePath);
+    setLoading(true);
+    setContent('');
+    try {
+      let result = '';
+      if (isJarEntry) {
+        result = await invoke<string>('read_jar_entry', { jarPath: basePath, entryName: entryPath });
+      } else {
+        result = await invoke<string>('read_local_class', { path: basePath });
+      }
+      setContent(result);
+    } catch (err) {
+      setContent(`Error reading file: ${err}`);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const toggleDir = (path: string) => {
+    setExpandedDirs(prev => {
+      const next = new Set(prev);
+      if (next.has(path)) next.delete(path);
+      else next.add(path);
+      return next;
+    });
+  };
+
+  const renderTree = (node: TreeNode, depth = 0) => {
+    const entries = Object.values(node.children).sort((a, b) => {
+      if (a.isDir && !b.isDir) return -1;
+      if (!a.isDir && b.isDir) return 1;
+      return a.name.localeCompare(b.name);
+    });
+
+    return entries.map(child => {
+      const isExpanded = expandedDirs.has(child.path);
+      const isSelected = selectedEntry === child.path;
+
+      if (child.isDir) {
+        return (
+          <div key={child.path}>
+            <div 
+              className={`flex items-center gap-1.5 px-2 py-1 cursor-pointer select-none text-xs th-text-2 th-hover-surface transition-colors`}
+              style={{ paddingLeft: `${depth * 12 + 8}px` }}
+              onClick={() => toggleDir(child.path)}
+            >
+              <div className="w-4 h-4 flex items-center justify-center text-slate-400">
+                {isExpanded ? <ChevronDown className="w-3.5 h-3.5" /> : <ChevronRight className="w-3.5 h-3.5" />}
+              </div>
+              <Folder className="w-4 h-4 text-blue-400 flex-shrink-0" fill="currentColor" fillOpacity={0.2} />
+              <span className="truncate">{child.name}</span>
+            </div>
+            {isExpanded && renderTree(child, depth + 1)}
+          </div>
+        );
+      }
+
+      return (
+        <div 
+          key={child.path}
+          className={`flex items-center gap-2 px-2 py-1 cursor-pointer select-none text-xs transition-colors ${
+            isSelected ? 'bg-indigo-500/15 text-indigo-400 font-medium' : 'th-text-2 th-hover-surface'
+          }`}
+          style={{ paddingLeft: `${depth * 12 + 28}px` }}
+          onClick={() => loadEntryContent(filePath, child.path, true)}
+        >
+          {getIconForFile(child.name)}
+          <span className="truncate">{child.name}</span>
+        </div>
+      );
+    });
+  };
+
+  const highlightedContent = useMemo(() => {
+    if (!content) return '';
+    const lang = getLanguage(selectedEntry || filePath);
+    try {
+      if (lang === 'plaintext') return content;
+      return hljs.highlight(content, { language: lang, ignoreIllegals: true }).value;
+    } catch {
+      return content;
+    }
+  }, [content, selectedEntry, filePath]);
+
+  if (!filePath) {
+    return (
+      <div 
+        className={`flex flex-col h-full -m-6 items-center justify-center border-2 border-dashed ${dragOver ? 'border-indigo-500 bg-indigo-500/5' : 'th-border th-bg-surface-h'} transition-all m-0 rounded-none`}
+      >
+        <Package className={`w-16 h-16 mb-4 ${dragOver ? 'text-indigo-400' : 'th-text-muted'}`} />
+        <h2 className="text-lg font-bold th-text mb-2">{t('Jar Viewer & Decompiler')}</h2>
+        <p className="text-sm th-text-muted mb-6 text-center max-w-sm">
+          {t('Drag and drop a .jar, .class, or any text file here, or click the button below to browse.')}
+        </p>
+        <button
+          onClick={handleOpenFile}
+          className="flex items-center gap-2 px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-md text-sm font-medium transition-colors"
+        >
+          <FileUp className="w-4 h-4" />
+          {t('Open File')}
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex flex-col h-full -m-6 overflow-hidden">
+      {/* Toolbar */}
+      <div className="flex items-center justify-between px-4 py-2 border-b th-border th-bg-surface flex-shrink-0">
+        <div className="flex items-center gap-2 overflow-hidden flex-1">
+          <div className="p-1.5 rounded-md bg-indigo-500/10 text-indigo-500 flex-shrink-0">
+            {isJar ? <FileArchive className="w-4 h-4" /> : <FileCode2 className="w-4 h-4" />}
+          </div>
+          <h1 className="text-sm font-bold th-text truncate" title={filePath}>
+            {filePath.split(/[/\\]/).pop()}
+          </h1>
+          <span className="text-xs th-text-muted truncate min-w-0" title={filePath}>
+            {filePath}
+          </span>
+        </div>
+
+        <button
+          onClick={handleOpenFile}
+          className="ml-4 px-3 py-1.5 text-xs rounded th-text-3 th-hover-surface transition-colors border th-border flex items-center gap-1.5"
+        >
+          <FileUp className="w-3.5 h-3.5" />
+          {t('Open Another')}
+        </button>
+      </div>
+
+      <div className="flex flex-1 min-h-0">
+        {/* Left Tree Panel */}
+        <div className="w-64 border-r th-border flex flex-col flex-shrink-0 th-bg-surface-h">
+          <div className="px-3 py-2 border-b th-border text-xs font-semibold th-text-muted uppercase tracking-wider bg-black/5">
+            {isJar ? t('Archive Contents') : t('File')}
+          </div>
+          <div className="flex-1 overflow-y-auto py-1">
+            {tree && renderTree(tree)}
+          </div>
+        </div>
+
+        {/* Right Content Panel */}
+        <div className="flex-1 flex flex-col min-w-0 th-bg-main">
+          {(selectedEntry || !isJar) && (
+            <div className="px-4 py-2 border-b th-border text-xs th-text-muted flex items-center gap-2 th-bg-surface">
+              {selectedEntry ? selectedEntry : filePath.split(/[/\\]/).pop()}
+              {loading && <span className="ml-auto text-indigo-400 animate-pulse">{t('Loading...')}</span>}
+            </div>
+          )}
+          
+          <div className="flex-1 overflow-auto bg-white dark:bg-[#0d1117]">
+            {content ? (
+              <div className="flex text-[13px] leading-relaxed font-mono">
+                <div 
+                  className="select-none text-right px-3 py-4 border-r th-border text-slate-400 dark:text-slate-600 bg-slate-50 dark:bg-[#0d1117] min-w-[3rem] whitespace-pre"
+                >
+                  {Array.from({ length: content.split('\n').length }, (_, i) => i + 1).join('\n')}
+                </div>
+                <pre className="m-0 flex-1 overflow-x-auto p-4 text-slate-900 dark:text-slate-200">
+                  <code dangerouslySetInnerHTML={{ __html: highlightedContent }} className="hljs" style={{ background: 'transparent', padding: 0 }} />
+                </pre>
+              </div>
+            ) : (
+              <div className="h-full flex items-center justify-center text-sm th-text-muted">
+                {loading ? t('Decompiling/Reading...') : (isJar ? t('Select a file to view its contents') : '')}
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}

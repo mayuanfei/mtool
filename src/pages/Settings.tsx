@@ -110,6 +110,18 @@ export function SettingsPage({ toolsEnabled, toggleTool, activePage, setActivePa
 
             <div className="px-6 py-5 flex items-center justify-between th-hover-surface transition-colors">
               <div>
+                <p className="text-base font-medium th-text-2 mb-1">{t('Jar Viewer')}</p>
+                <p className="text-sm th-text-muted">{t('View and decompile Java archive files.')}</p>
+              </div>
+              <Toggle checked={toolsEnabled.jarViewer} onChange={() => {
+                const next = !toolsEnabled.jarViewer;
+                toggleTool('jarViewer', next);
+                if (!next && activePage === 'jarViewer') setActivePage('settings');
+              }} />
+            </div>
+
+            <div className="px-6 py-5 flex items-center justify-between th-hover-surface transition-colors">
+              <div>
                 <p className="text-base font-medium th-text-2 mb-1">{t('Markdown Editor')}</p>
                 <p className="text-sm th-text-muted">{t('View and edit Markdown files with live preview.')}</p>
               </div>

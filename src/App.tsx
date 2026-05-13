@@ -9,14 +9,15 @@ import { SqlInBuilder } from './pages/SqlInBuilder';
 import { MarkdownEditor } from './pages/MarkdownEditor';
 import { FileSearch } from './pages/FileSearch';
 import { FileDiff } from './pages/FileDiff';
+import { JarViewer } from './pages/JarViewer';
 import { UserPage } from './pages/User';
 import { useI18n } from './i18n';
 import { useUpdater } from './updater';
 
-export type ToolKey = 'json' | 'qr' | 'pwd' | 'sqlIn' | 'md' | 'fileSearch' | 'fileDiff';
+export type ToolKey = 'json' | 'qr' | 'pwd' | 'sqlIn' | 'md' | 'fileSearch' | 'fileDiff' | 'jarViewer';
 export type ToolsEnabled = Record<ToolKey, boolean>;
 
-const DEFAULT_TOOLS: ToolsEnabled = { json: true, qr: true, pwd: true, sqlIn: true, md: true, fileSearch: true, fileDiff: true };
+const DEFAULT_TOOLS: ToolsEnabled = { json: true, qr: true, pwd: true, sqlIn: true, md: true, fileSearch: true, fileDiff: true, jarViewer: true };
 
 export default function App() {
   const [activePage, setActivePage] = useState(() => {
@@ -71,6 +72,7 @@ export default function App() {
       md: getOld('mtool_md_enabled'),
       fileSearch: getOld('mtool_filesearch_enabled'),
       fileDiff: getOld('mtool_filediff_enabled'),
+      jarViewer: getOld('mtool_jarviewer_enabled'),
     };
   });
 
@@ -98,6 +100,7 @@ export default function App() {
         mdEnabled={toolsEnabled.md}
         fileSearchEnabled={toolsEnabled.fileSearch}
         fileDiffEnabled={toolsEnabled.fileDiff}
+        jarViewerEnabled={toolsEnabled.jarViewer}
         hasUpdate={hasUpdate}
       />
       
@@ -111,6 +114,7 @@ export default function App() {
           {activePage === 'md' && toolsEnabled.md && <MarkdownEditor />}
           {activePage === 'fileSearch' && toolsEnabled.fileSearch && <FileSearch />}
           {activePage === 'fileDiff' && toolsEnabled.fileDiff && <FileDiff />}
+          {activePage === 'jarViewer' && toolsEnabled.jarViewer && <JarViewer />}
           {activePage === 'user' && <UserPage />}
           {activePage === 'settings' && (
             <SettingsPage 
@@ -128,7 +132,8 @@ export default function App() {
            !(activePage === 'sqlIn' && toolsEnabled.sqlIn) && 
            !(activePage === 'md' && toolsEnabled.md) && 
            !(activePage === 'fileSearch' && toolsEnabled.fileSearch) &&
-           !(activePage === 'fileDiff' && toolsEnabled.fileDiff) && (
+           !(activePage === 'fileDiff' && toolsEnabled.fileDiff) &&
+           !(activePage === 'jarViewer' && toolsEnabled.jarViewer) && (
              <div className="flex items-center justify-center h-full th-text-muted font-medium">{t('Select a tool from the sidebar')}</div>
           )}
         </main>

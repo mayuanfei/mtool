@@ -208,6 +208,18 @@ const translations = {
     'Text exceeds 10MB limit': 'Text exceeds 10MB limit',
     'Files exceed 10000 lines. Diff is approximate.': 'Files exceed 10000 lines. Diff is approximate.',
     'Paste text here, or drop a file': 'Paste text here, or drop a file',
+
+    // JarViewer
+    'Jar Viewer': 'Jar Viewer',
+    'View and decompile Java archive files.': 'View and decompile Java archive files.',
+    'Jar Viewer & Decompiler': 'Jar Viewer & Decompiler',
+    'Drag and drop a .jar, .class, or any text file here, or click the button below to browse.': 'Drag and drop a .jar, .class, or any text file here, or click the button below to browse.',
+    'Archive Contents': 'Archive Contents',
+    'File': 'File',
+    'Decompiling/Reading...': 'Decompiling/Reading...',
+    'Loading...': 'Loading...',
+    'Select a file to view its contents': 'Select a file to view its contents',
+    'Open Another': 'Open Another',
   },
   zh: {
     // Sidebar
@@ -414,6 +426,18 @@ const translations = {
     'Text exceeds 10MB limit': '文本超过 10MB 限制',
     'Files exceed 10000 lines. Diff is approximate.': '文件超过 10000 行，仅显示粗略差异结果',
     'Paste text here, or drop a file': '在此粘贴文本，或拖拽文件到此处',
+
+    // JarViewer
+    'Jar Viewer': 'Jar 浏览器',
+    'View and decompile Java archive files.': '浏览和反编译 Java 归档文件。',
+    'Jar Viewer & Decompiler': 'Jar 浏览器与反编译',
+    'Drag and drop a .jar, .class, or any text file here, or click the button below to browse.': '拖拽 .jar、.class 或任意文本文件到此处，或点击下方按钮选择文件。',
+    'Archive Contents': '归档内容',
+    'File': '文件',
+    'Decompiling/Reading...': '反编译 / 读取中...',
+    'Loading...': '加载中...',
+    'Select a file to view its contents': '选择一个文件以查看其内容',
+    'Open Another': '打开其他文件',
   }
 };
 

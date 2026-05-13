@@ -1,6 +1,5 @@
 mod file_search;
-
-use base64::prelude::*;
+mod jar_viewer;use base64::prelude::*;
 use std::fs;
 use std::io::Cursor;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -671,6 +670,10 @@ pub fn run() {
             open_file,
             open_text_file,
             read_text_file_by_path,
+            jar_viewer::open_jar_or_class,
+            jar_viewer::list_jar_entries,
+            jar_viewer::read_jar_entry,
+            jar_viewer::read_local_class,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
