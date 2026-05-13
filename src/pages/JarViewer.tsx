@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
 import { FileUp, FileArchive, Folder, File as FileIcon, FileJson, FileCode2, ChevronRight, ChevronDown, Package } from 'lucide-react';
 import { invoke } from '@tauri-apps/api/core';
 import { getCurrentWebview } from '@tauri-apps/api/webview';
@@ -48,6 +48,9 @@ function getLanguage(fileName: string): string {
   if (ext === 'xml') return 'xml';
   if (ext === 'md') return 'markdown';
   if (['js', 'jsx', 'ts', 'tsx'].includes(ext)) return 'javascript';
+  if (['properties', 'ini', 'conf'].includes(ext)) return 'properties';
+  if (ext === 'sql') return 'sql';
+  if (['sh', 'bash'].includes(ext)) return 'bash';
   return 'plaintext';
 }
 
@@ -68,6 +71,31 @@ export function JarViewer() {
   const [loading, setLoading] = useState(false);
   const [dragOver, setDragOver] = useState(false);
   const [expandedDirs, setExpandedDirs] = useState<Set<string>>(new Set());
+  
+  const sidebarWidthRef = useRef(256);
+  const [sidebarWidth, setSidebarWidth] = useState(256);
+
+  const handleMouseDownResizer = (e: React.MouseEvent) => {
+    e.preventDefault();
+    const startX = e.clientX;
+    const startWidth = sidebarWidthRef.current;
+    
+    const onMouseMove = (e: MouseEvent) => {
+      const newWidth = Math.max(150, Math.min(800, startWidth + (e.clientX - startX)));
+      sidebarWidthRef.current = newWidth;
+      setSidebarWidth(newWidth);
+    };
+    
+    const onMouseUp = () => {
+      document.removeEventListener('mousemove', onMouseMove);
+      document.removeEventListener('mouseup', onMouseUp);
+      document.body.style.cursor = '';
+    };
+    
+    document.addEventListener('mousemove', onMouseMove);
+    document.addEventListener('mouseup', onMouseUp);
+    document.body.style.cursor = 'col-resize';
+  };
 
   const handleOpenFile = async () => {
     try {
@@ -194,7 +222,7 @@ export function JarViewer() {
             isSelected ? 'bg-indigo-500/15 text-indigo-400 font-medium' : 'th-text-2 th-hover-surface'
           }`}
           style={{ paddingLeft: `${depth * 12 + 28}px` }}
-          onClick={() => loadEntryContent(filePath, child.path, true)}
+          onClick={() => loadEntryContent(filePath, child.path, isJar)}
         >
           {getIconForFile(child.name)}
           <span className="truncate">{child.name}</span>
@@ -262,7 +290,10 @@ export function JarViewer() {
 
       <div className="flex flex-1 min-h-0">
         {/* Left Tree Panel */}
-        <div className="w-64 border-r th-border flex flex-col flex-shrink-0 th-bg-surface-h">
+        <div 
+          className="border-r th-border flex flex-col flex-shrink-0 th-bg-surface-h"
+          style={{ width: `${sidebarWidth}px` }}
+        >
           <div className="px-3 py-2 border-b th-border text-xs font-semibold th-text-muted uppercase tracking-wider bg-black/5">
             {isJar ? t('Archive Contents') : t('File')}
           </div>
@@ -270,6 +301,12 @@ export function JarViewer() {
             {tree && renderTree(tree)}
           </div>
         </div>
+
+        {/* Resizer Handle */}
+        <div 
+          className="w-1 cursor-col-resize hover:bg-indigo-500/50 active:bg-indigo-500 transition-colors z-10"
+          onMouseDown={handleMouseDownResizer}
+        />
 
         {/* Right Content Panel */}
         <div className="flex-1 flex flex-col min-w-0 th-bg-main">
