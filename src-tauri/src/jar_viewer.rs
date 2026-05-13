@@ -1,7 +1,7 @@
 use std::fs::{self, File};
 use std::io::Read;
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::process::{Command, Stdio};
 use std::time::Duration;
 use sha2::{Sha256, Digest};
 use zip::ZipArchive;
@@ -50,13 +50,28 @@ pub fn ensure_cfr() -> Result<PathBuf, String> {
 pub fn decompile_class(class_file_path: &Path) -> Result<String, String> {
     let cfr_path = ensure_cfr()?;
     
-    let output = Command::new("java")
+    let mut child = Command::new("java")
         .arg("-jar")
         .arg(&cfr_path)
         .arg(class_file_path)
-        .output()
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
         .map_err(|e| format!("Failed to execute java (is it installed?): {}", e))?;
-        
+
+    let deadline = std::time::Instant::now() + Duration::from_secs(30);
+    loop {
+        if child.try_wait().map_err(|e| e.to_string())?.is_some() {
+            break;
+        }
+        if std::time::Instant::now() > deadline {
+            let _ = child.kill();
+            return Err("Decompilation timed out (30s)".to_string());
+        }
+        std::thread::sleep(Duration::from_millis(100));
+    }
+
+    let output = child.wait_with_output().map_err(|e| e.to_string())?;
     if output.status.success() {
         Ok(String::from_utf8_lossy(&output.stdout).to_string())
     } else {
@@ -65,16 +80,20 @@ pub fn decompile_class(class_file_path: &Path) -> Result<String, String> {
 }
 
 #[tauri::command]
-pub fn list_jar_entries(path: &str) -> Result<Vec<String>, String> {
-    let file = File::open(path).map_err(|e| e.to_string())?;
-    let mut archive = ZipArchive::new(file).map_err(|e| e.to_string())?;
-    let mut entries = Vec::new();
-    for i in 0..archive.len() {
-        if let Ok(file) = archive.by_index(i) {
-            entries.push(file.name().to_string());
+pub async fn list_jar_entries(path: String) -> Result<Vec<String>, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let file = File::open(&path).map_err(|e| e.to_string())?;
+        let mut archive = ZipArchive::new(file).map_err(|e| e.to_string())?;
+        let mut entries = Vec::new();
+        for i in 0..archive.len() {
+            if let Ok(file) = archive.by_index(i) {
+                entries.push(file.name().to_string());
+            }
         }
-    }
-    Ok(entries)
+        Ok(entries)
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]

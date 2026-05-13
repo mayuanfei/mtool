@@ -232,11 +232,9 @@ export function JarViewer() {
   };
 
   const { highlightedContent, lineCount } = useMemo(() => {
-    let resultContent = content || '';
-    let lineCount = resultContent ? resultContent.split('\n').length : 0;
-    
     if (!content) return { highlightedContent: '', lineCount: 0 };
-    
+
+    const lineCount = content.split('\n').length;
     const lang = getLanguage(selectedEntry || filePath);
     try {
       if (lang === 'plaintext') {
