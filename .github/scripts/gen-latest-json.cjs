@@ -47,7 +47,6 @@ const payload = {
   pub_date: new Date().toISOString(),
   platforms: {
     'darwin-aarch64': macosEntry,
-    'darwin-x86_64': macosEntry,
     'windows-x86_64': {
       signature: windowsSig,
       url: `${baseUrl}/mtool_${tag}.exe`,
