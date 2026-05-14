@@ -1,5 +1,11 @@
 # Changelog
 
+## [1.0.4]
+
+- **JAR 查看器 (JarViewer)**:
+  - 内置内置 CFR 反编译工具 JAR 包作为应用资源，彻底解决部分地区无法从 GitHub 下载 CFR 导致的工具失效问题。
+  - 支持离线环境下使用 JAR 查看器。
+
 ## [1.0.3]
 
 - **JAR 查看器 (JarViewer)**：

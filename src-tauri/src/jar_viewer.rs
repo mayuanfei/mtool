@@ -1,17 +1,26 @@
+use sha2::{Digest, Sha256};
 use std::fs::{self, File};
 use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::time::Duration;
-use sha2::{Sha256, Digest};
+use tauri::Manager;
 use zip::ZipArchive;
 
-pub fn ensure_cfr() -> Result<PathBuf, String> {
+pub fn ensure_cfr(app_handle: &tauri::AppHandle) -> Result<PathBuf, String> {
+    let expected_sha256 = "f686e8f3ded377d7bc87d216a90e9e9512df4156e75b06c655a16648ae8765b2";
+
+    // 1. Try to find bundled CFR in resources first.
+    if let Ok(bundled_path) = app_handle.path().resolve("resources/cfr-0.152.jar", tauri::path::BaseDirectory::Resource) {
+        if bundled_path.exists() {
+            return Ok(bundled_path);
+        }
+    }
+
+    // 2. Fallback to temp directory (useful for dev or if bundling failed).
     let mut cfr_path = std::env::temp_dir();
     cfr_path.push("cfr-0.152.jar");
     
-    let expected_sha256 = "f686e8f3ded377d7bc87d216a90e9e9512df4156e75b06c655a16648ae8765b2";
-
     if cfr_path.exists() {
         if let Ok(bytes) = fs::read(&cfr_path) {
             let mut hasher = Sha256::new();
@@ -23,6 +32,7 @@ pub fn ensure_cfr() -> Result<PathBuf, String> {
         }
     }
     
+    // 3. Last resort: Download if not bundled and not in temp.
     let url = "https://github.com/leibnitz27/cfr/releases/download/0.152/cfr-0.152.jar";
     let client = reqwest::blocking::Client::builder()
         .timeout(Duration::from_secs(30))
@@ -47,8 +57,8 @@ pub fn ensure_cfr() -> Result<PathBuf, String> {
     Ok(cfr_path)
 }
 
-pub fn decompile_class(class_file_path: &Path) -> Result<String, String> {
-    let cfr_path = ensure_cfr()?;
+pub fn decompile_class(app_handle: &tauri::AppHandle, class_file_path: &Path) -> Result<String, String> {
+    let cfr_path = ensure_cfr(app_handle)?;
     
     let child = Command::new("java")
         .arg("-jar")
@@ -97,7 +107,7 @@ pub fn decompile_class(class_file_path: &Path) -> Result<String, String> {
 }
 
 #[tauri::command]
-pub async fn list_jar_entries(path: String) -> Result<Vec<String>, String> {
+pub async fn list_jar_entries(_app_handle: tauri::AppHandle, path: String) -> Result<Vec<String>, String> {
     tauri::async_runtime::spawn_blocking(move || {
         let file = File::open(&path).map_err(|e| e.to_string())?;
         let mut archive = ZipArchive::new(file).map_err(|e| e.to_string())?;
@@ -114,7 +124,7 @@ pub async fn list_jar_entries(path: String) -> Result<Vec<String>, String> {
 }
 
 #[tauri::command]
-pub async fn read_jar_entry(jar_path: String, entry_name: String) -> Result<String, String> {
+pub async fn read_jar_entry(app_handle: tauri::AppHandle, jar_path: String, entry_name: String) -> Result<String, String> {
     tauri::async_runtime::spawn_blocking(move || {
         let file = File::open(&jar_path).map_err(|e| e.to_string())?;
         let mut archive = ZipArchive::new(file).map_err(|e| e.to_string())?;
@@ -128,7 +138,7 @@ pub async fn read_jar_entry(jar_path: String, entry_name: String) -> Result<Stri
             let temp_class = temp_dir.join(format!("mtool_temp_{:x}.class", rand::random::<u64>()));
             fs::write(&temp_class, &buf).map_err(|e| e.to_string())?;
             
-            let result = decompile_class(&temp_class);
+            let result = decompile_class(&app_handle, &temp_class);
             let _ = fs::remove_file(temp_class);
             result
         } else {
@@ -140,11 +150,11 @@ pub async fn read_jar_entry(jar_path: String, entry_name: String) -> Result<Stri
 }
 
 #[tauri::command]
-pub async fn read_local_class(path: String) -> Result<String, String> {
+pub async fn read_local_class(app_handle: tauri::AppHandle, path: String) -> Result<String, String> {
     tauri::async_runtime::spawn_blocking(move || {
         let path_obj = Path::new(&path);
         if path.ends_with(".class") {
-            decompile_class(path_obj)
+            decompile_class(&app_handle, path_obj)
         } else {
             let metadata = fs::metadata(path_obj).map_err(|e| e.to_string())?;
             if metadata.len() > 10 * 1024 * 1024 {
@@ -161,7 +171,7 @@ pub async fn read_local_class(path: String) -> Result<String, String> {
 }
 
 #[tauri::command]
-pub async fn open_jar_or_class() -> Result<(String, String), String> {
+pub async fn open_jar_or_class(_app_handle: tauri::AppHandle) -> Result<(String, String), String> {
     tauri::async_runtime::spawn_blocking(|| {
         if let Some(path) = rfd::FileDialog::new()
             .add_filter("Archive/Class/Text Files", &[
