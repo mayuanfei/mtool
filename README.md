@@ -2,7 +2,7 @@
 
 > 一款面向开发者的跨平台桌面效率工具箱，基于 **Tauri v2 + React 19 + TypeScript** 构建。
 
-[![Version](https://img.shields.io/badge/version-1.0.0-blue)](https://github.com/mayuanfei/mtool)
+[![Version](https://img.shields.io/badge/version-1.0.4-blue)](https://github.com/mayuanfei/mtool)
 [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 [![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Windows-lightgrey)]()
 
@@ -12,12 +12,14 @@
 
 | 工具 | 说明 |
 |------|------|
-| 📁 文件搜索 | 本地全文索引检索，支持模糊匹配与快速定位 |
-| 📄 JSON 格式化 | 格式化、压缩、校验 JSON，支持语法高亮 |
-| 📝 Markdown 编辑器 | 双栏实时预览，支持代码块高亮 |
+| 📁 文件搜索 | 本地全文索引检索，支持模糊匹配、大小过滤与内容全文搜索 |
+| 📄 JSON 格式化 | 格式化、压缩、校验 JSON，支持语法高亮与可折叠树形视图 |
+| 📝 Markdown 编辑器 | 双栏实时预览，支持代码块高亮，可打开/保存 `.md` 文件 |
 | 🔐 密码生成器 | 可配置复杂度、长度、批量生成强密码 |
-| 🗄️ SQL IN 构建器 | 从列值快速生成 SQL `IN(...)` 子句 |
-| 📷 文本转二维码 | 将任意文本/URL 生成高清 PNG 二维码 |
+| 🗄️ SQL IN 构建器 | 从列值快速生成 SQL `IN(...)` 子句，自动去重与转义 |
+| 📷 文本转二维码 | 将任意文本/URL 生成高清 PNG 二维码，支持自定义颜色 |
+| 🔍 文件对比 | 双栏并排对比两份文本内容，支持行级与词级差异高亮 |
+| 📦 JAR 查看器 | 浏览 JAR/ZIP 归档结构，反编译 `.class` 文件查看 Java 源码 |
 
 ---
 
@@ -28,6 +30,7 @@
 - [Node.js](https://nodejs.org/) >= 18
 - [Rust](https://www.rust-lang.org/) >= 1.77（通过 `rustup` 安装）
 - [Tauri CLI 依赖](https://v2.tauri.app/start/prerequisites/)（平台系统依赖，参见官方文档）
+- **JAR 查看器额外要求**：需要安装 [Java JDK/JRE](https://adoptium.net/)，并确保 `java` 命令在系统 PATH 中可用
 
 ### 安装依赖
 
@@ -56,13 +59,24 @@ npm run tauri build
 
 ---
 
+## 📥 下载安装
+
+前往 [Releases 页面](https://github.com/mayuanfei/mtool/releases) 下载最新版本：
+
+- **macOS**：下载 `.dmg` 文件，双击安装
+- **Windows**：下载 `.exe` 安装程序，运行即可
+
+应用内置自动更新功能，后续版本会自动提示更新。
+
+---
+
 ## 🛠️ 工具使用说明
 
 ### 📁 文件搜索
 
 1. 进入「设置」页面，开启「File Search」开关，程序将在后台对选定目录建立全文索引。
 2. 切换到「文件搜索」页面，在搜索框中输入查询语句，实时返回匹配的文件。
-3. 点击结果可直接在系统文件管理器中定位该文件。
+3. 点击结果可直接在系统文件管理器中定位该文件，或直接打开文件。
 
 #### 🔍 搜索语法
 
@@ -110,7 +124,8 @@ npm run tauri build
 
 - **格式化**：粘贴原始 JSON，点击「Format」，输出带缩进的可读格式。
 - **压缩**：点击「Minify」，去除多余空白，生成紧凑格式。
-- **校验**：输入框实时标红非法 JSON，并显示错误位置。
+- **校验**：输入框实时标红非法 JSON，并显示错误位置和行号。
+- **折叠/展开**：格式化后的 JSON 支持树形折叠，可以折叠/展开任意层级的对象和数组。
 - **复制**：点击右上角「Copy」按钮，快速复制处理结果。
 
 ---
@@ -120,6 +135,7 @@ npm run tauri build
 - 左侧编辑区输入 Markdown 内容，右侧实时渲染预览。
 - 支持代码块语法高亮（基于 highlight.js）。
 - 支持从本地打开 `.md` 文件，以及将内容另存为文件。
+- 支持同步滚动：编辑区和预览区联动滚动。
 
 ---
 
@@ -155,6 +171,40 @@ npm run tauri build
 
 ---
 
+### 🔍 文件对比
+
+基于 Myers diff 算法实现的双栏文本对比工具。
+
+1. **加载文件**：通过以下三种方式加载要对比的文本：
+   - 点击工具栏按钮选择本地文件
+   - 直接将文件拖拽到左右两侧面板
+   - 从剪贴板粘贴文本内容，或在文本框中直接输入/编辑
+2. **查看差异**：加载两侧内容后，自动进行对比并展示结果：
+   - 🔴 红色高亮标记删除的行
+   - 🟢 绿色高亮标记新增的行
+   - 修改行内的具体词级变更也会单独高亮
+3. **导航差异**：使用工具栏的上下箭头在各差异区域间快速跳转，右侧 minimap 提供全局差异分布概览。
+4. **辅助操作**：支持左右内容互换、重置、隐藏/显示输入面板。
+
+> 支持拖入两个文件同时加载。超过 10,000 行的文件会自动切换为近似对比模式。
+
+---
+
+### 📦 JAR 查看器
+
+浏览 JAR/ZIP 归档文件的内部结构，并自动反编译 `.class` 文件为可读的 Java 源码。
+
+1. **打开文件**：点击「Open File」按钮或直接拖拽文件到界面。
+2. **浏览结构**：左侧以树形目录展示归档内容，支持展开/折叠目录。
+3. **查看内容**：
+   - 点击 `.class` 文件 → 自动调用 CFR 反编译器还原为 Java 源码
+   - 点击文本文件（`.xml`、`.properties`、`.yaml` 等）→ 直接展示内容并语法高亮
+4. **支持的文件格式**：`.jar`、`.zip`、`.class` 以及常见文本文件格式。
+
+> **前置要求**：反编译 `.class` 文件需要系统已安装 Java 运行环境。CFR 反编译工具已内置于应用中，无需额外下载。
+
+---
+
 ## ⚙️ 设置
 
 | 选项 | 说明 |
@@ -163,6 +213,7 @@ npm run tauri build
 | 语言 | 切换界面语言（中文 / English） |
 | 工具开关 | 独立启用/禁用各个工具模块，关闭后从侧边栏隐藏 |
 | File Search | 开启后触发文件索引构建；关闭后清除索引数据 |
+| 自动更新 | 启动时自动检测新版本，有更新时弹出提示 |
 
 ---
 
@@ -172,6 +223,15 @@ npm run tauri build
 mtool/
 ├── src/                  # 前端源码 (React + TypeScript)
 │   ├── pages/            # 各工具页面组件
+│   │   ├── FileSearch    # 文件搜索
+│   │   ├── JsonFormatter # JSON 格式化
+│   │   ├── MarkdownEditor# Markdown 编辑器
+│   │   ├── PasswordGenerator # 密码生成器
+│   │   ├── SqlInBuilder  # SQL IN 构建器
+│   │   ├── TextToQr      # 文本转二维码
+│   │   ├── FileDiff      # 文件对比
+│   │   ├── JarViewer     # JAR 查看器
+│   │   └── Settings      # 设置页面
 │   ├── components/       # 公共 UI 组件
 │   ├── App.tsx           # 应用主入口与路由状态
 │   ├── theme.tsx         # 主题 Provider
@@ -179,7 +239,9 @@ mtool/
 ├── src-tauri/            # Tauri 后端 (Rust)
 │   ├── src/
 │   │   ├── lib.rs        # Tauri 命令注册
-│   │   └── file_search.rs# 文件索引引擎
+│   │   ├── file_search.rs# 文件索引引擎
+│   │   └── jar_viewer.rs # JAR 查看与反编译
+│   ├── resources/        # 内置资源 (CFR 反编译器)
 │   └── tauri.conf.json   # Tauri 配置
 └── package.json
 ```
@@ -191,6 +253,8 @@ mtool/
 - **前端**：React 19 · TypeScript · Vite 7 · Tailwind CSS v4
 - **后端**：Rust · Tauri v2
 - **数据库**：SQLite (FTS5 全文索引) via `rusqlite`
+- **差异对比**：Myers diff 算法（前端纯 TypeScript 实现）
+- **反编译**：CFR (Class File Reader) — Java 字节码反编译器
 - **二维码**：`qrcode` crate
 - **Markdown**：`marked` + `highlight.js`
 
