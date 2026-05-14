@@ -13,22 +13,31 @@ static CFR_PATH: OnceLock<PathBuf> = OnceLock::new();
 pub fn ensure_cfr(app_handle: &tauri::AppHandle) -> Result<PathBuf, String> {
     // Return cached path if already verified.
     if let Some(path) = CFR_PATH.get() {
-        return Ok(path.clone());
+        if path.exists() {
+            return Ok(path.clone());
+        }
     }
 
     let expected_sha256 = "f686e8f3ded377d7bc87d216a90e9e9512df4156e75b06c655a16648ae8765b2";
 
     // 1. Try to find bundled CFR in resources first.
-    if let Ok(bundled_path) = app_handle.path().resolve("resources/cfr-0.152.jar", tauri::path::BaseDirectory::Resource) {
-        if bundled_path.exists() {
-            // Verify integrity of bundled jar
-            if let Ok(bytes) = fs::read(&bundled_path) {
-                let mut hasher = Sha256::new();
-                hasher.update(&bytes);
-                let hash = hasher.finalize().iter().map(|b| format!("{:02x}", b)).collect::<String>();
-                if hash == expected_sha256 {
-                    let _ = CFR_PATH.set(bundled_path.clone());
-                    return Ok(bundled_path);
+    // We try multiple common patterns for resource resolution in Tauri v2.
+    let possible_rel_paths = ["resources/cfr-0.152.jar", "cfr-0.152.jar", "_up_/resources/cfr-0.152.jar"];
+    
+    for rel_path in possible_rel_paths {
+        if let Ok(bundled_path) = app_handle.path().resolve(rel_path, tauri::path::BaseDirectory::Resource) {
+            if bundled_path.exists() {
+                // Verify integrity of bundled jar
+                if let Ok(bytes) = fs::read(&bundled_path) {
+                    let mut hasher = Sha256::new();
+                    hasher.update(&bytes);
+                    let hash = hasher.finalize().iter().map(|b| format!("{:02x}", b)).collect::<String>();
+                    if hash == expected_sha256 {
+                        let _ = CFR_PATH.set(bundled_path.clone());
+                        return Ok(bundled_path);
+                    } else {
+                        eprintln!("[mtool] Bundled CFR hash mismatch at {:?}. Expected {}, got {}", bundled_path, expected_sha256, hash);
+                    }
                 }
             }
         }
@@ -55,9 +64,9 @@ pub fn ensure_cfr(app_handle: &tauri::AppHandle) -> Result<PathBuf, String> {
     let client = reqwest::blocking::Client::builder()
         .timeout(Duration::from_secs(30))
         .build()
-        .map_err(|e| format!("Failed to build client: {}", e))?;
+        .map_err(|e| format!("Failed to build client for download: {}", e))?;
         
-    let response = client.get(url).send().map_err(|e| format!("Failed to download CFR: {}", e))?;
+    let response = client.get(url).send().map_err(|e| format!("Failed to download CFR from GitHub: {}. Please check your internet connection.", e))?;
     let bytes = response.bytes().map_err(|e| format!("Failed to read CFR bytes: {}", e))?;
     
     let mut hasher = Sha256::new();
@@ -97,7 +106,8 @@ pub fn decompile_class(app_handle: &tauri::AppHandle, class_file_path: &Path) ->
 
     let child = command
         .spawn()
-        .map_err(|e| format!("Failed to execute java (is it installed?): {}", e))?;
+        .map_err(|e| format!("Failed to execute 'java'. Please ensure Java (JRE/JDK) is installed and available in your PATH. Error: {}", e))?;
+
 
     // Save PID before moving child into the thread.
     // On timeout we kill via OS signal using the PID — no shared state, no locks.
