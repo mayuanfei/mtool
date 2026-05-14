@@ -2,7 +2,7 @@
 
 > 一款面向开发者的跨平台桌面效率工具箱，基于 **Tauri v2 + React 19 + TypeScript** 构建。
 
-[![Version](https://img.shields.io/badge/version-1.0.4-blue)](https://github.com/mayuanfei/mtool)
+[![Version](https://img.shields.io/badge/version-1.0.5-blue)](https://github.com/mayuanfei/mtool)
 [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 [![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Windows-lightgrey)]()
 

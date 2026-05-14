@@ -1,5 +1,10 @@
 # Changelog
 
+## [1.0.5]
+
+- **JAR 查看器 (JarViewer)**:
+  - 修复 Windows 平台打开 `.class` 文件时会额外弹出黑色控制台窗口的问题，反编译过程改为后台静默执行。
+
 ## [1.0.4]
 
 - **JAR 查看器 (JarViewer)**:
@@ -42,5 +47,4 @@
   - 修复了 `escapeHtml` 无法正确全局转义长字符串带 `<`、`>` 符号的问题。
 - **其他维护**：
   - 修复 `App.tsx` 中关于自动更新信息 `updater.updateInfo?.version` 缺少依赖的 React 警告。
-
 

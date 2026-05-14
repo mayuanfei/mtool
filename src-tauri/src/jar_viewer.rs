@@ -78,13 +78,24 @@ pub fn ensure_cfr(app_handle: &tauri::AppHandle) -> Result<PathBuf, String> {
 
 pub fn decompile_class(app_handle: &tauri::AppHandle, class_file_path: &Path) -> Result<String, String> {
     let cfr_path = ensure_cfr(app_handle)?;
-    
-    let child = Command::new("java")
+
+    let mut command = Command::new("java");
+    command
         .arg("-jar")
         .arg(&cfr_path)
         .arg(class_file_path)
         .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
+        .stderr(Stdio::piped());
+
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+
+        const CREATE_NO_WINDOW: u32 = 0x08000000;
+        command.creation_flags(CREATE_NO_WINDOW);
+    }
+
+    let child = command
         .spawn()
         .map_err(|e| format!("Failed to execute java (is it installed?): {}", e))?;
 
