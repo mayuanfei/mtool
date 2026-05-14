@@ -14,7 +14,7 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - platform: macos-latest
+          - platform: macos-14
             args: '--target universal-apple-darwin'
           - platform: windows-latest
             args: ''
@@ -32,7 +32,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
 
       - name: Add macOS universal targets
-        if: matrix.platform == 'macos-latest'
+        if: matrix.platform == 'macos-14'
         run: rustup target add aarch64-apple-darwin x86_64-apple-darwin
 
       - uses: swatinem/rust-cache@v2
@@ -64,7 +64,7 @@ jobs:
       # Root cause: Tauri's bundler removes the .app directory after DMG creation.
       # The DMG always contains the .app, so we mount it to extract.
       - name: Create and sign macOS updater archive
-        if: matrix.platform == 'macos-latest'
+        if: matrix.platform == 'macos-14'
         shell: bash
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.MTOOL_PRIVATE_KEY }}
@@ -142,7 +142,7 @@ jobs:
           mv "$SIG" "${NSIS_DIR}/mtool_${TAG}.exe.sig"
 
       - name: Upload macOS updater signature
-        if: matrix.platform == 'macos-latest'
+        if: matrix.platform == 'macos-14'
         uses: actions/upload-artifact@v4
         with:
           name: macos-sig
