@@ -13,7 +13,15 @@ pub fn ensure_cfr(app_handle: &tauri::AppHandle) -> Result<PathBuf, String> {
     // 1. Try to find bundled CFR in resources first.
     if let Ok(bundled_path) = app_handle.path().resolve("resources/cfr-0.152.jar", tauri::path::BaseDirectory::Resource) {
         if bundled_path.exists() {
-            return Ok(bundled_path);
+            // Verify integrity of bundled jar
+            if let Ok(bytes) = fs::read(&bundled_path) {
+                let mut hasher = Sha256::new();
+                hasher.update(&bytes);
+                let hash = hasher.finalize().iter().map(|b| format!("{:02x}", b)).collect::<String>();
+                if hash == expected_sha256 {
+                    return Ok(bundled_path);
+                }
+            }
         }
     }
 
@@ -107,7 +115,7 @@ pub fn decompile_class(app_handle: &tauri::AppHandle, class_file_path: &Path) ->
 }
 
 #[tauri::command]
-pub async fn list_jar_entries(_app_handle: tauri::AppHandle, path: String) -> Result<Vec<String>, String> {
+pub async fn list_jar_entries(path: String) -> Result<Vec<String>, String> {
     tauri::async_runtime::spawn_blocking(move || {
         let file = File::open(&path).map_err(|e| e.to_string())?;
         let mut archive = ZipArchive::new(file).map_err(|e| e.to_string())?;
@@ -171,7 +179,7 @@ pub async fn read_local_class(app_handle: tauri::AppHandle, path: String) -> Res
 }
 
 #[tauri::command]
-pub async fn open_jar_or_class(_app_handle: tauri::AppHandle) -> Result<(String, String), String> {
+pub async fn open_jar_or_class() -> Result<(String, String), String> {
     tauri::async_runtime::spawn_blocking(|| {
         if let Some(path) = rfd::FileDialog::new()
             .add_filter("Archive/Class/Text Files", &[

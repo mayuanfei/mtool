@@ -54,10 +54,14 @@ export function PasswordGenerator() {
     const val = saved ? parseInt(saved, 10) : 1;
     return isNaN(val) ? 1 : Math.max(1, Math.min(100, val));
   });
-  const [useUpper, setUseUpper] = useState(true);
-  const [useLower, setUseLower] = useState(true);
-  const [useNumbers, setUseNumbers] = useState(true);
-  const [useSymbols, setUseSymbols] = useState(true);
+  const [useUpper, setUseUpper] = useState(() =>
+    localStorage.getItem('mtool_pwd_upper') !== 'false');
+  const [useLower, setUseLower] = useState(() =>
+    localStorage.getItem('mtool_pwd_lower') !== 'false');
+  const [useNumbers, setUseNumbers] = useState(() =>
+    localStorage.getItem('mtool_pwd_numbers') !== 'false');
+  const [useSymbols, setUseSymbols] = useState(() =>
+    localStorage.getItem('mtool_pwd_use_symbols') !== 'false');
   const [customSymbols, setCustomSymbols] = useState(() => {
     return localStorage.getItem('mtool_pwd_symbols') || '!@#$%^&*';
   });
@@ -166,6 +170,20 @@ export function PasswordGenerator() {
   useEffect(() => {
     localStorage.setItem('mtool_pwd_count', generateCount.toString());
   }, [generateCount]);
+
+  // Save boolean toggles to localStorage
+  useEffect(() => {
+    localStorage.setItem('mtool_pwd_upper', useUpper.toString());
+  }, [useUpper]);
+  useEffect(() => {
+    localStorage.setItem('mtool_pwd_lower', useLower.toString());
+  }, [useLower]);
+  useEffect(() => {
+    localStorage.setItem('mtool_pwd_numbers', useNumbers.toString());
+  }, [useNumbers]);
+  useEffect(() => {
+    localStorage.setItem('mtool_pwd_use_symbols', useSymbols.toString());
+  }, [useSymbols]);
 
   // When options change, generate new one automatically (without adding to history for slider drag)
   useEffect(() => {
