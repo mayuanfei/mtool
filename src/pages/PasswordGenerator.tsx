@@ -81,6 +81,7 @@ export function PasswordGenerator() {
     return [];
   });
   const [isCopied, setIsCopied] = useState(false);
+  const [charsetEmpty, setCharsetEmpty] = useState(false);
   const [historyCopiedId, setHistoryCopiedId] = useState<string | null>(null);
 
   const calculateStrength = useCallback((): 'STRONG' | 'GOOD' | 'FAIR' | 'WEAK' => {
@@ -110,8 +111,11 @@ export function PasswordGenerator() {
 
     if (!charset) {
       setPasswords([]);
+      setCharsetEmpty(true);
       return;
     }
+
+    setCharsetEmpty(false);
 
     const newPasswords: string[] = [];
     const historyAdditions: HistoryItem[] = [];
@@ -269,7 +273,7 @@ export function PasswordGenerator() {
                 {passwords.length > 0 ? passwords.map((p, i) => (
                   <div key={i} className="break-all">{p}</div>
                 )) : (
-                  !useUpper && !useLower && !useNumbers && !useSymbols
+                  charsetEmpty
                     ? <span className="text-sm text-amber-500 font-sans tracking-normal">{t('Please select at least one character type')}</span>
                     : '---'
                 )}
