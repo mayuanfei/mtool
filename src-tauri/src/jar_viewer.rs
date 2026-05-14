@@ -86,7 +86,7 @@ pub fn decompile_class(class_file_path: &Path) -> Result<String, String> {
                 use windows_sys::Win32::System::Threading::{OpenProcess, TerminateProcess, PROCESS_TERMINATE};
                 use windows_sys::Win32::Foundation::CloseHandle;
                 let handle = OpenProcess(PROCESS_TERMINATE, 0, pid);
-                if handle != 0 {
+                if handle != 0 as _ {
                     TerminateProcess(handle, 1);
                     CloseHandle(handle);
                 }
