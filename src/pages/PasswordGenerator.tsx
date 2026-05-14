@@ -268,7 +268,11 @@ export function PasswordGenerator() {
               <div className={`font-mono tracking-widest th-text overflow-y-auto max-h-40 mr-4 flex flex-col gap-2 w-full ${passwords.length > 1 ? 'text-xl' : 'text-3xl whitespace-nowrap overflow-hidden text-ellipsis'}`}>
                 {passwords.length > 0 ? passwords.map((p, i) => (
                   <div key={i} className="break-all">{p}</div>
-                )) : '---'}
+                )) : (
+                  !useUpper && !useLower && !useNumbers && !useSymbols
+                    ? <span className="text-sm text-amber-500 font-sans tracking-normal">{t('Please select at least one character type')}</span>
+                    : '---'
+                )}
               </div>
               <div className="flex items-center gap-3 shrink-0 mt-1">
                 <button 

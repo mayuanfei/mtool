@@ -69,6 +69,7 @@ const translations = {
     'STRENGTH': 'STRENGTH',
     'ACTION': 'ACTION',
     'Create secure passwords.': 'Create secure passwords.',
+    'Please select at least one character type': 'Please select at least one character type',
     
     // SqlInBuilder
     'SQL IN Builder': 'SQL IN Builder',
@@ -287,6 +288,7 @@ const translations = {
     'STRENGTH': '强度',
     'ACTION': '操作',
     'Create secure passwords.': '创建安全的密码。',
+    'Please select at least one character type': '请至少选择一种字符类型',
     
     // SqlInBuilder
     'SQL IN Builder': 'SQL IN 构建器',

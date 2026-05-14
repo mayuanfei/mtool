@@ -3,11 +3,19 @@ use std::fs::{self, File};
 use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+use std::sync::OnceLock;
 use std::time::Duration;
 use tauri::Manager;
 use zip::ZipArchive;
 
+static CFR_PATH: OnceLock<PathBuf> = OnceLock::new();
+
 pub fn ensure_cfr(app_handle: &tauri::AppHandle) -> Result<PathBuf, String> {
+    // Return cached path if already verified.
+    if let Some(path) = CFR_PATH.get() {
+        return Ok(path.clone());
+    }
+
     let expected_sha256 = "f686e8f3ded377d7bc87d216a90e9e9512df4156e75b06c655a16648ae8765b2";
 
     // 1. Try to find bundled CFR in resources first.
@@ -19,6 +27,7 @@ pub fn ensure_cfr(app_handle: &tauri::AppHandle) -> Result<PathBuf, String> {
                 hasher.update(&bytes);
                 let hash = hasher.finalize().iter().map(|b| format!("{:02x}", b)).collect::<String>();
                 if hash == expected_sha256 {
+                    let _ = CFR_PATH.set(bundled_path.clone());
                     return Ok(bundled_path);
                 }
             }
@@ -35,6 +44,7 @@ pub fn ensure_cfr(app_handle: &tauri::AppHandle) -> Result<PathBuf, String> {
             hasher.update(&bytes);
             let hash = hasher.finalize().iter().map(|b| format!("{:02x}", b)).collect::<String>();
             if hash == expected_sha256 {
+                let _ = CFR_PATH.set(cfr_path.clone());
                 return Ok(cfr_path);
             }
         }
@@ -62,6 +72,7 @@ pub fn ensure_cfr(app_handle: &tauri::AppHandle) -> Result<PathBuf, String> {
     fs::write(&temp_download_path, &bytes).map_err(|e| format!("Failed to write temp CFR: {}", e))?;
     let _ = fs::rename(&temp_download_path, &cfr_path);
     
+    let _ = CFR_PATH.set(cfr_path.clone());
     Ok(cfr_path)
 }
 
