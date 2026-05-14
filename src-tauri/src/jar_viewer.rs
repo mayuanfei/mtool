@@ -11,55 +11,46 @@ use zip::ZipArchive;
 static CFR_PATH: OnceLock<PathBuf> = OnceLock::new();
 
 pub fn ensure_cfr(app_handle: &tauri::AppHandle) -> Result<PathBuf, String> {
-    // Return cached path if already verified.
-    if let Some(path) = CFR_PATH.get() {
-        if path.exists() {
-            return Ok(path.clone());
+    let expected_sha256 = "f686e8f3ded377d7bc87d216a90e9e9512df4156e75b06c655a16648ae8765b2";
+    
+    // Always use a path in the local temp directory for execution.
+    // This avoids issues with Java and UNC paths (e.g. in macOS VMs).
+    let mut local_cfr_path = std::env::temp_dir();
+    local_cfr_path.push("mtool_cfr_0.152.jar");
+
+    // 1. If it already exists in temp and is valid, use it.
+    if local_cfr_path.exists() {
+        if let Ok(bytes) = fs::read(&local_cfr_path) {
+            let mut hasher = Sha256::new();
+            hasher.update(&bytes);
+            let hash = hasher.finalize().iter().map(|b| format!("{:02x}", b)).collect::<String>();
+            if hash == expected_sha256 {
+                return Ok(local_cfr_path);
+            }
         }
     }
 
-    let expected_sha256 = "f686e8f3ded377d7bc87d216a90e9e9512df4156e75b06c655a16648ae8765b2";
-
-    // 1. Try to find bundled CFR in resources first.
-    // We try multiple common patterns for resource resolution in Tauri v2.
+    // 2. Try to find bundled CFR and copy it to temp.
     let possible_rel_paths = ["resources/cfr-0.152.jar", "cfr-0.152.jar", "_up_/resources/cfr-0.152.jar"];
-    
     for rel_path in possible_rel_paths {
         if let Ok(bundled_path) = app_handle.path().resolve(rel_path, tauri::path::BaseDirectory::Resource) {
             if bundled_path.exists() {
-                // Verify integrity of bundled jar
                 if let Ok(bytes) = fs::read(&bundled_path) {
                     let mut hasher = Sha256::new();
                     hasher.update(&bytes);
                     let hash = hasher.finalize().iter().map(|b| format!("{:02x}", b)).collect::<String>();
                     if hash == expected_sha256 {
-                        let _ = CFR_PATH.set(bundled_path.clone());
-                        return Ok(bundled_path);
-                    } else {
-                        eprintln!("[mtool] Bundled CFR hash mismatch at {:?}. Expected {}, got {}", bundled_path, expected_sha256, hash);
+                        // Found valid bundled jar, copy to local temp for execution
+                        if fs::write(&local_cfr_path, &bytes).is_ok() {
+                            return Ok(local_cfr_path);
+                        }
                     }
                 }
             }
         }
     }
 
-    // 2. Fallback to temp directory (useful for dev or if bundling failed).
-    let mut cfr_path = std::env::temp_dir();
-    cfr_path.push("cfr-0.152.jar");
-    
-    if cfr_path.exists() {
-        if let Ok(bytes) = fs::read(&cfr_path) {
-            let mut hasher = Sha256::new();
-            hasher.update(&bytes);
-            let hash = hasher.finalize().iter().map(|b| format!("{:02x}", b)).collect::<String>();
-            if hash == expected_sha256 {
-                let _ = CFR_PATH.set(cfr_path.clone());
-                return Ok(cfr_path);
-            }
-        }
-    }
-    
-    // 3. Last resort: Download if not bundled and not in temp.
+    // 3. Fallback: Download to local temp.
     let url = "https://github.com/leibnitz27/cfr/releases/download/0.152/cfr-0.152.jar";
     let client = reqwest::blocking::Client::builder()
         .timeout(Duration::from_secs(30))
@@ -77,12 +68,9 @@ pub fn ensure_cfr(app_handle: &tauri::AppHandle) -> Result<PathBuf, String> {
         return Err(format!("CFR jar integrity check failed. Expected {}, got {}", expected_sha256, hash));
     }
     
-    let temp_download_path = cfr_path.with_file_name(format!("cfr-0.152-{:x}.tmp", rand::random::<u64>()));
-    fs::write(&temp_download_path, &bytes).map_err(|e| format!("Failed to write temp CFR: {}", e))?;
-    let _ = fs::rename(&temp_download_path, &cfr_path);
+    fs::write(&local_cfr_path, &bytes).map_err(|e| format!("Failed to write CFR to local temp: {}", e))?;
     
-    let _ = CFR_PATH.set(cfr_path.clone());
-    Ok(cfr_path)
+    Ok(local_cfr_path)
 }
 
 pub fn decompile_class(app_handle: &tauri::AppHandle, class_file_path: &Path) -> Result<String, String> {
