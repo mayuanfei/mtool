@@ -65,7 +65,9 @@ fn verify_sha256(path: &Path) -> bool {
 }
 
 fn resolve_bundled_cfr(app_handle: &tauri::AppHandle) -> Result<PathBuf, String> {
-    let possible_rel_paths = ["resources/cfr-0.152.jar", "cfr-0.152.jar", "_up_/resources/cfr-0.152.jar"];
+    // "resources/cfr-0.152.jar" — Tauri 标准打包布局：资源文件位于应用程序包的 resources/ 子目录
+    // "cfr-0.152.jar"            — Tauri resource root 备用：部分打包配置会将资源直接放到根目录
+    let possible_rel_paths = ["resources/cfr-0.152.jar", "cfr-0.152.jar"];
     for rel_path in possible_rel_paths {
         if let Ok(path) = app_handle.path().resolve(rel_path, tauri::path::BaseDirectory::Resource) {
             if path.exists() && verify_sha256(&path) {
@@ -224,7 +226,15 @@ pub async fn read_local_class(app_handle: tauri::AppHandle, path: String) -> Res
     tauri::async_runtime::spawn_blocking(move || {
         let path_obj = Path::new(&path);
         if path.ends_with(".class") {
-            decompile_class(&app_handle, path_obj)
+            // 将 .class 文件复制到本地 temp 目录再传给 java，
+            // 避免 VM 共享目录 UNC 路径（如 \\Mac\Home\...）导致 java 无法读取输入文件
+            let bytes = fs::read(path_obj).map_err(|e| e.to_string())?;
+            let temp_class = std::env::temp_dir()
+                .join(format!("mtool_temp_{:x}.class", rand::random::<u64>()));
+            fs::write(&temp_class, &bytes).map_err(|e| e.to_string())?;
+            let result = decompile_class(&app_handle, &temp_class);
+            let _ = fs::remove_file(&temp_class);
+            result
         } else {
             let metadata = fs::metadata(path_obj).map_err(|e| e.to_string())?;
             if metadata.len() > 10 * 1024 * 1024 {

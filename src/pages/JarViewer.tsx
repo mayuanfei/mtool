@@ -61,6 +61,17 @@ function getIconForFile(name: string) {
   return <FileIcon className="w-4 h-4 text-slate-400" />;
 }
 
+// hljs.highlight 会转义 HTML 特殊字符，但 plaintext 分支和异常兜底分支
+// 会直接将原始字符串注入 dangerouslySetInnerHTML，需手动转义防止 XSS
+function escapeHtml(str: string): string {
+  return str
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;');
+}
+
 export function JarViewer() {
   const { t } = useI18n();
   const [filePath, setFilePath] = useState('');
@@ -238,11 +249,11 @@ export function JarViewer() {
     const lang = getLanguage(selectedEntry || filePath);
     try {
       if (lang === 'plaintext') {
-        return { highlightedContent: content, lineCount };
+        return { highlightedContent: escapeHtml(content), lineCount };
       }
       return { highlightedContent: hljs.highlight(content, { language: lang, ignoreIllegals: true }).value, lineCount };
     } catch {
-      return { highlightedContent: content, lineCount };
+      return { highlightedContent: escapeHtml(content), lineCount };
     }
   }, [content, selectedEntry, filePath]);
 
