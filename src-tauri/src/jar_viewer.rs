@@ -10,52 +10,94 @@ use zip::ZipArchive;
 
 static CFR_PATH: OnceLock<PathBuf> = OnceLock::new();
 
-pub fn ensure_cfr(app_handle: &tauri::AppHandle) -> Result<PathBuf, String> {
-    let expected_sha256 = "f686e8f3ded377d7bc87d216a90e9e9512df4156e75b06c655a16648ae8765b2";
-    
-    // Always use a path in the local temp directory for execution.
-    // This avoids issues with Java and UNC paths (e.g. in macOS VMs).
-    let mut local_cfr_path = std::env::temp_dir();
-    local_cfr_path.push("mtool_cfr_0.152.jar");
+const EXPECTED_SHA256: &str = "f686e8f3ded377d7bc87d216a90e9e9512df4156e75b06c655a16648ae8765b2";
 
-    // 1. If it already exists in temp and is valid, use it.
-    if local_cfr_path.exists() {
-        if let Ok(bytes) = fs::read(&local_cfr_path) {
-            let mut hasher = Sha256::new();
-            hasher.update(&bytes);
-            let hash = hasher.finalize().iter().map(|b| format!("{:02x}", b)).collect::<String>();
-            if hash == expected_sha256 {
-                return Ok(local_cfr_path);
-            }
-        }
+pub fn ensure_cfr(app_handle: &tauri::AppHandle) -> Result<PathBuf, String> {
+    // 1. Check OnceLock for cached path
+    if let Some(path) = CFR_PATH.get() {
+        return Ok(path.clone());
     }
 
-    // 2. Try to find bundled CFR and copy it to temp.
+    // 2. Resolve bundled CFR (with download fallback if not bundled)
+    let bundled = resolve_bundled_cfr(app_handle)?;
+
+    // 3. Handle UNC paths for Java compatibility (VM scenarios)
+    let cfr_path = if is_unc_path(&bundled) {
+        copy_to_temp_if_needed(&bundled)?
+    } else {
+        bundled
+    };
+
+    let _ = CFR_PATH.set(cfr_path.clone());
+    Ok(cfr_path)
+}
+
+fn is_unc_path(path: &Path) -> bool {
+    #[cfg(windows)]
+    {
+        use std::path::{Component, Prefix};
+        match path.components().next() {
+            Some(Component::Prefix(p)) => matches!(p.kind(), Prefix::UNC(_, _) | Prefix::VerbatimUNC(_, _)),
+            _ => false,
+        }
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = path;
+        false
+    }
+}
+
+fn verify_sha256(path: &Path) -> bool {
+    if !path.exists() { return false; }
+    let Ok(mut file) = File::open(path) else { return false; };
+    let mut hasher = Sha256::new();
+    let mut buffer = [0; 65536];
+    loop {
+        match file.read(&mut buffer) {
+            Ok(0) => break,
+            Ok(n) => hasher.update(&buffer[..n]),
+            Err(_) => return false,
+        }
+    }
+    let hash = hasher.finalize().iter().map(|b| format!("{:02x}", b)).collect::<String>();
+    hash == EXPECTED_SHA256
+}
+
+fn resolve_bundled_cfr(app_handle: &tauri::AppHandle) -> Result<PathBuf, String> {
     let possible_rel_paths = ["resources/cfr-0.152.jar", "cfr-0.152.jar", "_up_/resources/cfr-0.152.jar"];
     for rel_path in possible_rel_paths {
-        if let Ok(bundled_path) = app_handle.path().resolve(rel_path, tauri::path::BaseDirectory::Resource) {
-            if bundled_path.exists() {
-                if let Ok(bytes) = fs::read(&bundled_path) {
-                    let mut hasher = Sha256::new();
-                    hasher.update(&bytes);
-                    let hash = hasher.finalize().iter().map(|b| format!("{:02x}", b)).collect::<String>();
-                    if hash == expected_sha256 {
-                        // Found valid bundled jar, copy to local temp for execution
-                        if fs::write(&local_cfr_path, &bytes).is_ok() {
-                            return Ok(local_cfr_path);
-                        }
-                    }
-                }
+        if let Ok(path) = app_handle.path().resolve(rel_path, tauri::path::BaseDirectory::Resource) {
+            if path.exists() && verify_sha256(&path) {
+                return Ok(path);
             }
         }
     }
+    
+    // Fallback: Check local temp (maybe downloaded previously)
+    let temp_path = std::env::temp_dir().join("mtool_cfr_0.152.jar");
+    if verify_sha256(&temp_path) {
+        return Ok(temp_path);
+    }
+    
+    // Final fallback: Download to local temp
+    download_cfr(&temp_path)
+}
 
-    // 3. Fallback: Download to local temp.
+fn copy_to_temp_if_needed(src: &Path) -> Result<PathBuf, String> {
+    let dest = std::env::temp_dir().join("mtool_cfr_0.152.jar");
+    if !verify_sha256(&dest) {
+        fs::copy(src, &dest).map_err(|e| format!("Failed to copy CFR to temp for UNC support: {}", e))?;
+    }
+    Ok(dest)
+}
+
+fn download_cfr(dest: &Path) -> Result<PathBuf, String> {
     let url = "https://github.com/leibnitz27/cfr/releases/download/0.152/cfr-0.152.jar";
     let client = reqwest::blocking::Client::builder()
         .timeout(Duration::from_secs(30))
         .build()
-        .map_err(|e| format!("Failed to build client for download: {}", e))?;
+        .map_err(|e| format!("Failed to build download client: {}", e))?;
         
     let response = client.get(url).send().map_err(|e| format!("Failed to download CFR from GitHub: {}. Please check your internet connection.", e))?;
     let bytes = response.bytes().map_err(|e| format!("Failed to read CFR bytes: {}", e))?;
@@ -64,14 +106,14 @@ pub fn ensure_cfr(app_handle: &tauri::AppHandle) -> Result<PathBuf, String> {
     hasher.update(&bytes);
     let hash = hasher.finalize().iter().map(|b| format!("{:02x}", b)).collect::<String>();
     
-    if hash != expected_sha256 {
-        return Err(format!("CFR jar integrity check failed. Expected {}, got {}", expected_sha256, hash));
+    if hash != EXPECTED_SHA256 {
+        return Err(format!("CFR jar integrity check failed. Expected {}, got {}", EXPECTED_SHA256, hash));
     }
     
-    fs::write(&local_cfr_path, &bytes).map_err(|e| format!("Failed to write CFR to local temp: {}", e))?;
-    
-    Ok(local_cfr_path)
+    fs::write(dest, &bytes).map_err(|e| format!("Failed to write CFR to local temp: {}", e))?;
+    Ok(dest.to_path_buf())
 }
+
 
 pub fn decompile_class(app_handle: &tauri::AppHandle, class_file_path: &Path) -> Result<String, String> {
     let cfr_path = ensure_cfr(app_handle)?;
