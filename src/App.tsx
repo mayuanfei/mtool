@@ -21,7 +21,8 @@ const DEFAULT_TOOLS: ToolsEnabled = { json: true, qr: true, pwd: true, sqlIn: tr
 
 export default function App() {
   const [activePage, setActivePage] = useState(() => {
-    return localStorage.getItem('mtool_active_page') || 'settings';
+    const page = localStorage.getItem('mtool_active_page') || 'settings';
+    return page === 'user' ? 'settings' : page;
   });
   const { t } = useI18n();
   const updater = useUpdater();

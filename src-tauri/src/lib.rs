@@ -29,7 +29,7 @@ fn maybe_start_watcher(engine: &IndexEngine, has_data: bool, index_disabled: boo
     if index_disabled || !has_data {
         return;
     }
-    if engine.watcher_stopped.load(Ordering::Relaxed) == false {
+    if !engine.watcher_stopped.load(Ordering::Relaxed) {
         return;
     }
     let disabled = engine.disabled.clone();
