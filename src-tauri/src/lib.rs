@@ -285,7 +285,7 @@ async fn build_index(
     }).await;
 
     {
-        let mut s = status_ref.write().unwrap();
+        let mut s = status_ref.write().unwrap_or_else(|e| e.into_inner());
         s.is_indexing = true;
         s.total = 0;
     }
@@ -317,19 +317,19 @@ async fn build_index(
     .await {
         Ok(Ok(t)) => t,
         Ok(Err(e)) => {
-            let mut s = status_ref.write().unwrap();
+            let mut s = status_ref.write().unwrap_or_else(|e| e.into_inner());
             s.is_indexing = false;
             return Err(e);
         }
         Err(e) => {
-            let mut s = status_ref.write().unwrap();
+            let mut s = status_ref.write().unwrap_or_else(|e| e.into_inner());
             s.is_indexing = false;
             return Err(e.to_string());
         }
     };
 
     {
-        let mut s = status_ref.write().unwrap();
+        let mut s = status_ref.write().unwrap_or_else(|e| e.into_inner());
         s.is_indexing = false;
         s.total = total;
         s.last_built_at = file_search::get_last_built_at(&state.db_path);
@@ -361,7 +361,7 @@ async fn build_index(
 
 #[tauri::command]
 fn get_index_status(state: tauri::State<'_, IndexEngine>) -> IndexStatus {
-    state.status.read().unwrap().clone()
+    state.status.read().unwrap_or_else(|e| e.into_inner()).clone()
 }
 
 #[tauri::command]
@@ -419,7 +419,7 @@ async fn disable_file_search(
     state: tauri::State<'_, IndexEngine>,
 ) -> Result<(), String> {
     {
-        let mut s = state.status.write().unwrap();
+        let mut s = state.status.write().unwrap_or_else(|e| e.into_inner());
         s.is_indexing = false;
         s.total = 0;
         s.last_built_at = None;

@@ -8,9 +8,27 @@ export function TextToQr() {
   const { t } = useI18n();
   const { theme } = useTheme();
   const [payload, setPayload] = useState('');
-  const [redundancy, setRedundancy] = useState('Q');
-  const [resolution, setResolution] = useState(512);
-  const [selectedColor, setSelectedColor] = useState('#6366f1');
+  const [redundancy, setRedundancy] = useState(() => {
+    return localStorage.getItem('mtool_qr_redundancy') || 'Q';
+  });
+  const [resolution, setResolution] = useState(() => {
+    const saved = localStorage.getItem('mtool_qr_resolution');
+    const val = saved ? parseInt(saved, 10) : 512;
+    return isNaN(val) ? 512 : val;
+  });
+  const [selectedColor, setSelectedColor] = useState(() => {
+    return localStorage.getItem('mtool_qr_color') || '#6366f1';
+  });
+
+  useEffect(() => {
+    localStorage.setItem('mtool_qr_redundancy', redundancy);
+  }, [redundancy]);
+  useEffect(() => {
+    localStorage.setItem('mtool_qr_resolution', resolution.toString());
+  }, [resolution]);
+  useEffect(() => {
+    localStorage.setItem('mtool_qr_color', selectedColor);
+  }, [selectedColor]);
   const [qrBase64, setQrBase64] = useState('');
   const [isGenerating, setIsGenerating] = useState(false);
   const [isCopied, setIsCopied] = useState(false);

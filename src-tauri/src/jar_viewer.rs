@@ -202,6 +202,10 @@ pub async fn read_jar_entry(app_handle: tauri::AppHandle, jar_path: String, entr
         let mut archive = ZipArchive::new(file).map_err(|e| e.to_string())?;
         let mut entry = archive.by_name(&entry_name).map_err(|e| e.to_string())?;
         
+        if entry.size() > 10 * 1024 * 1024 {
+            return Err(format!("Entry too large ({} MB). Max 10 MB.", entry.size() / 1024 / 1024));
+        }
+
         let mut buf = Vec::new();
         entry.read_to_end(&mut buf).map_err(|e| e.to_string())?;
         

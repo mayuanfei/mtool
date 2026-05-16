@@ -1,5 +1,5 @@
 import { Copy, Check, Database, Trash2, ChevronDown, ChevronUp } from 'lucide-react';
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { useI18n } from '../i18n';
 
 type QuoteStyle = 'single' | 'double' | 'none';
@@ -7,7 +7,13 @@ type QuoteStyle = 'single' | 'double' | 'none';
 export function SqlInBuilder() {
   const { t } = useI18n();
   const [input, setInput] = useState('');
-  const [quoteStyle, setQuoteStyle] = useState<QuoteStyle>('single');
+  const [quoteStyle, setQuoteStyle] = useState<QuoteStyle>(() => {
+    return (localStorage.getItem('mtool_sqlin_quote') as QuoteStyle) || 'single';
+  });
+
+  useEffect(() => {
+    localStorage.setItem('mtool_sqlin_quote', quoteStyle);
+  }, [quoteStyle]);
   const [isCopied, setIsCopied] = useState(false);
   const [showDuplicates, setShowDuplicates] = useState(false);
 

@@ -9,15 +9,25 @@ import hljs from 'highlight.js';
 import DOMPurify from 'dompurify';
 import { useI18n } from '../i18n';
 
-export function MarkdownEditor() {
+export function MarkdownEditor({ setMdDirty }: { setMdDirty?: (dirty: boolean) => void }) {
   const { t } = useI18n();
   const [content, setContent] = useState('');
   const [filePath, setFilePath] = useState('');
   const [isDirty, setIsDirty] = useState(false);
+
+  useEffect(() => {
+    setMdDirty?.(isDirty);
+  }, [isDirty, setMdDirty]);
   const [originalContent, setOriginalContent] = useState('');
   const [isCopied, setIsCopied] = useState(false);
   const [isDragOver, setIsDragOver] = useState(false);
-  const [viewMode, setViewMode] = useState<'split' | 'edit' | 'preview'>('preview');
+  const [viewMode, setViewMode] = useState<'split' | 'edit' | 'preview'>(() => {
+    return (localStorage.getItem('mtool_md_viewmode') as 'split' | 'edit' | 'preview') || 'preview';
+  });
+
+  useEffect(() => {
+    localStorage.setItem('mtool_md_viewmode', viewMode);
+  }, [viewMode]);
   const previewRef = useRef<HTMLDivElement>(null);
   const editorRef = useRef<HTMLTextAreaElement>(null);
   // Tracks which pane is driving the scroll to prevent infinite loops

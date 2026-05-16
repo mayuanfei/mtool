@@ -10,7 +10,6 @@ import { MarkdownEditor } from './pages/MarkdownEditor';
 import { FileSearch } from './pages/FileSearch';
 import { FileDiff } from './pages/FileDiff';
 import { JarViewer } from './pages/JarViewer';
-import { UserPage } from './pages/User';
 import { useI18n } from './i18n';
 import { useUpdater } from './updater';
 
@@ -89,11 +88,22 @@ export default function App() {
     localStorage.setItem('mtool_active_page', activePage);
   }, [activePage]);
 
+  const [mdDirty, setMdDirty] = useState(false);
+
+  const handleNavigate = (page: string) => {
+    if (activePage === 'md' && mdDirty) {
+      if (!window.confirm(t('You have unsaved changes in Markdown Editor. Are you sure you want to leave?'))) {
+        return;
+      }
+    }
+    setActivePage(page);
+  };
+
   return (
     <div className="flex h-screen overflow-hidden font-sans th-text-2 antialiased th-bg-app">
       <Sidebar 
         activePage={activePage} 
-        onNavigate={setActivePage} 
+        onNavigate={handleNavigate} 
         jsonEnabled={toolsEnabled.json}
         qrEnabled={toolsEnabled.qr}
         pwdEnabled={toolsEnabled.pwd}
@@ -112,21 +122,20 @@ export default function App() {
           {activePage === 'qr' && toolsEnabled.qr && <TextToQr />}
           {activePage === 'pwd' && toolsEnabled.pwd && <PasswordGenerator />}
           {activePage === 'sqlIn' && toolsEnabled.sqlIn && <SqlInBuilder />}
-          {activePage === 'md' && toolsEnabled.md && <MarkdownEditor />}
+          {activePage === 'md' && toolsEnabled.md && <MarkdownEditor setMdDirty={setMdDirty} />}
           {activePage === 'fileSearch' && toolsEnabled.fileSearch && <FileSearch />}
           {activePage === 'fileDiff' && toolsEnabled.fileDiff && <FileDiff />}
           {activePage === 'jarViewer' && toolsEnabled.jarViewer && <JarViewer />}
-          {activePage === 'user' && <UserPage />}
           {activePage === 'settings' && (
             <SettingsPage 
               toolsEnabled={toolsEnabled}
               toggleTool={toggleTool}
               activePage={activePage}
-              setActivePage={setActivePage}
+              setActivePage={handleNavigate}
               updater={updater}
               setShowModal={setShowUpdateModal}            />
           )}
-          {activePage !== 'settings' && activePage !== 'user' &&
+          {activePage !== 'settings' &&
            !(activePage === 'json' && toolsEnabled.json) && 
            !(activePage === 'qr' && toolsEnabled.qr) && 
            !(activePage === 'pwd' && toolsEnabled.pwd) && 
