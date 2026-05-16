@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Code2, QrCode, Settings, User, Key, Database, FileText, PanelLeftClose, PanelLeftOpen, SearchCode, FileDiff, Package } from 'lucide-react';
+import { Code2, QrCode, Settings, Key, Database, FileText, PanelLeftClose, PanelLeftOpen, SearchCode, FileDiff, Package } from 'lucide-react';
 import { useI18n } from '../i18n';
 
 interface SidebarProps {
@@ -66,7 +66,7 @@ export function Sidebar({ activePage, onNavigate, jsonEnabled, qrEnabled, pwdEna
              <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" className="w-5 h-5 text-white">
                 <path d="M4 20V5.5L10 12L16 5.5V19" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"/>
                 <circle cx="10" cy="12" r="2" stroke="currentColor" strokeWidth="2.5"/>
-                <path d="M4 16C4 16 2.5 17.5 2.5 19C2.5 20.5 4 21 4 21C4 21 5.5 20.5 5.5 19C5.5 17.5 4 16 4 16Z" stroke="currentColor" strokeWidth="2.5"/>
+                <path d="M4 16C4 16 2.5 17.5 2.5 17.5 19C2.5 20.5 4 21 4 21C4 21 5.5 20.5 5.5 19C5.5 17.5 4 16 4 16Z" stroke="currentColor" strokeWidth="2.5"/>
                 <path d="M16 16C16 16 14.5 17.5 14.5 19C14.5 20.5 16 21 16 21C16 21 17.5 20.5 17.5 19C17.5 17.5 16 16 16 16Z" stroke="currentColor" strokeWidth="2.5"/>
              </svg>
           </div>
@@ -129,7 +129,7 @@ export function Sidebar({ activePage, onNavigate, jsonEnabled, qrEnabled, pwdEna
           </span>
           {!collapsed && <span className="text-[13px] truncate">{t('Settings')}</span>}
         </button>
-        <NavItem item={{ id: 'user', label: t('User'), icon: User }} />
+        {/* User feature coming soon: <NavItem item={{ id: 'user', label: t('User'), icon: User }} /> */}
       </div>
     </aside>
   );

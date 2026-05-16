@@ -44,7 +44,7 @@ export function UpdateModal({ open, updateInfo, downloading, progress, error, in
               {updateInfo.notes}
             </pre>
           ) : (
-            <p className="text-sm th-text-muted italic">No changelog provided.</p>
+            <p className="text-sm th-text-muted italic">{t('No changelog provided.')}</p>
           )}
         </div>
 

@@ -54,7 +54,7 @@ export function SettingsPage({ toolsEnabled, toggleTool, activePage, setActivePa
   };
 
   return (
-    <div className="max-w-4xl max-w-5xl mx-auto w-full">
+    <div className="max-w-5xl mx-auto w-full">
       <div className="mb-10">
         <h1 className="text-4xl font-bold tracking-tight th-text mb-2">{t('Settings')}</h1>
         <p className="th-text-3">{t('Configure MTOOL behaviors and active utilities.')}</p>

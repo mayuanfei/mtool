@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect } from 'react';
 import { Sidebar } from './components/Sidebar';
 import { UpdateModal } from './components/UpdateModal';
 import { JsonFormatter } from './pages/JsonFormatter';
@@ -25,17 +25,17 @@ export default function App() {
   });
   const { t } = useI18n();
   const updater = useUpdater();
-  const { hasUpdate, checkForUpdate, autoUpdate } = updater;
+  const { hasUpdate, checkForUpdate } = updater;
 
   const [showUpdateModal, setShowUpdateModal] = useState(false);
 
-  const didCheck = useRef(false);
   useEffect(() => {
-    if (!didCheck.current && autoUpdate) {
-      didCheck.current = true;
+    const isAuto = localStorage.getItem('mtool_auto_update');
+    const shouldAutoUpdate = isAuto !== null ? isAuto === 'true' : true;
+    if (shouldAutoUpdate) {
       checkForUpdate();
     }
-  }, [autoUpdate, checkForUpdate]);
+  }, [checkForUpdate]);
 
   useEffect(() => {
     if (hasUpdate && updater.updateInfo) {

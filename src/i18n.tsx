@@ -120,6 +120,7 @@ const translations = {
     "What's new in": "What's new in",
     'Cancel': 'Cancel',
     'Skip this version': 'Skip this version',
+    'No changelog provided.': 'No changelog provided.',
 
     // MarkdownEditor
     'Markdown Editor': 'Markdown Editor',
@@ -339,6 +340,7 @@ const translations = {
     "What's new in": '新版本内容',
     'Cancel': '取消',
     'Skip this version': '跳过此版本',
+    'No changelog provided.': '暂无更新日志。',
 
     // MarkdownEditor
     'Markdown Editor': 'Markdown 编辑器',
