@@ -1,5 +1,5 @@
 import { useState, useCallback, useEffect, useRef, useMemo } from 'react';
-import { Trash2, FolderOpen, Save, Copy, Check, Eye, Edit3, FileText, Download, Upload } from 'lucide-react';
+import { Trash2, FolderOpen, Save, Copy, Check, Eye, Edit3, FileText, Download, Upload, XCircle } from 'lucide-react';
 import { invoke } from '@tauri-apps/api/core';
 import { openUrl } from '@tauri-apps/plugin-opener';
 import { getCurrentWebview } from '@tauri-apps/api/webview';
@@ -21,6 +21,7 @@ export function MarkdownEditor({ setMdDirty }: { setMdDirty?: (dirty: boolean) =
   }, [isDirty, setMdDirty]);
   const [originalContent, setOriginalContent] = useState('');
   const [isCopied, setIsCopied] = useState(false);
+  const [copyError, setCopyError] = useState(false);
   const [isDragOver, setIsDragOver] = useState(false);
   const [viewMode, setViewMode] = useState<'split' | 'edit' | 'preview'>(() => {
     return (localStorage.getItem('mtool_md_viewmode') as 'split' | 'edit' | 'preview') || 'preview';
@@ -148,7 +149,8 @@ export function MarkdownEditor({ setMdDirty }: { setMdDirty?: (dirty: boolean) =
       setIsCopied(true);
       setTimeout(() => setIsCopied(false), 2000);
     } catch {
-      // fallback
+      setCopyError(true);
+      setTimeout(() => setCopyError(false), 2000);
     }
   }, [content]);
 
@@ -381,9 +383,13 @@ export function MarkdownEditor({ setMdDirty }: { setMdDirty?: (dirty: boolean) =
               </span>
               <button
                 onClick={handleCopy}
-                className={`text-[10px] font-bold transition-colors uppercase flex items-center gap-1 ${isCopied ? 'text-emerald-400' : 'text-indigo-400 hover:text-indigo-300'}`}
+                className={`text-[10px] font-bold transition-colors uppercase flex items-center gap-1 ${
+                  copyError ? 'text-red-400' :
+                  isCopied ? 'text-emerald-400' :
+                  'text-indigo-400 hover:text-indigo-300'
+                }`}
               >
-                {isCopied ? <Check className="w-3 h-3" /> : <Copy className="w-3 h-3" />} {isCopied ? t('Copied!') : t('Copy')}
+                {copyError ? <XCircle className="w-3 h-3" /> : isCopied ? <Check className="w-3 h-3" /> : <Copy className="w-3 h-3" />} {copyError ? t('Failed') : isCopied ? t('Copied!') : t('Copy')}
               </button>
             </div>
 

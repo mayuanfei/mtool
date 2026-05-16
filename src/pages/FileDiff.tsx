@@ -1,5 +1,5 @@
 import { useState, useRef, useCallback, useEffect, useMemo } from 'react';
-import { FileUp, ClipboardPaste, ChevronUp, ChevronDown, RotateCcw, ArrowLeftRight } from 'lucide-react';
+import { FileUp, ClipboardPaste, ChevronUp, ChevronDown, RotateCcw, ArrowLeftRight, XCircle } from 'lucide-react';
 import { invoke } from '@tauri-apps/api/core';
 import { getCurrentWebview } from '@tauri-apps/api/webview';
 import { useI18n } from '../i18n';
@@ -228,6 +228,7 @@ interface FilePanelProps {
 function FilePanel({ side, fileName, content, onFileOpen }: FilePanelProps) {
   const { t } = useI18n();
   const [dragOver, setDragOver] = useState(false);
+  const [pasteError, setPasteError] = useState(false);
 
   const handleDragOver = useCallback((e: React.DragEvent) => {
     e.preventDefault();
@@ -293,7 +294,8 @@ function FilePanel({ side, fileName, content, onFileOpen }: FilePanelProps) {
         onFileOpen(t('Pasted Text'), text);
       }
     } catch {
-      // Clipboard not available
+      setPasteError(true);
+      setTimeout(() => setPasteError(false), 2000);
     }
   }, [onFileOpen, t]);
 
@@ -321,10 +323,12 @@ function FilePanel({ side, fileName, content, onFileOpen }: FilePanelProps) {
           </button>
           <button
             onClick={handlePasteFromClipboard}
-            className="p-1.5 rounded th-text-muted hover:th-text-2 th-hover-surface transition-colors"
-            title={t('Paste from Clipboard')}
+            className={`p-1.5 rounded transition-colors ${
+              pasteError ? 'bg-red-500/20 text-red-400' : 'th-text-muted hover:th-text-2 th-hover-surface'
+            }`}
+            title={pasteError ? t('Failed') : t('Paste from Clipboard')}
           >
-            <ClipboardPaste className="w-3.5 h-3.5" />
+            {pasteError ? <XCircle className="w-3.5 h-3.5" /> : <ClipboardPaste className="w-3.5 h-3.5" />}
           </button>
         </div>
       </div>

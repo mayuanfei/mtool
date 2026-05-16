@@ -1,4 +1,4 @@
-import { Copy, RefreshCcw, Check, Key } from 'lucide-react';
+import { Copy, RefreshCcw, Check, Key, XCircle } from 'lucide-react';
 import { useState, useEffect, useCallback } from 'react';
 import { useI18n, TranslationKey } from '../i18n';
 
@@ -81,8 +81,10 @@ export function PasswordGenerator() {
     return [];
   });
   const [isCopied, setIsCopied] = useState(false);
+  const [copyError, setCopyError] = useState(false);
   const [charsetEmpty, setCharsetEmpty] = useState(false);
   const [historyCopiedId, setHistoryCopiedId] = useState<string | null>(null);
+  const [historyCopyErrorId, setHistoryCopyErrorId] = useState<string | null>(null);
 
   const calculateStrength = useCallback((): 'STRONG' | 'GOOD' | 'FAIR' | 'WEAK' => {
     let score = 0;
@@ -213,6 +215,13 @@ export function PasswordGenerator() {
       }
     } catch (e) {
       console.error(e);
+      if (isHistoryId) {
+        setHistoryCopyErrorId(isHistoryId);
+        setTimeout(() => setHistoryCopyErrorId(null), 2000);
+      } else {
+        setCopyError(true);
+        setTimeout(() => setCopyError(false), 2000);
+      }
     }
   };
 
@@ -293,10 +302,14 @@ export function PasswordGenerator() {
                 </button>
                 <button 
                   onClick={() => handleCopy(passwords.join('\n'))}
-                  className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg font-medium transition-colors flex items-center gap-2 focus:outline-none shadow-lg shadow-indigo-600/20"
+                  className={`px-4 py-2 rounded-lg font-medium transition-colors flex items-center gap-2 focus:outline-none shadow-lg ${
+                    copyError ? 'bg-red-500/20 text-red-400 border border-red-500/30 shadow-red-500/10' :
+                    isCopied ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 shadow-emerald-500/10' :
+                    'bg-indigo-600 hover:bg-indigo-500 text-white shadow-indigo-600/20'
+                  }`}
                 >
-                  {isCopied ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
-                  {isCopied ? t('Copied!') : t('Copy')}
+                  {copyError ? <XCircle className="w-4 h-4" /> : isCopied ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
+                  {copyError ? t('Failed') : isCopied ? t('Copied!') : t('Copy')}
                 </button>
               </div>
             </div>
@@ -444,7 +457,7 @@ export function PasswordGenerator() {
                           className="p-2 th-text-muted hover:th-text th-hover-surface rounded transition-colors focus:outline-none inline-flex"
                           title={t('Copy')}
                         >
-                          {historyCopiedId === item.id ? <Check className="w-4 h-4 text-emerald-400" /> : <Copy className="w-4 h-4" />}
+                          {historyCopyErrorId === item.id ? <XCircle className="w-4 h-4 text-rose-400" /> : historyCopiedId === item.id ? <Check className="w-4 h-4 text-emerald-400" /> : <Copy className="w-4 h-4" />}
                         </button>
                       </td>
                     </tr>

@@ -1,4 +1,4 @@
-import { Copy, Check, Database, Trash2, ChevronDown, ChevronUp } from 'lucide-react';
+import { Copy, Check, Database, Trash2, ChevronDown, ChevronUp, XCircle } from 'lucide-react';
 import { useState, useMemo, useEffect } from 'react';
 import { useI18n } from '../i18n';
 
@@ -15,6 +15,7 @@ export function SqlInBuilder() {
     localStorage.setItem('mtool_sqlin_quote', quoteStyle);
   }, [quoteStyle]);
   const [isCopied, setIsCopied] = useState(false);
+  const [copyError, setCopyError] = useState(false);
   const [showDuplicates, setShowDuplicates] = useState(false);
 
   const { output, inputCount, outputCount } = useMemo(() => {
@@ -75,6 +76,8 @@ export function SqlInBuilder() {
       setTimeout(() => setIsCopied(false), 2000);
     } catch (e) {
       console.error(e);
+      setCopyError(true);
+      setTimeout(() => setCopyError(false), 2000);
     }
   };
 
@@ -181,10 +184,14 @@ export function SqlInBuilder() {
               <button
                 onClick={handleCopy}
                 disabled={!output}
-                className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 disabled:bg-[var(--bg-surface)] disabled:text-[var(--text-muted)] disabled:border disabled:border-[var(--border-subtle)] disabled:shadow-none text-white rounded-lg text-xs font-medium transition-colors flex items-center gap-1.5 focus:outline-none shadow-lg shadow-indigo-600/20"
+                className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors flex items-center gap-1.5 focus:outline-none shadow-lg disabled:bg-[var(--bg-surface)] disabled:text-[var(--text-muted)] disabled:border disabled:border-[var(--border-subtle)] disabled:shadow-none ${
+                  copyError ? 'bg-red-500/20 text-red-400 border border-red-500/30 shadow-red-500/10' :
+                  isCopied ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 shadow-emerald-500/10' :
+                  'bg-indigo-600 hover:bg-indigo-500 text-white shadow-indigo-600/20'
+                }`}
               >
-                {isCopied ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
-                {isCopied ? t('Copied!') : t('Copy')}
+                {copyError ? <XCircle className="w-3.5 h-3.5" /> : isCopied ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
+                {copyError ? t('Failed') : isCopied ? t('Copied!') : t('Copy')}
               </button>
             </div>
             <div className="flex-1 w-full th-bg-input border th-border rounded-lg p-4 text-sm font-mono text-emerald-700 dark:text-emerald-400 overflow-y-auto break-all whitespace-pre-wrap min-h-[12rem]">

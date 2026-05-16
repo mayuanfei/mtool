@@ -1,4 +1,4 @@
-import { Copy, MinusSquare, Trash2, AlignLeft, Check } from 'lucide-react';
+import { Copy, MinusSquare, Trash2, AlignLeft, Check, XCircle } from 'lucide-react';
 import { useState, useCallback, useEffect, useRef, useMemo } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { useI18n } from '../i18n';
@@ -131,6 +131,7 @@ export function JsonFormatter() {
   const [plainOutput, setPlainOutput] = useState('');
   const [isError, setIsError] = useState(false);
   const [isCopied, setIsCopied] = useState(false);
+  const [copyError, setCopyError] = useState(false);
 
   const updateOutput = useCallback((text: string, isMinified: boolean) => {
     setPlainOutput(text);
@@ -203,7 +204,8 @@ export function JsonFormatter() {
       setIsCopied(true);
       setTimeout(() => setIsCopied(false), 2000);
     } catch {
-      // fallback for environments without clipboard API
+      setCopyError(true);
+      setTimeout(() => setCopyError(false), 2000);
     }
   }, [plainOutput]);
 
@@ -304,9 +306,13 @@ export function JsonFormatter() {
             </span>
             <button
               onClick={handleCopy}
-              className={`text-[10px] font-bold transition-colors uppercase flex items-center gap-1 ${isCopied ? 'text-emerald-400' : 'text-indigo-400 hover:text-indigo-300'}`}
+              className={`text-[10px] font-bold transition-colors uppercase flex items-center gap-1 ${
+                copyError ? 'text-red-400' :
+                isCopied ? 'text-emerald-400' :
+                'text-indigo-400 hover:text-indigo-300'
+              }`}
             >
-              {isCopied ? <Check className="w-3 h-3" /> : <Copy className="w-3 h-3" />} {isCopied ? t('Copied!') : t('Copy')}
+              {copyError ? <XCircle className="w-3 h-3" /> : isCopied ? <Check className="w-3 h-3" /> : <Copy className="w-3 h-3" />} {copyError ? t('Failed') : isCopied ? t('Copied!') : t('Copy')}
             </button>
           </div>
 
