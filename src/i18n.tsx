@@ -45,6 +45,8 @@ const translations = {
     'Failed': 'Failed',
     'Enter payload to generate': 'Enter payload to generate',
     'Failed to generate QR Code': 'Failed to generate QR Code',
+    'Payload too long (max 2048 chars)': 'Payload too long (max 2048 chars)',
+    'Payload is empty': 'Payload is empty',
     
     // PasswordGenerator
     'Password Generator': 'Password Generator',
@@ -272,6 +274,8 @@ const translations = {
     'Failed': '操作失败',
     'Enter payload to generate': '输入文本以生成',
     'Failed to generate QR Code': '生成二维码失败',
+    'Payload too long (max 2048 chars)': '文本过长（最多支持 2048 个字符）',
+    'Payload is empty': '输入文本不能为空',
     
     // PasswordGenerator
     'Password Generator': '密码生成器',

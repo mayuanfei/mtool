@@ -4,6 +4,13 @@ import { invoke } from '@tauri-apps/api/core';
 import { useI18n } from '../i18n';
 import { useTheme } from '../theme';
 
+function translateError(err: string, t: (k: any) => string): string {
+  if (!err) return '';
+  if (err.includes('data too long')) return t('Payload too long (max 2048 chars)');
+  if (err.includes('Payload is empty')) return t('Payload is empty');
+  return err;
+}
+
 export function TextToQr() {
   const { t } = useI18n();
   const { theme } = useTheme();
@@ -122,6 +129,7 @@ export function TextToQr() {
             <textarea
               value={payload}
               onChange={(e) => setPayload(e.target.value)}
+              maxLength={2048}
               autoCapitalize="none"
               autoCorrect="off"
               spellCheck={false}
@@ -231,7 +239,7 @@ export function TextToQr() {
                       <div className="text-red-400 text-xs font-mono text-center px-2 overflow-auto max-h-full w-full">
                         <XCircle className="w-8 h-8 mx-auto mb-2 text-red-500/80" />
                         {t('Failed to generate QR Code')}:<br/>
-                        <span className="text-[11px] opacity-80 mt-1 inline-block break-words select-text w-full">{genError}</span>
+                        <span className="text-[11px] opacity-80 mt-1 inline-block break-words select-text w-full">{translateError(genError, t)}</span>
                       </div>
                    ) : qrBase64 ? (
                       <img 
