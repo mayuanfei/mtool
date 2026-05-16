@@ -44,6 +44,7 @@ const translations = {
     'Download': 'Download',
     'Failed': 'Failed',
     'Enter payload to generate': 'Enter payload to generate',
+    'Failed to generate QR Code': 'Failed to generate QR Code',
     
     // PasswordGenerator
     'Password Generator': 'Password Generator',
@@ -270,6 +271,7 @@ const translations = {
     'Download': '下载',
     'Failed': '操作失败',
     'Enter payload to generate': '输入文本以生成',
+    'Failed to generate QR Code': '生成二维码失败',
     
     // PasswordGenerator
     'Password Generator': '密码生成器',

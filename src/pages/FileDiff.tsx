@@ -563,16 +563,24 @@ export function FileDiff() {
 
           // If two files are dropped, assign left and right
           if (paths.length >= 2) {
-            try {
-              const [p1, c1] = await invoke<[string, string]>('read_text_file_by_path', { path: paths[0] });
-              const name1 = p1.split(/[/\\]/).pop() || p1;
-              handleLeftFile(name1, c1);
-            } catch { /* skip */ }
-            try {
-              const [p2, c2] = await invoke<[string, string]>('read_text_file_by_path', { path: paths[1] });
-              const name2 = p2.split(/[/\\]/).pop() || p2;
-              handleRightFile(name2, c2);
-            } catch { /* skip */ }
+            const path1 = paths[0];
+            const name1 = path1.split(/[/\\]/).pop() || path1;
+            if (isTextFile(name1)) {
+              try {
+                const [p1, c1] = await invoke<[string, string]>('read_text_file_by_path', { path: path1 });
+                const n1 = p1.split(/[/\\]/).pop() || p1;
+                handleLeftFile(n1, c1);
+              } catch { /* skip */ }
+            }
+            const path2 = paths[1];
+            const name2 = path2.split(/[/\\]/).pop() || path2;
+            if (isTextFile(name2)) {
+              try {
+                const [p2, c2] = await invoke<[string, string]>('read_text_file_by_path', { path: path2 });
+                const n2 = p2.split(/[/\\]/).pop() || p2;
+                handleRightFile(n2, c2);
+              } catch { /* skip */ }
+            }
             return;
           }
 

@@ -30,6 +30,7 @@ export function TextToQr() {
     localStorage.setItem('mtool_qr_color', selectedColor);
   }, [selectedColor]);
   const [qrBase64, setQrBase64] = useState('');
+  const [genError, setGenError] = useState('');
   const [isGenerating, setIsGenerating] = useState(false);
   const [isCopied, setIsCopied] = useState(false);
   const [copyError, setCopyError] = useState(false);
@@ -42,11 +43,13 @@ export function TextToQr() {
   useEffect(() => {
     if (!payload.trim()) {
       setQrBase64('');
+      setGenError('');
       return;
     }
     const id = ++genIdRef.current;
     const timer = setTimeout(async () => {
       setIsGenerating(true);
+      setGenError('');
       try {
         const result = await invoke<string>('generate_qr', {
           payload,
@@ -57,9 +60,12 @@ export function TextToQr() {
         });
         if (genIdRef.current !== id) return;
         setQrBase64(result);
+        setGenError('');
       } catch (err) {
         if (genIdRef.current !== id) return;
         console.error('Failed to generate QR:', err);
+        setQrBase64('');
+        setGenError(String(err));
       } finally {
         if (genIdRef.current === id) setIsGenerating(false);
       }
@@ -221,7 +227,13 @@ export function TextToQr() {
              <div className="relative mt-8 group">
                 <div className="absolute -inset-4 bg-indigo-500/20 blur-2xl rounded-full opacity-0 group-hover:opacity-100 transition-opacity duration-1000"></div>
                 <div className="relative w-64 h-64 th-bg-input border th-border rounded-xl p-4 flex items-center justify-center shadow-xl">
-                   {qrBase64 ? (
+                   {genError ? (
+                      <div className="text-red-400 text-xs font-mono text-center px-2 overflow-auto max-h-full w-full">
+                        <XCircle className="w-8 h-8 mx-auto mb-2 text-red-500/80" />
+                        {t('Failed to generate QR Code')}:<br/>
+                        <span className="text-[11px] opacity-80 mt-1 inline-block break-words select-text w-full">{genError}</span>
+                      </div>
+                   ) : qrBase64 ? (
                       <img 
                         src={`data:image/png;base64,${qrBase64}`} 
                         alt="QR Code" 

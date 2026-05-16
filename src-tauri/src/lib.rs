@@ -220,7 +220,8 @@ fn open_text_file() -> Result<(String, String), String> {
             "tsx", "csv", "tsv", "log", "ini", "cfg", "conf", "toml", "env",
             "sh", "bash", "zsh", "bat", "cmd", "ps1", "py", "rb", "java",
             "c", "cpp", "h", "hpp", "go", "rs", "swift", "kt", "sql", "graphql",
-            "properties", "vue", "svelte",
+            "properties", "gitignore", "dockerignore", "editorconfig", "eslintrc",
+            "prettierrc", "babelrc", "npmrc", "lock", "vue", "svelte",
         ])
         .pick_file()
     {
