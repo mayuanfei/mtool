@@ -1,5 +1,5 @@
 import { Copy, Download, Clipboard, Trash2, QrCode, Check, XCircle } from 'lucide-react';
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useMemo } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { useI18n } from '../i18n';
 import { useTheme } from '../theme';
@@ -44,8 +44,10 @@ export function TextToQr() {
   const [downloadError, setDownloadError] = useState(false);
   const genIdRef = useRef(0);
 
-  const bgColor = getComputedStyle(document.documentElement)
-    .getPropertyValue('--bg-card').trim() || (theme === 'dark' ? '#0f172a' : '#ffffff');
+  const bgColor = useMemo(() => {
+    return getComputedStyle(document.documentElement)
+      .getPropertyValue('--bg-card').trim() || (theme === 'dark' ? '#0f172a' : '#ffffff');
+  }, [theme]);
 
   useEffect(() => {
     if (!payload.trim()) {

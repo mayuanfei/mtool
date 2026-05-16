@@ -75,7 +75,7 @@ impl IndexEngine {
         let total = count_entries(&self.db_path);
         let last_built_at = get_last_built_at(&self.db_path);
         {
-            let mut s = self.status.write().unwrap();
+            let mut s = self.status.write().unwrap_or_else(|e| e.into_inner());
             s.total = total;
             s.last_built_at = last_built_at;
         }
