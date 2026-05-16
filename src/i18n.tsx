@@ -70,6 +70,12 @@ const translations = {
     'ACTION': 'ACTION',
     'Create secure passwords.': 'Create secure passwords.',
     'Please select at least one character type': 'Please select at least one character type',
+    'Character Types': 'Character Types',
+    'Advanced Settings': 'Advanced Settings',
+    'Generated Password': 'Generated Password',
+    'Regenerate': 'Regenerate',
+    'Generation History': 'Generation History',
+    'Last 5 items': 'Last 5 items',
     
     // SqlInBuilder
     'SQL IN Builder': 'SQL IN Builder',
@@ -290,6 +296,12 @@ const translations = {
     'ACTION': '操作',
     'Create secure passwords.': '创建安全的密码。',
     'Please select at least one character type': '请至少选择一种字符类型',
+    'Character Types': '字符类型',
+    'Advanced Settings': '高级设置',
+    'Generated Password': '生成结果',
+    'Regenerate': '重新生成',
+    'Generation History': '生成历史',
+    'Last 5 items': '最近 5 条记录',
     
     // SqlInBuilder
     'SQL IN Builder': 'SQL IN 构建器',

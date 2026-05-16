@@ -258,7 +258,7 @@ export function PasswordGenerator() {
   };
 
   return (
-    <div className="w-full h-full flex flex-col">
+    <div className="w-full h-full flex flex-col min-h-0">
       <div className="flex justify-between items-center mb-6 border-b th-border pb-4 shrink-0">
         <h2 className="th-text font-semibold text-lg flex items-center gap-2">
           <Key className="w-5 h-5 text-indigo-400" />
@@ -266,11 +266,10 @@ export function PasswordGenerator() {
         </h2>
       </div>
 
-      <div className="flex-1 overflow-y-auto pr-2">
-        <div className="max-w-5xl mx-auto w-full space-y-6 pb-6">
+      <div className="flex-1 flex flex-col min-h-0 overflow-y-auto pr-2 pb-6 space-y-6">
         
         {/* Main Generator Card */}
-        <section className="th-bg-card border th-border rounded-xl p-6 shadow-2xl">
+        <section className="th-bg-card border th-border rounded-xl p-6 shadow-2xl shrink-0">
           
           {/* Password Display */}
           <div className="th-bg-input border th-border rounded-lg p-5 mb-8">
@@ -288,6 +287,7 @@ export function PasswordGenerator() {
                 <button 
                   onClick={() => generatePassword(true)}
                   className="p-2 th-text-3 hover:th-text th-hover-surface rounded-lg transition-colors focus:outline-none"
+                  title={t('Regenerate')}
                 >
                   <RefreshCcw className="w-5 h-5" />
                 </button>
@@ -340,7 +340,7 @@ export function PasswordGenerator() {
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div className="th-bg-input-alt border th-border rounded-lg p-4 flex items-center justify-between">
+            <div className="th-bg-input-alt border th-border rounded-lg p-4 flex items-center justify-between shadow-inner">
               <div>
                 <p className="text-sm font-bold th-text-2 mb-1">{t('Uppercase Letters')}</p>
                 <p className="text-xs th-text-muted font-mono">{t('A-Z')}</p>
@@ -348,7 +348,7 @@ export function PasswordGenerator() {
               <Toggle checked={useUpper} onChange={() => setUseUpper(!useUpper)} />
             </div>
             
-            <div className="th-bg-input-alt border th-border rounded-lg p-4 flex items-center justify-between">
+            <div className="th-bg-input-alt border th-border rounded-lg p-4 flex items-center justify-between shadow-inner">
               <div>
                 <p className="text-sm font-bold th-text-2 mb-1">{t('Lowercase Letters')}</p>
                 <p className="text-xs th-text-muted font-mono">{t('a-z')}</p>
@@ -356,7 +356,7 @@ export function PasswordGenerator() {
               <Toggle checked={useLower} onChange={() => setUseLower(!useLower)} />
             </div>
 
-            <div className="th-bg-input-alt border th-border rounded-lg p-4 flex items-center justify-between">
+            <div className="th-bg-input-alt border th-border rounded-lg p-4 flex items-center justify-between shadow-inner">
               <div>
                 <p className="text-sm font-bold th-text-2 mb-1">{t('Numbers')}</p>
                 <p className="text-xs th-text-muted font-mono">{t('0-9')}</p>
@@ -364,7 +364,7 @@ export function PasswordGenerator() {
               <Toggle checked={useNumbers} onChange={() => setUseNumbers(!useNumbers)} />
             </div>
 
-            <div className="th-bg-input-alt border th-border rounded-lg p-4 flex items-center justify-between">
+            <div className="th-bg-input-alt border th-border rounded-lg p-4 flex items-center justify-between shadow-inner">
               <div className="flex-1 mr-4">
                 <p className="text-sm font-bold th-text-2 mb-1">{t('Symbols')}</p>
                 <input 
@@ -380,7 +380,7 @@ export function PasswordGenerator() {
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4">
-            <div className="th-bg-input-alt border th-border rounded-lg p-4">
+            <div className="th-bg-input-alt border th-border rounded-lg p-4 shadow-inner">
               <p className="text-sm font-bold th-text-2 mb-2">{t('Exclude Characters')}</p>
               <input 
                 type="text" 
@@ -390,7 +390,7 @@ export function PasswordGenerator() {
                 className="w-full th-bg-card border th-border-subtle th-text-2 text-xs font-mono rounded px-3 py-2 focus:outline-none focus:border-indigo-500"
               />
             </div>
-            <div className="th-bg-input-alt border th-border rounded-lg p-4">
+            <div className="th-bg-input-alt border th-border rounded-lg p-4 shadow-inner">
               <p className="text-sm font-bold th-text-2 mb-2">{t('Generate Count')}</p>
               <input 
                 type="number" 
@@ -408,23 +408,27 @@ export function PasswordGenerator() {
 
         {/* History Table */}
         {history.length > 0 && (
-          <section className="th-bg-card border th-border rounded-xl overflow-hidden shadow-2xl">
-            <div className="overflow-x-auto">
+          <section className="th-bg-card border th-border rounded-xl overflow-hidden shadow-2xl flex flex-col min-h-[16rem] flex-1">
+            <div className="px-6 py-4 border-b th-border th-bg-surface-h flex justify-between items-center shrink-0">
+              <span className="text-[11px] font-bold th-text-3 uppercase tracking-widest">{t('Generation History')}</span>
+              <span className="text-[10px] th-text-muted font-mono">{t('Last 5 items')}</span>
+            </div>
+            <div className="overflow-y-auto flex-1 min-h-0">
               <table className="w-full text-left text-sm th-text-3">
-                <thead className="text-[10px] uppercase font-bold tracking-widest th-text-muted border-b th-border th-bg-input-alt">
+                <thead className="text-[10px] uppercase font-bold tracking-widest th-text-muted border-b th-border th-bg-input-alt sticky top-0 z-10">
                   <tr>
-                    <th className="px-6 py-4">{t('TIMESTAMP')}</th>
-                    <th className="px-6 py-4">{t('PREVIEW')}</th>
-                    <th className="px-6 py-4">{t('STRENGTH')}</th>
-                    <th className="px-6 py-4 text-right">{t('ACTION')}</th>
+                    <th className="px-6 py-3">{t('TIMESTAMP')}</th>
+                    <th className="px-6 py-3">{t('PREVIEW')}</th>
+                    <th className="px-6 py-3">{t('STRENGTH')}</th>
+                    <th className="px-6 py-3 text-right">{t('ACTION')}</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y th-divide">
                   {history.map((item) => (
                     <tr key={item.id} className="th-hover-surface transition-colors">
-                      <td className="px-6 py-4 font-mono text-xs">{item.timestamp}</td>
-                      <td className="px-6 py-4 font-mono th-text-2">{maskPassword(item.password)}</td>
-                      <td className="px-6 py-4">
+                      <td className="px-6 py-3.5 font-mono text-xs whitespace-nowrap">{item.timestamp}</td>
+                      <td className="px-6 py-3.5 font-mono th-text-2">{maskPassword(item.password)}</td>
+                      <td className="px-6 py-3.5 whitespace-nowrap">
                         <span className={`px-2 py-1 rounded text-[10px] font-bold uppercase ${
                           item.strength === 'STRONG' ? 'bg-emerald-500/10 text-emerald-400' :
                           item.strength === 'GOOD' ? 'bg-blue-500/10 text-blue-400' :
@@ -434,10 +438,11 @@ export function PasswordGenerator() {
                           {t(item.strength as TranslationKey)}
                         </span>
                       </td>
-                      <td className="px-6 py-4 text-right">
+                      <td className="px-6 py-3.5 text-right whitespace-nowrap">
                         <button 
                           onClick={() => handleCopy(item.password, item.id)}
                           className="p-2 th-text-muted hover:th-text th-hover-surface rounded transition-colors focus:outline-none inline-flex"
+                          title={t('Copy')}
                         >
                           {historyCopiedId === item.id ? <Check className="w-4 h-4 text-emerald-400" /> : <Copy className="w-4 h-4" />}
                         </button>
@@ -450,7 +455,6 @@ export function PasswordGenerator() {
           </section>
         )}
 
-        </div>
       </div>
     </div>
   );
