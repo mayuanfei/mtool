@@ -693,7 +693,7 @@ export function FileDiff() {
   const hasBothContent = leftContent.length > 0 && rightContent.length > 0;
 
   return (
-    <div className="flex flex-col h-full -m-6 overflow-hidden">
+    <div className="flex flex-col h-full w-full overflow-hidden">
       {/* Toolbar — opaque sticky header */}
       <div className="flex items-center justify-between px-4 py-2 border-b th-border th-bg-surface flex-shrink-0">
         <div className="flex items-center gap-2">

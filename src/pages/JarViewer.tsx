@@ -270,7 +270,7 @@ export function JarViewer() {
   if (!filePath) {
     return (
       <div 
-        className={`flex flex-col h-full -m-6 items-center justify-center border-2 border-dashed ${dragOver ? 'border-indigo-500 bg-indigo-500/5' : 'th-border th-bg-surface-h'} transition-all m-0 rounded-none`}
+        className={`flex flex-col h-full w-full items-center justify-center border-2 border-dashed ${dragOver ? 'border-indigo-500 bg-indigo-500/5' : 'th-border th-bg-surface-h'} transition-all m-0 rounded-none`}
       >
         <Package className={`w-16 h-16 mb-4 ${dragOver ? 'text-indigo-400' : 'th-text-muted'}`} />
         <h2 className="text-lg font-bold th-text mb-2">{t('Jar Viewer & Decompiler')}</h2>
@@ -289,7 +289,7 @@ export function JarViewer() {
   }
 
   return (
-    <div className="flex flex-col h-full -m-6 overflow-hidden">
+    <div className="flex flex-col h-full w-full overflow-hidden">
       {/* Toolbar */}
       <div className="flex items-center justify-between px-4 py-2 border-b th-border th-bg-surface flex-shrink-0">
         <div className="flex items-center gap-2 overflow-hidden flex-1">
