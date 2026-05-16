@@ -55,9 +55,9 @@ export function MarkdownEditor() {
     try {
       return DOMPurify.sanitize(marked.parse(content) as string);
     } catch {
-      return '<p class="text-red-400">Render error</p>';
+      return `<p class="text-red-400">${t('Render error')}</p>`;
     }
-  }, [content, marked]);
+  }, [content, marked, t]);
 
   // Track dirty state
   const handleContentChange = useCallback((value: string) => {

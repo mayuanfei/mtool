@@ -146,6 +146,11 @@ export function JarViewer() {
     }
   };
 
+  const loadFileRef = useRef(loadFile);
+  useEffect(() => {
+    loadFileRef.current = loadFile;
+  });
+
   useEffect(() => {
     const setup = async () => {
       const unlisten = await getCurrentWebview().onDragDropEvent(async (event) => {
@@ -155,7 +160,7 @@ export function JarViewer() {
           if (!paths || paths.length === 0) return;
           const path = paths[0];
           const ext = path.split('.').pop()?.toLowerCase() || '';
-          await loadFile(path, ext);
+          await loadFileRef.current(path, ext);
         } else if (event.payload.type === 'enter' || event.payload.type === 'over') {
           setDragOver(true);
         } else if (event.payload.type === 'leave') {

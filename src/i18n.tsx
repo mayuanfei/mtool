@@ -140,6 +140,7 @@ const translations = {
     'Collapse Sidebar': 'Collapse Sidebar',
     'Expand Sidebar': 'Expand Sidebar',
     'Release to open file': 'Release to open file',
+    'Render error': 'Render error',
 
     // FileSearch
     'File Search': 'File Search',
@@ -153,8 +154,6 @@ const translations = {
     'Indexing...': 'Indexing...',
     'files indexed': 'files indexed',
     'Re-index': 'Re-index',
-    'Add Directory': 'Add Directory',
-    'No directories indexed. Click "Add Directory" to get started.': 'No directories indexed. Click "Add Directory" to get started.',
     'Remove': 'Remove',
     'Results': 'Results',
     'Searching...': 'Searching...',
@@ -360,6 +359,7 @@ const translations = {
     'Collapse Sidebar': '收起侧边栏',
     'Expand Sidebar': '展开侧边栏',
     'Release to open file': '释放以打开文件',
+    'Render error': '渲染出错',
 
     // FileSearch
     'File Search': '文件搜索',
@@ -373,8 +373,6 @@ const translations = {
     'Indexing...': '正在建立索引...',
     'files indexed': '个文件已索引',
     'Re-index': '重新索引',
-    'Add Directory': '添加目录',
-    'No directories indexed. Click "Add Directory" to get started.': '未添加目录，点击"添加目录"开始建立索引。',
     'Remove': '移除',
     'Results': '搜索结果',
     'Searching...': '搜索中...',

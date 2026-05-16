@@ -89,13 +89,19 @@ export function PasswordGenerator() {
     if (useUpper) score += 1;
     if (useLower) score += 1;
     if (useNumbers) score += 1;
-    if (useSymbols) score += 1;
+    if (useSymbols && customSymbols.length > 0) score += 1;
 
+    if (length < 8) return 'WEAK';
+    if (length < 12) {
+      if (score >= 3) return 'GOOD';
+      if (score === 2) return 'FAIR';
+      return 'WEAK';
+    }
     if (score === 4) return 'STRONG';
     if (score === 3) return 'GOOD';
     if (score === 2) return 'FAIR';
     return 'WEAK';
-  }, [useUpper, useLower, useNumbers, useSymbols]);
+  }, [useUpper, useLower, useNumbers, useSymbols, customSymbols, length]);
 
   const generatePassword = useCallback((addToHistory = true) => {
     let charset = '';
@@ -364,8 +370,9 @@ export function PasswordGenerator() {
                 <input 
                   type="text" 
                   value={customSymbols}
+                  disabled={!useSymbols}
                   onChange={(e) => setCustomSymbols(e.target.value)}
-                  className="w-full th-bg-card border th-border-subtle th-text-2 text-xs font-mono rounded px-2 py-1 focus:outline-none focus:border-indigo-500"
+                  className={`w-full th-bg-card border th-border-subtle th-text-2 text-xs font-mono rounded px-2 py-1 focus:outline-none focus:border-indigo-500 ${!useSymbols ? 'opacity-50 cursor-not-allowed' : ''}`}
                 />
               </div>
               <Toggle checked={useSymbols} onChange={() => setUseSymbols(!useSymbols)} />
