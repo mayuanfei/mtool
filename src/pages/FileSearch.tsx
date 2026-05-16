@@ -127,6 +127,7 @@ export function FileSearch() {
   });
   const [isSearching, setIsSearching] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [openError, setOpenError] = useState<string | null>(null);
   const [searchElapsed, setSearchElapsed] = useState<number | null>(null);
   const [recentSearches, setRecentSearches] = useState<string[]>(() => {
     try {
@@ -260,14 +261,20 @@ export function FileSearch() {
       } else {
         await invoke("open_file", { path: entry.path });
       }
-    } catch (_) {}
+    } catch (err) {
+      setOpenError(`${t('Failed to open file')}: ${String(err)}`);
+      setTimeout(() => setOpenError(null), 3000);
+    }
   };
 
   // 在文件管理器中定位（显示父目录并高亮该文件）
   const handleReveal = async (path: string) => {
     try {
       await invoke("reveal_in_explorer", { path });
-    } catch (_) {}
+    } catch (err) {
+      setOpenError(`${t('Failed to open file')}: ${String(err)}`);
+      setTimeout(() => setOpenError(null), 3000);
+    }
   };
 
   const isIndexing = status.is_indexing;
@@ -443,6 +450,15 @@ export function FileSearch() {
       {error && (
         <div className="mb-3 px-3 py-2 bg-rose-900/30 border border-rose-700/50 rounded-lg text-sm text-rose-400">
           {error}
+        </div>
+      )}
+
+      {openError && (
+        <div className="mb-3 px-3 py-2 bg-rose-900/30 border border-rose-700/50 rounded-lg text-sm text-rose-400 flex items-center justify-between animate-fade-in">
+          <span>{openError}</span>
+          <button onClick={() => setOpenError(null)} className="p-1 hover:bg-rose-800/30 rounded text-rose-300">
+            <X className="w-3.5 h-3.5" />
+          </button>
         </div>
       )}
 

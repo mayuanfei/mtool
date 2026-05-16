@@ -194,6 +194,7 @@ const translations = {
     'file content search': 'file content search',
     'Reveal in file manager': 'Reveal in file manager',
     'keyword': 'keyword',
+    'Failed to open file': 'Failed to open file',
 
     // FileDiff
     'File Compare': 'File Compare',
@@ -423,6 +424,7 @@ const translations = {
     'file content search': '文件内容搜索',
     'Reveal in file manager': '在文件管理器中定位',
     'keyword': '关键词',
+    'Failed to open file': '打开文件失败',
 
     // FileDiff
     'File Compare': '文件对比',

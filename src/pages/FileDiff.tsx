@@ -658,7 +658,9 @@ export function FileDiff() {
       }
       
       if (!skipWordDiff && row.isDiff && row.leftType === 'delete' && row.rightType === 'insert') {
-        row.wdiff = wordDiff(row.leftText, row.rightText);
+        if (row.leftText.length < 500 && row.rightText.length < 500) {
+          row.wdiff = wordDiff(row.leftText, row.rightText);
+        }
       }
     });
 

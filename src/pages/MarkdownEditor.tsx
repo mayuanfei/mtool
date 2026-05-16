@@ -349,7 +349,7 @@ export function MarkdownEditor({ setMdDirty }: { setMdDirty?: (dirty: boolean) =
 
         {/* Editor pane */}
         {(viewMode === 'split' || viewMode === 'edit') && (
-          <div className={`${viewMode === 'edit' ? 'flex-1' : 'flex-1'} th-bg-card border th-border rounded-xl flex flex-col overflow-hidden shadow-2xl`}>
+          <div className="flex-1 th-bg-card border th-border rounded-xl flex flex-col overflow-hidden shadow-2xl">
             <div className="px-4 py-2 th-bg-surface-h border-b th-border flex justify-between items-center">
               <span className="text-[11px] font-bold th-text-3 uppercase tracking-tighter flex items-center gap-2">
                 <Edit3 className="w-3 h-3" /> {t('Editor')}
@@ -374,7 +374,7 @@ export function MarkdownEditor({ setMdDirty }: { setMdDirty?: (dirty: boolean) =
 
         {/* Preview pane */}
         {(viewMode === 'split' || viewMode === 'preview') && (
-          <div className={`${viewMode === 'preview' ? 'flex-1' : 'flex-1'} th-bg-card border th-border rounded-xl flex flex-col overflow-hidden shadow-2xl`}>
+          <div className="flex-1 th-bg-card border th-border rounded-xl flex flex-col overflow-hidden shadow-2xl">
             <div className="px-4 py-2 th-bg-surface-h border-b th-border flex justify-between items-center">
               <span className="text-[11px] font-bold th-text-3 uppercase tracking-tighter flex items-center gap-2">
                 <Eye className="w-3 h-3" /> {t('Preview')}
