@@ -17,6 +17,7 @@ export function MarkdownEditor({ setMdDirty }: { setMdDirty?: (dirty: boolean) =
 
   useEffect(() => {
     setMdDirty?.(isDirty);
+    return () => setMdDirty?.(false);
   }, [isDirty, setMdDirty]);
   const [originalContent, setOriginalContent] = useState('');
   const [isCopied, setIsCopied] = useState(false);
