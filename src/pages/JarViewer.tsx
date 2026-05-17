@@ -344,13 +344,13 @@ export function JarViewer() {
           
           <div className="flex-1 overflow-auto bg-white dark:bg-[#0d1117]">
             {content ? (
-              <div className="flex text-[13px] leading-relaxed font-mono">
+              <div className="flex text-[13px] leading-relaxed font-mono w-fit min-w-full">
                 <div 
-                  className="select-none text-right px-3 py-4 border-r th-border text-slate-400 dark:text-slate-600 bg-slate-50 dark:bg-[#0d1117] min-w-[3rem] whitespace-pre"
+                  className="sticky left-0 select-none text-right px-3 py-4 border-r th-border text-slate-400 dark:text-slate-600 bg-slate-50 dark:bg-[#0d1117] min-w-[3rem] whitespace-pre z-10"
                 >
                   {Array.from({ length: lineCount }, (_, i) => i + 1).join('\n')}
                 </div>
-                <pre className="m-0 flex-1 overflow-x-auto p-4 text-slate-900 dark:text-slate-200">
+                <pre className="m-0 flex-1 p-4 text-slate-900 dark:text-slate-200 overflow-visible">
                   <code dangerouslySetInnerHTML={{ __html: highlightedContent }} className="hljs" style={{ background: 'transparent', padding: 0 }} />
                 </pre>
               </div>
