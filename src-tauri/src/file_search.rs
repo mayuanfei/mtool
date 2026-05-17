@@ -41,6 +41,7 @@ pub struct IndexEngine {
     pub shutdown: Arc<AtomicBool>,
     pub fts5_ready: Arc<AtomicBool>,
     pub watcher_stopped: Arc<AtomicBool>,
+    pub is_building: Arc<AtomicBool>,
 }
 
 impl IndexEngine {
@@ -68,6 +69,7 @@ impl IndexEngine {
             shutdown: Arc::new(AtomicBool::new(false)),
             fts5_ready: Arc::new(AtomicBool::new(fts5_ready)),
             watcher_stopped: Arc::new(AtomicBool::new(true)),
+            is_building: Arc::new(AtomicBool::new(false)),
         }
     }
 

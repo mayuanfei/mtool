@@ -154,7 +154,8 @@ fn open_md_file() -> Result<(String, String), String> {
             ));
         }
         let content = fs::read_to_string(&path)
-            .map_err(|e| format!("Failed to read file: {}", e))?;
+            .map_err(|e| format!("Failed to read file: {}", e))?
+            .replace("\r\n", "\n");
         let path_str = path.to_string_lossy().to_string();
         Ok((path_str, content))
     } else {
@@ -206,8 +207,9 @@ fn open_md_file_by_path(path: &str) -> Result<(String, String), String> {
             metadata.len() / 1024 / 1024
         ));
     }
-    let content =
-        fs::read_to_string(path).map_err(|e| format!("Failed to read file: {}", e))?;
+    let content = fs::read_to_string(path)
+        .map_err(|e| format!("Failed to read file: {}", e))?
+        .replace("\r\n", "\n");
     Ok((path.to_string(), content))
 }
 
@@ -233,7 +235,8 @@ fn open_text_file() -> Result<(String, String), String> {
             ));
         }
         let content = fs::read_to_string(&path)
-            .map_err(|e| format!("Failed to read file: {}", e))?;
+            .map_err(|e| format!("Failed to read file: {}", e))?
+            .replace("\r\n", "\n");
         let path_str = path.to_string_lossy().to_string();
         Ok((path_str, content))
     } else {
@@ -251,7 +254,8 @@ fn read_text_file_by_path(path: &str) -> Result<(String, String), String> {
         ));
     }
     let content = fs::read_to_string(path)
-        .map_err(|e| format!("Failed to read file: {}", e))?;
+        .map_err(|e| format!("Failed to read file: {}", e))?
+        .replace("\r\n", "\n");
     Ok((path.to_string(), content))
 }
 
@@ -264,6 +268,10 @@ async fn build_index(
     app: tauri::AppHandle,
     state: tauri::State<'_, IndexEngine>,
 ) -> Result<usize, String> {
+    if state.is_building.compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed).is_err() {
+        return Err("Index build already in progress".to_string());
+    }
+
     let status_ref = state.status.clone();
     let db_path = state.db_path.clone();
 
@@ -320,11 +328,13 @@ async fn build_index(
         Ok(Err(e)) => {
             let mut s = status_ref.write().unwrap_or_else(|e| e.into_inner());
             s.is_indexing = false;
+            state.is_building.store(false, Ordering::Release);
             return Err(e);
         }
         Err(e) => {
             let mut s = status_ref.write().unwrap_or_else(|e| e.into_inner());
             s.is_indexing = false;
+            state.is_building.store(false, Ordering::Release);
             return Err(e.to_string());
         }
     };
@@ -348,6 +358,7 @@ async fn build_index(
     let shutdown = state.shutdown.clone();
     let db_path_w = state.db_path.clone();
     let watcher_stopped = state.watcher_stopped.clone();
+    let is_building_clone = state.is_building.clone();
     std::thread::spawn(move || {
         // 1. 先完成 FTS5 重建
         if rebuild_fts5_background(&db_fts) {
@@ -355,6 +366,7 @@ async fn build_index(
         }
         // 2. 再启动 watcher（避免与 FTS5 重建产生写写竞争）
         start_fs_watcher(db_path_w, disabled, shutdown, watcher_stopped);
+        is_building_clone.store(false, Ordering::Release);
     });
 
     Ok(total)
@@ -428,6 +440,7 @@ async fn disable_file_search(
     state.disabled.store(true, Ordering::Relaxed);
     state.shutdown.store(true, Ordering::Relaxed);
     state.fts5_ready.store(false, Ordering::Relaxed);
+    state.is_building.store(false, Ordering::Release);
 
     let db_path = state.db_path.clone();
     let watcher_stopped = state.watcher_stopped.clone();
