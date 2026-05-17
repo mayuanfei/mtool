@@ -1,5 +1,5 @@
 import { useState, useRef, useCallback, useEffect, useMemo } from 'react';
-import { FileUp, ClipboardPaste, ChevronUp, ChevronDown, RotateCcw, ArrowLeftRight, XCircle } from 'lucide-react';
+import { FileUp, ClipboardPaste, ChevronUp, ChevronDown, RotateCcw, ArrowLeftRight, XCircle, X } from 'lucide-react';
 import { invoke } from '@tauri-apps/api/core';
 import { getCurrentWebview } from '@tauri-apps/api/webview';
 import { useI18n } from '../i18n';
@@ -223,9 +223,10 @@ interface FilePanelProps {
   fileName: string;
   content: string;
   onFileOpen: (name: string, content: string) => void;
+  onFileError?: (err: string) => void;
 }
 
-function FilePanel({ side, fileName, content, onFileOpen }: FilePanelProps) {
+function FilePanel({ side, fileName, content, onFileOpen, onFileError }: FilePanelProps) {
   const { t } = useI18n();
   const [dragOver, setDragOver] = useState(false);
   const [pasteError, setPasteError] = useState(false);
@@ -278,10 +279,13 @@ function FilePanel({ side, fileName, content, onFileOpen }: FilePanelProps) {
       const result = await invoke<[string, string]>('open_text_file');
       const name = result[0].split(/[/\\]/).pop() || result[0];
       onFileOpen(name, result[1]);
-    } catch {
-      // User cancelled
+    } catch (e) {
+      const msg = String(e);
+      if (!msg.includes('No file selected') && !msg.includes('cancelled')) {
+        onFileError?.(msg);
+      }
     }
-  }, [onFileOpen]);
+  }, [onFileOpen, onFileError]);
 
   const handlePasteFromClipboard = useCallback(async () => {
     try {
@@ -532,6 +536,7 @@ export function FileDiff() {
   const [rightContent, setRightContent] = useState('');
   const [showInput, setShowInput] = useState(true);
   const [currentDiffIdx, setCurrentDiffIdx] = useState(0);
+  const [fileError, setFileError] = useState<string | null>(null);
   const userNavRef = useRef(false);
 
   const leftContentRef = useRef(leftContent);
@@ -574,7 +579,13 @@ export function FileDiff() {
                 const [p1, c1] = await invoke<[string, string]>('read_text_file_by_path', { path: path1 });
                 const n1 = p1.split(/[/\\]/).pop() || p1;
                 handleLeftFile(n1, c1);
-              } catch { /* skip */ }
+                setFileError(null);
+              } catch (e) {
+                const msg = String(e);
+                if (!msg.includes('No file selected') && !msg.includes('cancelled')) {
+                  setFileError(msg);
+                }
+              }
             }
             const path2 = paths[1];
             const name2 = path2.split(/[/\\]/).pop() || path2;
@@ -583,7 +594,13 @@ export function FileDiff() {
                 const [p2, c2] = await invoke<[string, string]>('read_text_file_by_path', { path: path2 });
                 const n2 = p2.split(/[/\\]/).pop() || p2;
                 handleRightFile(n2, c2);
-              } catch { /* skip */ }
+                setFileError(null);
+              } catch (e) {
+                const msg = String(e);
+                if (!msg.includes('No file selected') && !msg.includes('cancelled')) {
+                  setFileError(msg);
+                }
+              }
             }
             return;
           }
@@ -610,8 +627,12 @@ export function FileDiff() {
               handleRightFile(name, content);
               dropSide = 'left';
             }
-          } catch {
-            // read error
+            setFileError(null);
+          } catch (e) {
+            const msg = String(e);
+            if (!msg.includes('No file selected') && !msg.includes('cancelled')) {
+              setFileError(msg);
+            }
           }
         }
       });
@@ -781,6 +802,18 @@ export function FileDiff() {
         </div>
       </div>
 
+      {fileError && (
+        <div className="mx-4 mt-3 px-4 py-2.5 bg-rose-900/30 border border-rose-700/50 rounded-xl text-sm text-rose-300 flex items-center justify-between animate-fade-in shadow-lg flex-shrink-0">
+          <div className="flex items-center gap-2">
+            <XCircle className="w-4 h-4 text-rose-400 shrink-0" />
+            <span>{fileError}</span>
+          </div>
+          <button onClick={() => setFileError(null)} className="p-1 hover:bg-rose-800/30 rounded text-rose-300 transition-colors">
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+      )}
+
       {showInput && (
         <div className="flex gap-3 p-3 flex-shrink-0" style={{ height: hasAnyContent && hasBothContent ? '200px' : '280px' }}>
           <FilePanel
@@ -788,12 +821,14 @@ export function FileDiff() {
             fileName={leftName}
             content={leftContent}
             onFileOpen={handleLeftFile}
+            onFileError={setFileError}
           />
           <FilePanel
             side="right"
             fileName={rightName}
             content={rightContent}
             onFileOpen={handleRightFile}
+            onFileError={setFileError}
           />
         </div>
       )}

@@ -1,5 +1,5 @@
 import { useState, useCallback, useEffect, useRef, useMemo } from 'react';
-import { Trash2, FolderOpen, Save, Copy, Check, Eye, Edit3, FileText, Download, Upload, XCircle } from 'lucide-react';
+import { Trash2, FolderOpen, Save, Copy, Check, Eye, Edit3, FileText, Download, Upload, XCircle, X } from 'lucide-react';
 import { invoke } from '@tauri-apps/api/core';
 import { openUrl } from '@tauri-apps/plugin-opener';
 import { getCurrentWebview } from '@tauri-apps/api/webview';
@@ -22,6 +22,7 @@ export function MarkdownEditor({ setMdDirty }: { setMdDirty?: (dirty: boolean) =
   const [originalContent, setOriginalContent] = useState('');
   const [isCopied, setIsCopied] = useState(false);
   const [copyError, setCopyError] = useState(false);
+  const [fileError, setFileError] = useState<string | null>(null);
   const [isDragOver, setIsDragOver] = useState(false);
   const [viewMode, setViewMode] = useState<'split' | 'edit' | 'preview'>(() => {
     return (localStorage.getItem('mtool_md_viewmode') as 'split' | 'edit' | 'preview') || 'preview';
@@ -85,8 +86,12 @@ export function MarkdownEditor({ setMdDirty }: { setMdDirty?: (dirty: boolean) =
       setContent(result[1]);
       setOriginalContent(result[1]);
       setIsDirty(false);
-    } catch {
-      // user cancelled or error
+      setFileError(null);
+    } catch (e) {
+      const msg = String(e);
+      if (!msg.includes('No file selected') && !msg.includes('cancelled')) {
+        setFileError(msg);
+      }
     }
   }, []);
 
@@ -97,8 +102,12 @@ export function MarkdownEditor({ setMdDirty }: { setMdDirty?: (dirty: boolean) =
       setFilePath(savedPath);
       setOriginalContent(content);
       setIsDirty(false);
-    } catch {
-      // user cancelled or error
+      setFileError(null);
+    } catch (e) {
+      const msg = String(e);
+      if (!msg.includes('No file selected') && !msg.includes('cancelled')) {
+        setFileError(msg);
+      }
     }
   }, [filePath, content]);
 
@@ -109,8 +118,12 @@ export function MarkdownEditor({ setMdDirty }: { setMdDirty?: (dirty: boolean) =
       setFilePath(savedPath);
       setOriginalContent(content);
       setIsDirty(false);
-    } catch {
-      // user cancelled or error
+      setFileError(null);
+    } catch (e) {
+      const msg = String(e);
+      if (!msg.includes('No file selected') && !msg.includes('cancelled')) {
+        setFileError(msg);
+      }
     }
   }, [content]);
 
@@ -170,8 +183,12 @@ export function MarkdownEditor({ setMdDirty }: { setMdDirty?: (dirty: boolean) =
             setContent(result[1]);
             setOriginalContent(result[1]);
             setIsDirty(false);
-          } catch {
-            // read error
+            setFileError(null);
+          } catch (e) {
+            const msg = String(e);
+            if (!msg.includes('No file selected') && !msg.includes('cancelled')) {
+              setFileError(msg);
+            }
           }
         }
       });
@@ -345,6 +362,18 @@ export function MarkdownEditor({ setMdDirty }: { setMdDirty?: (dirty: boolean) =
           </button>
         </div>
       </div>
+
+      {fileError && (
+        <div className="mb-4 px-4 py-2.5 bg-rose-900/30 border border-rose-700/50 rounded-xl text-sm text-rose-300 flex items-center justify-between animate-fade-in shadow-lg">
+          <div className="flex items-center gap-2">
+            <XCircle className="w-4 h-4 text-rose-400 shrink-0" />
+            <span>{fileError}</span>
+          </div>
+          <button onClick={() => setFileError(null)} className="p-1 hover:bg-rose-800/30 rounded text-rose-300 transition-colors">
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+      )}
 
       {/* Main editor area */}
       <div className="flex-1 flex gap-4 min-h-0">

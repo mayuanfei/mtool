@@ -53,12 +53,12 @@ export function UpdateModal({ open, updateInfo, downloading, progress, error, in
           <div className="px-6 pb-4">
             <div className="w-full bg-slate-200 dark:bg-slate-700 rounded-full h-2 overflow-hidden">
               <div
-                className="bg-indigo-500 h-2 rounded-full transition-all duration-300"
-                style={{ width: `${progress}%` }}
+                className={`bg-indigo-500 h-2 rounded-full transition-all duration-300 ${progress === -1 ? 'w-full animate-pulse' : ''}`}
+                style={{ width: progress === -1 ? '100%' : `${progress}%` }}
               />
             </div>
             <p className="text-xs th-text-muted mt-2 text-center">
-              {installed ? t('Ready to restart') : `${t('Downloading...')} ${progress}%`}
+              {installed ? t('Ready to restart') : progress === -1 ? t('Downloading...') : `${t('Downloading...')} ${progress}%`}
             </p>
           </div>
         )}
@@ -102,7 +102,7 @@ export function UpdateModal({ open, updateInfo, downloading, progress, error, in
                 disabled={downloading}
                 className="px-4 py-2 text-sm font-medium bg-indigo-600 hover:bg-indigo-700 disabled:opacity-60 disabled:cursor-not-allowed text-white rounded-lg transition-colors"
               >
-                {downloading ? `${t('Downloading...')} ${progress}%` : t('Install & Restart')}
+                {downloading ? (progress === -1 ? t('Downloading...') : `${t('Downloading...')} ${progress}%`) : t('Install & Restart')}
               </button>
             )}
           </div>

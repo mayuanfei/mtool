@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Globe, Wrench, Palette, RefreshCw } from 'lucide-react';
+import { Globe, Wrench, Palette, RefreshCw, XCircle, X } from 'lucide-react';
 import { invoke } from '@tauri-apps/api/core';
 import { getVersion } from '@tauri-apps/api/app';
 import { useI18n } from '../i18n';
@@ -42,6 +42,7 @@ export function SettingsPage({ toolsEnabled, toggleTool, activePage, setActivePa
   const { hasUpdate, updateInfo, checking, error,
           autoUpdate, setAutoUpdate, checkForUpdate } = updater;
   const [lastCheckDone, setLastCheckDone] = useState(false);
+  const [toggleError, setToggleError] = useState<string | null>(null);
   const [appVersion, setAppVersion] = useState<string>('...');
 
   useEffect(() => {
@@ -61,6 +62,18 @@ export function SettingsPage({ toolsEnabled, toggleTool, activePage, setActivePa
       </div>
 
       <div className="space-y-6">
+        {toggleError && (
+          <div className="px-4 py-2.5 bg-rose-900/30 border border-rose-700/50 rounded-xl text-sm text-rose-300 flex items-center justify-between animate-fade-in shadow-lg">
+            <div className="flex items-center gap-2">
+              <XCircle className="w-4 h-4 text-rose-400 shrink-0" />
+              <span>{toggleError}</span>
+            </div>
+            <button onClick={() => setToggleError(null)} className="p-1 hover:bg-rose-800/30 rounded text-rose-300 transition-colors">
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+        )}
+
         {/* Utility Configuration Card */}
         <section className="th-bg-card border th-border rounded-xl overflow-hidden shadow-2xl">
           <div className="px-6 py-4 border-b th-border flex items-center gap-3 th-bg-surface-h">
@@ -89,6 +102,8 @@ export function SettingsPage({ toolsEnabled, toggleTool, activePage, setActivePa
                   } catch (e) {
                     console.error(e);
                     toggleTool('fileSearch', !next);
+                    setToggleError(`${t('Failed')}: ${String(e)}`);
+                    setTimeout(() => setToggleError(null), 3000);
                   } finally {
                     setIsProcessing(false);
                   }

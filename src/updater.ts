@@ -83,7 +83,7 @@ export function useUpdater(): UseUpdaterReturn {
           total = event.data.contentLength ?? 0;
         } else if (event.event === 'Progress') {
           downloaded += event.data.chunkLength;
-          setProgress(total > 0 ? Math.round((downloaded / total) * 100) : 50);
+          setProgress(total > 0 ? Math.round((downloaded / total) * 100) : -1);
         }
       });
       setProgress(100);
