@@ -16,6 +16,35 @@ interface SidebarProps {
   hasUpdate: boolean;
 }
 
+interface NavItemProps {
+  item: {
+    id: string;
+    label: string;
+    icon: React.ComponentType<{ className?: string; strokeWidth?: number }>;
+  };
+  activePage: string;
+  collapsed: boolean;
+  onNavigate: (page: string) => void;
+}
+
+function NavItem({ item, activePage, collapsed, onNavigate }: NavItemProps) {
+  const isActive = activePage === item.id;
+  return (
+    <button
+      onClick={() => onNavigate(item.id)}
+      title={collapsed ? item.label : undefined}
+      className={`w-full flex items-center ${collapsed ? 'justify-center' : ''} gap-3 px-3 py-2 rounded-md font-medium transition-colors ${
+        isActive
+          ? 'bg-indigo-600/10 text-indigo-400 border border-indigo-500/20 shadow-sm'
+          : 'th-text-3 th-hover-surface border border-transparent'
+      }`}
+    >
+      <item.icon className="w-[18px] h-[18px] flex-shrink-0" strokeWidth={2} />
+      {!collapsed && <span className="text-[13px] truncate">{item.label}</span>}
+    </button>
+  );
+}
+
 export function Sidebar({ activePage, onNavigate, jsonEnabled, qrEnabled, pwdEnabled, sqlInEnabled, mdEnabled, fileSearchEnabled, fileDiffEnabled, jarViewerEnabled, hasUpdate }: SidebarProps) {
   const { t } = useI18n();
 
@@ -38,24 +67,6 @@ export function Sidebar({ activePage, onNavigate, jsonEnabled, qrEnabled, pwdEna
     ...(pwdEnabled ? [{ id: 'pwd', label: t('Password Generator'), icon: Key }] : []),
     ...(sqlInEnabled ? [{ id: 'sqlIn', label: t('SQL IN Builder'), icon: Database }] : []),
   ];
-
-  const NavItem = ({ item }: { item: { id: string; label: string; icon: React.ComponentType<{ className?: string; strokeWidth?: number }> } }) => {
-    const isActive = activePage === item.id;
-    return (
-      <button
-        onClick={() => onNavigate(item.id)}
-        title={collapsed ? item.label : undefined}
-        className={`w-full flex items-center ${collapsed ? 'justify-center' : ''} gap-3 px-3 py-2 rounded-md font-medium transition-colors ${
-          isActive
-            ? 'bg-indigo-600/10 text-indigo-400 border border-indigo-500/20 shadow-sm'
-            : 'th-text-3 th-hover-surface border border-transparent'
-        }`}
-      >
-        <item.icon className="w-[18px] h-[18px] flex-shrink-0" strokeWidth={2} />
-        {!collapsed && <span className="text-[13px] truncate">{item.label}</span>}
-      </button>
-    );
-  };
 
   return (
     <aside className={`${collapsed ? 'w-16' : 'w-64'} flex-shrink-0 flex flex-col border-r th-border th-bg-card transition-all duration-200 ease-in-out`} style={{ opacity: 0.95 }}>
@@ -102,7 +113,7 @@ export function Sidebar({ activePage, onNavigate, jsonEnabled, qrEnabled, pwdEna
           <div className="text-[10px] font-bold th-text-muted uppercase tracking-widest px-3 mb-2 mt-2">{t('Tools')}</div>
         )}
         {navItems.map((item) => (
-          <NavItem key={item.id} item={item} />
+          <NavItem key={item.id} item={item} activePage={activePage} collapsed={collapsed} onNavigate={onNavigate} />
         ))}
       </div>
 

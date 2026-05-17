@@ -585,6 +585,27 @@ fn start_fs_watcher(db_path: String, disabled: Arc<AtomicBool>, shutdown: Arc<At
 }
 
 fn handle_fs_event(event: &notify::Event, db_path: &str, conn: &mut Option<rusqlite::Connection>) {
+    if matches!(event.kind, EventKind::Modify(ModifyKind::Name(RenameMode::Both))) {
+        if conn.is_none() {
+            *conn = rusqlite::Connection::open(db_path).ok();
+        }
+        if let Some(c) = conn.as_mut() {
+            if let Some(from) = event.paths.first() {
+                if !should_skip_path(from) {
+                    delete_entry_in_db(c, &from.to_string_lossy());
+                }
+            }
+            if let Some(to) = event.paths.get(1) {
+                if !should_skip_path(to) {
+                    if let Some(entry) = entry_from_path(to) {
+                        upsert_entry_in_db(c, &entry);
+                    }
+                }
+            }
+        }
+        return;
+    }
+
     for path in &event.paths {
         if should_skip_path(path) {
             continue;
