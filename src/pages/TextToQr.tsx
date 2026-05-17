@@ -1,10 +1,10 @@
 import { Copy, Download, Clipboard, Trash2, QrCode, Check, XCircle } from 'lucide-react';
 import { useState, useEffect, useRef, useMemo } from 'react';
 import { invoke } from '@tauri-apps/api/core';
-import { useI18n } from '../i18n';
+import { useI18n, TranslationKey } from '../i18n';
 import { useTheme } from '../theme';
 
-function translateError(err: string, t: (k: any) => string): string {
+function translateError(err: string, t: (k: TranslationKey) => string): string {
   if (!err) return '';
   if (err.includes('data too long')) return t('Payload too long (max 2048 chars)');
   if (err.includes('Payload is empty')) return t('Payload is empty');
@@ -42,6 +42,7 @@ export function TextToQr() {
   const [isCopied, setIsCopied] = useState(false);
   const [copyError, setCopyError] = useState(false);
   const [downloadError, setDownloadError] = useState(false);
+  const [pasteError, setPasteError] = useState(false);
   const genIdRef = useRef(0);
 
   const bgColor = useMemo(() => {
@@ -140,8 +141,8 @@ export function TextToQr() {
             />
             
             <div className="flex justify-end gap-2">
-               <button className="p-2 th-text-muted hover:th-text th-hover-surface rounded transition-colors border border-transparent" title="Paste from clipboard" onClick={async () => { try { const text = await invoke<string>('read_text_from_clipboard'); setPayload(text); } catch(e){ console.error(e); } }}>
-                  <Clipboard className="w-4 h-4" />
+               <button className={`p-2 rounded transition-colors border ${pasteError ? 'text-red-400 border-red-500/30 bg-red-500/10' : 'th-text-muted hover:th-text th-hover-surface border-transparent'}`} title={pasteError ? t('Failed') : t('Paste from Clipboard')} onClick={async () => { try { const text = await invoke<string>('read_text_from_clipboard'); setPayload(text); } catch(e){ console.error(e); setPasteError(true); setTimeout(() => setPasteError(false), 2000); } }}>
+                  {pasteError ? <XCircle className="w-4 h-4" /> : <Clipboard className="w-4 h-4" />}
                </button>
                <button className="p-2 th-text-muted hover:text-red-400 th-hover-surface rounded transition-colors border border-transparent" title="Clear payload" onClick={() => setPayload('')}>
                   <Trash2 className="w-4 h-4" />

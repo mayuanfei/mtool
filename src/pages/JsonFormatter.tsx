@@ -132,6 +132,7 @@ export function JsonFormatter() {
   const [isError, setIsError] = useState(false);
   const [isCopied, setIsCopied] = useState(false);
   const [copyError, setCopyError] = useState(false);
+  const requestIdRef = useRef(0);
 
   const updateOutput = useCallback((text: string, isMinified: boolean) => {
     setPlainOutput(text);
@@ -159,11 +160,14 @@ export function JsonFormatter() {
       setIsError(false);
       return;
     }
+    const currentId = ++requestIdRef.current;
     const timer = setTimeout(async () => {
       try {
         const result = await invoke<string>('format_json', { input: rawInput });
+        if (requestIdRef.current !== currentId) return;
         updateOutput(result, false);
       } catch (e) {
+        if (requestIdRef.current !== currentId) return;
         showError(String(e));
       }
     }, 300);
@@ -172,20 +176,26 @@ export function JsonFormatter() {
 
   const handleFormat = useCallback(async () => {
     if (!rawInput.trim()) return;
+    const currentId = ++requestIdRef.current;
     try {
       const result = await invoke<string>('format_json', { input: rawInput });
+      if (requestIdRef.current !== currentId) return;
       updateOutput(result, false);
     } catch (e) {
+      if (requestIdRef.current !== currentId) return;
       showError(String(e));
     }
   }, [rawInput, updateOutput, showError]);
 
   const handleMinify = useCallback(async () => {
     if (!rawInput.trim()) return;
+    const currentId = ++requestIdRef.current;
     try {
       const result = await invoke<string>('minify_json', { input: rawInput });
+      if (requestIdRef.current !== currentId) return;
       updateOutput(result, true);
     } catch (e) {
+      if (requestIdRef.current !== currentId) return;
       showError(String(e));
     }
   }, [rawInput, updateOutput, showError]);
