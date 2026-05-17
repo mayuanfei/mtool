@@ -261,7 +261,7 @@ function FilePanel({ side, fileName, content, onFileOpen, onFileError }: FilePan
       const file = files[0];
       if (!isTextFile(file.name)) return;
       if (file.size > 10 * 1024 * 1024) {
-        alert(t('File size exceeds 10MB limit'));
+        onFileError?.(t('File size exceeds 10MB limit'));
         return;
       }
       const reader = new FileReader();
@@ -272,7 +272,7 @@ function FilePanel({ side, fileName, content, onFileOpen, onFileError }: FilePan
       };
       reader.readAsText(file);
     }
-  }, [onFileOpen, t]);
+  }, [onFileOpen, onFileError, t]);
 
   const handleOpenFile = useCallback(async () => {
     try {
@@ -292,7 +292,7 @@ function FilePanel({ side, fileName, content, onFileOpen, onFileError }: FilePan
       const text = await navigator.clipboard.readText();
       if (text) {
         if (text.length > 10 * 1024 * 1024) {
-          alert(t('Pasted text exceeds 10MB limit'));
+          onFileError?.(t('Pasted text exceeds 10MB limit'));
           return;
         }
         onFileOpen(t('Pasted Text'), text);
@@ -301,7 +301,7 @@ function FilePanel({ side, fileName, content, onFileOpen, onFileError }: FilePan
       setPasteError(true);
       setTimeout(() => setPasteError(false), 2000);
     }
-  }, [onFileOpen, t]);
+  }, [onFileOpen, onFileError, t]);
 
   return (
     <div
@@ -342,7 +342,7 @@ function FilePanel({ side, fileName, content, onFileOpen, onFileError }: FilePan
         value={content}
         onChange={(e) => {
           if (e.target.value.length > 10 * 1024 * 1024) {
-            alert(t('Text exceeds 10MB limit'));
+            onFileError?.(t('Text exceeds 10MB limit'));
             return;
           }
           onFileOpen(fileName || t('Pasted Text'), e.target.value);

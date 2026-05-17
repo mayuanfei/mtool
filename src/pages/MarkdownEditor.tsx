@@ -273,9 +273,11 @@ export function MarkdownEditor({ setMdDirty }: { setMdDirty?: (dirty: boolean) =
     openUrl(href).catch(console.error);
   }, []);
 
-  const lineCount = content ? content.split('\n').length : 0;
+  const { lineCount, wordCount } = useMemo(() => ({
+    lineCount: content ? content.split('\n').length : 0,
+    wordCount: content.trim() ? content.trim().split(/\s+/).length : 0,
+  }), [content]);
   const charCount = content.length;
-  const wordCount = content.trim() ? content.trim().split(/\s+/).length : 0;
   const fileName = filePath ? filePath.split('/').pop() || filePath.split('\\').pop() || 'Untitled' : t('Untitled');
 
   return (
@@ -453,7 +455,7 @@ export function MarkdownEditor({ setMdDirty }: { setMdDirty?: (dirty: boolean) =
           </span>
           <span>{t('Lines')}: {lineCount}</span>
           <span>{t('Words')}: {wordCount}</span>
-          <span>Length: {charCount} {t('chars')}</span>
+          <span>{t('Length')}: {charCount} {t('chars')}</span>
         </div>
         <div className="flex items-center gap-2 italic">
           MTOOL Desktop Tools {new Date().getFullYear()}

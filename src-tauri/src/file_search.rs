@@ -235,6 +235,10 @@ pub fn should_skip_path(path: &Path) -> bool {
             "/.rustup/toolchains/", // Rust 工具链源码
             "/Library/Containers/",        // ← 新增：跳过其他 App 沙盒容器
             "/Library/Group Containers/",  // ← 新增：跳过 Group 容器
+            "/Library/Developer/CoreSimulator/",  // 同时覆盖系统和用户级
+            "/Library/Developer/Xcode/DerivedData/",
+            "/.gradle/caches/",
+            "/.m2/repository/",
         ] {
             if path_str.contains(skip) {
                 return true;
