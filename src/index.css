@@ -780,3 +780,17 @@ details.json-collapse:not([open]) > summary.json-summary .json-toggle::after {
   background-color: #6366f1;
   box-shadow: 0 0 4px rgba(99, 102, 241, 0.4);
 }
+
+/* ========================================
+   Animations
+   ======================================== */
+
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(-4px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+.animate-fade-in {
+  animation: fadeIn 0.2s ease-out;
+}
+
