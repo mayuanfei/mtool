@@ -162,7 +162,9 @@ pub fn decompile_class(app_handle: &tauri::AppHandle, class_file_path: &Path) ->
         Err(_) => {
             // Timeout: kill the java process via PID (lock-free, no deadlock risk).
             #[cfg(unix)]
-            unsafe { libc::kill(pid as i32, libc::SIGKILL); }
+            if let Ok(pid_i32) = pid.try_into() {
+                unsafe { libc::kill(pid_i32, libc::SIGKILL); }
+            }
             #[cfg(windows)]
             unsafe {
                 use windows_sys::Win32::System::Threading::{OpenProcess, TerminateProcess, PROCESS_TERMINATE};

@@ -83,8 +83,17 @@ export function JarViewer() {
   const [dragOver, setDragOver] = useState(false);
   const [expandedDirs, setExpandedDirs] = useState<Set<string>>(new Set());
   
-  const sidebarWidthRef = useRef(256);
-  const [sidebarWidth, setSidebarWidth] = useState(256);
+  const [sidebarWidth, setSidebarWidth] = useState(() => {
+    try {
+      const saved = localStorage.getItem('mtool_jarviewer_width');
+      const w = saved ? parseInt(saved, 10) : 256;
+      return isNaN(w) ? 256 : Math.max(150, Math.min(800, w));
+    } catch {
+      return 256;
+    }
+  });
+  const sidebarWidthRef = useRef(sidebarWidth);
+  const loadIdRef = useRef(0);
 
   const handleMouseDownResizer = (e: React.MouseEvent) => {
     e.preventDefault();
@@ -101,6 +110,9 @@ export function JarViewer() {
       document.removeEventListener('mousemove', onMouseMove);
       document.removeEventListener('mouseup', onMouseUp);
       document.body.style.cursor = '';
+      try {
+        localStorage.setItem('mtool_jarviewer_width', sidebarWidthRef.current.toString());
+      } catch {}
     };
     
     document.addEventListener('mousemove', onMouseMove);
@@ -177,6 +189,7 @@ export function JarViewer() {
     setSelectedEntry(entryPath || basePath);
     setLoading(true);
     setContent('');
+    const currentId = ++loadIdRef.current;
     try {
       let result = '';
       if (isJarEntry) {
@@ -184,11 +197,15 @@ export function JarViewer() {
       } else {
         result = await invoke<string>('read_local_class', { path: basePath });
       }
+      if (loadIdRef.current !== currentId) return;
       setContent(result);
     } catch (err) {
+      if (loadIdRef.current !== currentId) return;
       setContent(`Error reading file: ${err}`);
     } finally {
-      setLoading(false);
+      if (loadIdRef.current === currentId) {
+        setLoading(false);
+      }
     }
   };
 
