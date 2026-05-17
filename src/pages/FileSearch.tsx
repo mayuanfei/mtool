@@ -374,7 +374,7 @@ export function FileSearch() {
                 setShowRecent(true);
               }
             }}
-            placeholder={t('Search file names...   e.g. *.yml   report draft   size:>100MB   content:"keyword"')}
+            placeholder={t('Search file names (supports * and ?)...   e.g. *.yml   report draft   size:>100MB   content:"keyword"')}
             className="w-full pl-9 pr-10 py-2.5 th-bg-card border th-border-subtle
               rounded-lg text-sm th-text-2
               placeholder:text-slate-400 dark:placeholder:text-slate-500
