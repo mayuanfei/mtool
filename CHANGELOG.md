@@ -1,5 +1,35 @@
 # Changelog
 
+## [1.0.8]
+
+- **系统核心 (Core)**:
+  - 生产环境 CSP 兼容性修复：将内联主题初始化脚本提取为独立文件 `public/theme-init.js`，彻底解决生产构建下的 FOUC（页面闪烁）问题。
+- **文本转二维码 (TextToQr)**:
+  - 修复「清空」按钮提示文字的硬编码英文问题，接入 i18n 国际化。
+- **文本对比 (FileDiff)**:
+  - 移除 Tauri 2 环境下不再执行的浏览器原生 `FileReader` 拖放死代码，仅保留纯文本拖放逻辑，精简代码结构。
+
+## [1.0.7]
+
+- **文本转二维码 (TextToQr)**:
+  - 引入 `TranslationKey` 替换项目仅存的 `any` 类型，实现 100% TypeScript 严格类型覆盖。
+  - 补充剪贴板读取失败的 UI 错误提示反馈。
+- **JSON 格式化 (JsonFormatter)**:
+  - 引入 `requestIdRef` 竞态锁保护，避免快速连续输入大 JSON 时旧请求覆盖新结果的问题。
+
+## [1.0.6]
+
+- **系统核心 (Core)**:
+  - 修复 Windows 平台读取包含 CRLF 换行的文件时，由于 React 受控组件换行符自动归一化导致立即误判为“已修改”的 Bug，读取后统一归一化为 LF 换行。
+  - 为文件索引重建 `build_index` 命令引入全局并发锁 (`is_building`)，避免自动重建与手动操作同时触发的竞态问题。
+  - 开启 `tsconfig.json` 的 `noImplicitReturns`，提升 TypeScript 分支返回检查的严谨性。
+- **文件搜索 (FileSearch)**:
+  - 更新搜索框占位符提示文案，明确提示仅支持 `*` 和 `?` 通配符。
+- **JAR 查看器 (JarViewer)**:
+  - 增加侧边栏宽度的 `localStorage` 持久化支持 (`mtool_jarviewer_width`)。
+  - 在加载条目内容时引入 `loadIdRef` 竞态保护，防止快速点击树节点时旧请求覆盖新内容。
+  - 优化超时杀进程中 PID 的类型转换逻辑 (`try_into()`)，提升跨平台安全性。
+
 ## [1.0.5]
 
 - **JAR 查看器 (JarViewer)**:
