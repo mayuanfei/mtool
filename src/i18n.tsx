@@ -214,6 +214,22 @@ const translations = {
     'Loading...': 'Loading...',
     'Select a file to view its contents': 'Select a file to view its contents',
     'Open Another': 'Open Another',
+    
+    // EncoderDecoder
+    'Encoder / Decoder': 'Encoder / Decoder',
+    'Convert between various data formats.': 'Convert between various data formats.',
+    'Mode': 'Mode',
+    'Encode': 'Encode',
+    'Decode': 'Decode',
+    'Base64': 'Base64',
+    'URL': 'URL',
+    'Unicode': 'Unicode',
+    'HTML Entity': 'HTML Entity',
+    'XML Entity': 'XML Entity',
+    'Input': 'Input',
+    'Output': 'Output',
+    'Clear Input': 'Clear Input',
+    'Copy Output': 'Copy Output',
   },
   zh: {
     // Sidebar
@@ -426,6 +442,22 @@ const translations = {
     'Loading...': '加载中...',
     'Select a file to view its contents': '选择一个文件以查看其内容',
     'Open Another': '打开其他文件',
+    
+    // EncoderDecoder
+    'Encoder / Decoder': '编码 / 解码',
+    'Convert between various data formats.': '在不同数据格式之间进行转换。',
+    'Mode': '模式',
+    'Encode': '编码',
+    'Decode': '解码',
+    'Base64': 'Base64',
+    'URL': 'URL',
+    'Unicode': 'Unicode',
+    'HTML Entity': 'HTML 实体',
+    'XML Entity': 'XML 实体',
+    'Input': '输入',
+    'Output': '输出',
+    'Clear Input': '清空输入',
+    'Copy Output': '复制输出',
   }
 };
 

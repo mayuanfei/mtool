@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Code2, QrCode, Settings, Key, Database, FileText, PanelLeftClose, PanelLeftOpen, SearchCode, FileDiff, Package } from 'lucide-react';
+import { Code2, QrCode, Settings, Key, Database, FileText, PanelLeftClose, PanelLeftOpen, SearchCode, FileDiff, Package, ArrowRightLeft } from 'lucide-react';
 import { useI18n } from '../i18n';
 
 interface SidebarProps {
@@ -13,6 +13,7 @@ interface SidebarProps {
   fileSearchEnabled: boolean;
   fileDiffEnabled: boolean;
   jarViewerEnabled: boolean;
+  encoderEnabled: boolean;
   hasUpdate: boolean;
 }
 
@@ -45,7 +46,7 @@ function NavItem({ item, activePage, collapsed, onNavigate }: NavItemProps) {
   );
 }
 
-export function Sidebar({ activePage, onNavigate, jsonEnabled, qrEnabled, pwdEnabled, sqlInEnabled, mdEnabled, fileSearchEnabled, fileDiffEnabled, jarViewerEnabled, hasUpdate }: SidebarProps) {
+export function Sidebar({ activePage, onNavigate, jsonEnabled, qrEnabled, pwdEnabled, sqlInEnabled, mdEnabled, fileSearchEnabled, fileDiffEnabled, jarViewerEnabled, encoderEnabled, hasUpdate }: SidebarProps) {
   const { t } = useI18n();
 
   const [collapsed, setCollapsed] = useState(() => {
@@ -61,6 +62,7 @@ export function Sidebar({ activePage, onNavigate, jsonEnabled, qrEnabled, pwdEna
     ...(fileSearchEnabled ? [{ id: 'fileSearch', label: t('File Search'), icon: SearchCode }] : []),
     ...(fileDiffEnabled ? [{ id: 'fileDiff', label: t('File Compare'), icon: FileDiff }] : []),
     ...(jarViewerEnabled ? [{ id: 'jarViewer', label: t('Jar Viewer'), icon: Package }] : []),
+    ...(encoderEnabled ? [{ id: 'encoder', label: t('Encoder / Decoder'), icon: ArrowRightLeft }] : []),
     ...(mdEnabled ? [{ id: 'md', label: t('Markdown Editor'), icon: FileText }] : []),
     ...(jsonEnabled ? [{ id: 'json', label: t('JSON Formatter'), icon: Code2 }] : []),
     ...(qrEnabled ? [{ id: 'qr', label: t('Text to QR'), icon: QrCode }] : []),
