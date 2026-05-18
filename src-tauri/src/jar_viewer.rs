@@ -21,31 +21,12 @@ pub fn ensure_cfr(app_handle: &tauri::AppHandle) -> Result<PathBuf, String> {
     // 2. Resolve bundled CFR (with download fallback if not bundled)
     let bundled = resolve_bundled_cfr(app_handle)?;
 
-    // 3. Handle UNC paths for Java compatibility (VM scenarios)
-    let cfr_path = if is_unc_path(&bundled) {
-        copy_to_temp_if_needed(&bundled)?
-    } else {
-        bundled
-    };
+    // 3. Always copy CFR to local temp directory to ensure Java can read it,
+    // avoiding ClassNotFoundException on Windows UNC paths or network mapped drives (Z:\).
+    let cfr_path = copy_to_temp_if_needed(&bundled)?;
 
     let _ = CFR_PATH.set(cfr_path.clone());
     Ok(cfr_path)
-}
-
-fn is_unc_path(path: &Path) -> bool {
-    #[cfg(windows)]
-    {
-        use std::path::{Component, Prefix};
-        match path.components().next() {
-            Some(Component::Prefix(p)) => matches!(p.kind(), Prefix::UNC(_, _) | Prefix::VerbatimUNC(_, _)),
-            _ => false,
-        }
-    }
-    #[cfg(not(windows))]
-    {
-        let _ = path;
-        false
-    }
 }
 
 fn verify_sha256(path: &Path) -> bool {
@@ -88,6 +69,9 @@ fn resolve_bundled_cfr(app_handle: &tauri::AppHandle) -> Result<PathBuf, String>
 
 fn copy_to_temp_if_needed(src: &Path) -> Result<PathBuf, String> {
     let dest = std::env::temp_dir().join("mtool_cfr_0.152.jar");
+    if src == dest {
+        return Ok(dest);
+    }
     if !verify_sha256(&dest) {
         fs::copy(src, &dest).map_err(|e| format!("Failed to copy CFR to temp for UNC support: {}", e))?;
     }

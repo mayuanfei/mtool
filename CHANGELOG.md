@@ -8,6 +8,8 @@
   - 修复「清空」按钮提示文字的硬编码英文问题，接入 i18n 国际化。
 - **文本对比 (FileDiff)**:
   - 移除 Tauri 2 环境下不再执行的浏览器原生 `FileReader` 拖放死代码，仅保留纯文本拖放逻辑，精简代码结构。
+- **JAR 查看器 (JarViewer)**:
+  - 彻底解决 Windows 虚拟机网络映射盘 (Z:) 或 UNC 路径下执行反编译时抛出 `ClassNotFoundException: org.benf.cfr.reader.Main` 的错误。现无条件将 CFR 工具包复制到本地 C 盘临时目录执行，消除网络盘类加载器权限障碍。
 
 ## [1.0.7]
 
