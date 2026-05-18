@@ -248,31 +248,11 @@ function FilePanel({ side, fileName, content, onFileOpen, onFileError }: FilePan
     e.stopPropagation();
     setDragOver(false);
 
-    // Try to read dropped text first
     const text = e.dataTransfer.getData('text/plain');
     if (text) {
       onFileOpen(t('Pasted Text'), text);
-      return;
     }
-
-    // For drag-and-drop from OS, files are read via the browser File API
-    const files = Array.from(e.dataTransfer.files);
-    if (files.length > 0) {
-      const file = files[0];
-      if (!isTextFile(file.name)) return;
-      if (file.size > 10 * 1024 * 1024) {
-        onFileError?.(t('File size exceeds 10MB limit'));
-        return;
-      }
-      const reader = new FileReader();
-      reader.onload = () => {
-        if (typeof reader.result === 'string') {
-          onFileOpen(file.name, reader.result);
-        }
-      };
-      reader.readAsText(file);
-    }
-  }, [onFileOpen, onFileError, t]);
+  }, [onFileOpen, t]);
 
   const handleOpenFile = useCallback(async () => {
     try {
