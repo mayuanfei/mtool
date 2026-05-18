@@ -93,6 +93,7 @@ const translations = {
     'Build SQL IN clause from column values.': 'Build SQL IN clause from column values.',
     
     // Settings
+    'Index build already in progress': 'Index build already in progress',
     'Configure MTOOL behaviors and active utilities.': 'Configure MTOOL behaviors and active utilities.',
     'Utility Configuration': 'Utility Configuration',
     'Parse, validate, and beautify raw JSON payloads.': 'Parse, validate, and beautify raw JSON payloads.',
@@ -304,6 +305,7 @@ const translations = {
     'Build SQL IN clause from column values.': '将一列值组装为 SQL IN 子句。',
     
     // Settings
+    'Index build already in progress': '索引重建正在进行中',
     'Configure MTOOL behaviors and active utilities.': '配置 MTOOL 的行为和启用的工具。',
     'Utility Configuration': '工具配置',
     'Parse, validate, and beautify raw JSON payloads.': '解析、验证并美化原始 JSON 文本。',

@@ -237,7 +237,9 @@ pub async fn read_local_class(app_handle: tauri::AppHandle, path: String) -> Res
                     metadata.len() / 1024 / 1024
                 ));
             }
-            fs::read_to_string(path_obj).map_err(|e| e.to_string())
+            fs::read_to_string(path_obj)
+                .map(|s| s.replace("\r\n", "\n"))
+                .map_err(|e| e.to_string())
         }
     })
     .await

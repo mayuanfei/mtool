@@ -102,7 +102,10 @@ export function SettingsPage({ toolsEnabled, toggleTool, activePage, setActivePa
                   } catch (e) {
                     console.error(e);
                     toggleTool('fileSearch', !next);
-                    setToggleError(`${t('Failed')}: ${String(e)}`);
+                    const errMsg = String(e) === 'Index build already in progress' 
+                      ? t('Index build already in progress') 
+                      : String(e);
+                    setToggleError(`${t('Failed')}: ${errMsg}`);
                     setTimeout(() => setToggleError(null), 3000);
                   } finally {
                     setIsProcessing(false);
