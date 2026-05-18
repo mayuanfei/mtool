@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { ArrowRightLeft, Copy, Trash2, ArrowDown } from 'lucide-react';
+import { ArrowRightLeft, Copy, Trash2, ArrowDown, Check } from 'lucide-react';
 import { useI18n } from '../i18n';
 
 type Mode = 'base64' | 'url' | 'unicode' | 'html' | 'xml';
@@ -10,6 +10,7 @@ export function EncoderDecoder() {
   const [input, setInput] = useState('');
   const [output, setOutput] = useState('');
   const [error, setError] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
 
   const handleEncode = () => {
     setError(null);
@@ -74,6 +75,8 @@ export function EncoderDecoder() {
     if (!output) return;
     try {
       await navigator.clipboard.writeText(output);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
     } catch (err) {
       console.error('Failed to copy', err);
     }
@@ -115,14 +118,14 @@ export function EncoderDecoder() {
           ))}
         </div>
 
-        <div className="flex-1 flex flex-col gap-4 min-h-0">
+        <div className="flex-1 flex gap-4 min-h-0">
           
           {/* Input Panel */}
           <div className="flex-1 flex flex-col min-h-0 border th-border rounded-xl overflow-hidden shadow-sm th-bg-card">
             <div className="px-4 py-3 border-b th-border th-bg-surface-h flex items-center justify-between">
               <span className="font-semibold text-sm th-text-2 uppercase tracking-tight">{t('Input')}</span>
               <button 
-                onClick={() => setInput('')}
+                onClick={() => { setInput(''); setOutput(''); setError(null); }}
                 className="p-1.5 th-text-muted hover:text-rose-400 hover:bg-rose-500/10 rounded transition-colors"
                 title={t('Clear Input')}
               >
@@ -132,27 +135,27 @@ export function EncoderDecoder() {
             <textarea
               value={input}
               onChange={(e) => setInput(e.target.value)}
-              className="flex-1 w-full p-4 bg-transparent border-none focus:ring-0 th-text resize-none font-mono text-sm leading-relaxed"
+              className="flex-1 w-full p-4 bg-transparent border-none focus:ring-0 th-text placeholder:text-gray-500/40 resize-none font-mono text-sm leading-relaxed"
               placeholder="..."
               spellCheck={false}
             />
           </div>
 
-          {/* Action Bar */}
-          <div className="flex justify-center gap-4 shrink-0 py-1">
+          {/* Action Center */}
+          <div className="flex flex-col justify-center gap-4 shrink-0 px-2">
             <button
               onClick={handleEncode}
-              className="flex items-center justify-center gap-2 px-8 py-3 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl shadow-lg transition-all active:scale-95"
+              className="flex flex-col items-center justify-center gap-1 w-24 py-3 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl shadow-lg transition-all active:scale-95"
             >
-              <span className="font-bold">{t('Encode')}</span>
-              <ArrowDown className="w-5 h-5" />
+              <span className="font-bold text-sm">{t('Encode')}</span>
+              <ArrowDown className="w-4 h-4 -rotate-90" />
             </button>
             <button
               onClick={handleDecode}
-              className="flex items-center justify-center gap-2 px-8 py-3 th-bg-surface th-hover-surface border th-border th-text-2 rounded-xl shadow-sm transition-all active:scale-95"
+              className="flex flex-col items-center justify-center gap-1 w-24 py-3 th-bg-surface th-hover-surface border th-border th-text-2 rounded-xl shadow-sm transition-all active:scale-95"
             >
-              <span className="font-bold">{t('Decode')}</span>
-              <ArrowDown className="w-5 h-5" />
+              <ArrowDown className="w-4 h-4 -rotate-90" />
+              <span className="font-bold text-sm">{t('Decode')}</span>
             </button>
           </div>
 
@@ -162,22 +165,22 @@ export function EncoderDecoder() {
               <span className="font-semibold text-sm th-text-2 uppercase tracking-tight">{t('Output')}</span>
               <button 
                 onClick={copyOutput}
-                className="p-1.5 th-text-muted hover:text-emerald-400 hover:bg-emerald-500/10 rounded transition-colors"
-                title={t('Copy Output')}
+                className={`p-1.5 rounded transition-colors ${copied ? 'text-emerald-400 bg-emerald-500/10' : 'th-text-muted hover:text-emerald-400 hover:bg-emerald-500/10'}`}
+                title={copied ? t('Copied!') : t('Copy Output')}
               >
-                <Copy className="w-4 h-4" />
+                {copied ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
               </button>
             </div>
             <div className="flex-1 relative">
               <textarea
                 value={output}
                 readOnly
-                className="absolute inset-0 w-full h-full p-4 bg-transparent border-none focus:ring-0 th-text resize-none font-mono text-sm leading-relaxed"
+                className="absolute inset-0 w-full h-full p-4 bg-transparent border-none focus:ring-0 th-text placeholder:text-gray-500/40 resize-none font-mono text-sm leading-relaxed"
                 placeholder="..."
                 spellCheck={false}
               />
               {error && (
-                <div className="absolute bottom-4 left-4 right-4 p-3 bg-rose-500/10 border border-rose-500/20 text-rose-400 text-sm rounded-lg backdrop-blur-sm">
+                <div className="absolute bottom-4 left-4 right-4 p-3 bg-rose-500/10 border border-rose-500/20 text-rose-400 text-sm rounded-lg backdrop-blur-sm shadow-sm break-words">
                   {error}
                 </div>
               )}

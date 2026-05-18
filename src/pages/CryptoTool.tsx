@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Lock, Copy, Trash2, ArrowDown, ShieldAlert } from 'lucide-react';
+import { Lock, Copy, Trash2, ArrowDown, ShieldAlert, Check } from 'lucide-react';
 import { useI18n } from '../i18n';
 import CryptoJS from 'crypto-js';
 import { sm2, sm3, sm4 } from 'sm-crypto';
@@ -29,6 +29,7 @@ export function CryptoTool() {
   const [privateKey, setPrivateKey] = useState('');
 
   const [error, setError] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
 
   const categories: { value: Category; label: string }[] = [
     { value: 'hash', label: t('Hash / Digest') },
@@ -186,6 +187,8 @@ export function CryptoTool() {
     if (!output) return;
     try {
       await navigator.clipboard.writeText(output);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
     } catch (err) {
       console.error('Failed to copy', err);
     }
@@ -334,7 +337,7 @@ export function CryptoTool() {
             <div className="px-4 py-3 border-b th-border th-bg-surface-h flex items-center justify-between">
               <span className="font-semibold text-sm th-text-2 uppercase tracking-tight">{t('Input')}</span>
               <button 
-                onClick={() => setInput('')}
+                onClick={() => { setInput(''); setOutput(''); setError(null); }}
                 className="p-1.5 th-text-muted hover:text-rose-400 hover:bg-rose-500/10 rounded transition-colors"
                 title={t('Clear Input')}
               >
@@ -344,7 +347,7 @@ export function CryptoTool() {
             <textarea
               value={input}
               onChange={(e) => setInput(e.target.value)}
-              className="flex-1 w-full p-4 bg-transparent border-none focus:ring-0 th-text resize-none font-mono text-sm leading-relaxed"
+              className="flex-1 w-full p-4 bg-transparent border-none focus:ring-0 th-text placeholder:text-gray-500/40 resize-none font-mono text-sm leading-relaxed"
               placeholder="..."
               spellCheck={false}
             />
@@ -364,7 +367,7 @@ export function CryptoTool() {
                 onClick={() => handleAction(false)}
                 className="flex flex-col items-center justify-center gap-1 w-24 py-3 th-bg-surface th-hover-surface border th-border th-text-2 rounded-xl shadow-sm transition-all active:scale-95"
               >
-                <ArrowDown className="w-4 h-4 rotate-90" />
+                <ArrowDown className="w-4 h-4 -rotate-90" />
                 <span className="font-bold text-sm">{t('Decrypt')}</span>
               </button>
             )}
@@ -376,17 +379,17 @@ export function CryptoTool() {
               <span className="font-semibold text-sm th-text-2 uppercase tracking-tight">{t('Output')}</span>
               <button 
                 onClick={copyOutput}
-                className="p-1.5 th-text-muted hover:text-emerald-400 hover:bg-emerald-500/10 rounded transition-colors"
-                title={t('Copy Output')}
+                className={`p-1.5 rounded transition-colors ${copied ? 'text-emerald-400 bg-emerald-500/10' : 'th-text-muted hover:text-emerald-400 hover:bg-emerald-500/10'}`}
+                title={copied ? t('Copied!') : t('Copy Output')}
               >
-                <Copy className="w-4 h-4" />
+                {copied ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
               </button>
             </div>
             <div className="flex-1 relative">
               <textarea
                 value={output}
                 readOnly
-                className="absolute inset-0 w-full h-full p-4 bg-transparent border-none focus:ring-0 th-text resize-none font-mono text-sm leading-relaxed"
+                className="absolute inset-0 w-full h-full p-4 bg-transparent border-none focus:ring-0 th-text placeholder:text-gray-500/40 resize-none font-mono text-sm leading-relaxed"
                 placeholder="..."
                 spellCheck={false}
               />
