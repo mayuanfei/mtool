@@ -15,7 +15,11 @@ const EXPECTED_SHA256: &str = "f686e8f3ded377d7bc87d216a90e9e9512df4156e75b06c65
 pub fn ensure_cfr(app_handle: &tauri::AppHandle) -> Result<PathBuf, String> {
     // 1. Check OnceLock for cached path
     if let Some(path) = CFR_PATH.get() {
-        return Ok(path.clone());
+        // 边缘防护机制：如果应用运行期间临时文件夹被清理软件清空，
+        // 检测到文件丢失后跳过缓存，自动从自带资源重新拷贝恢复。
+        if path.exists() {
+            return Ok(path.clone());
+        }
     }
 
     // 2. Resolve bundled CFR (with download fallback if not bundled)
