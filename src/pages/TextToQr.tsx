@@ -144,7 +144,7 @@ export function TextToQr() {
                <button className={`p-2 rounded transition-colors border ${pasteError ? 'text-red-400 border-red-500/30 bg-red-500/10' : 'th-text-muted hover:th-text th-hover-surface border-transparent'}`} title={pasteError ? t('Failed') : t('Paste from Clipboard')} onClick={async () => { try { const text = await invoke<string>('read_text_from_clipboard'); setPayload(text); } catch(e){ console.error(e); setPasteError(true); setTimeout(() => setPasteError(false), 2000); } }}>
                   {pasteError ? <XCircle className="w-4 h-4" /> : <Clipboard className="w-4 h-4" />}
                </button>
-               <button className="p-2 th-text-muted hover:text-red-400 th-hover-surface rounded transition-colors border border-transparent" title="Clear payload" onClick={() => setPayload('')}>
+               <button className="p-2 th-text-muted hover:text-red-400 th-hover-surface rounded transition-colors border border-transparent" title={t('Clear')} onClick={() => setPayload('')}>
                   <Trash2 className="w-4 h-4" />
                </button>
             </div>
