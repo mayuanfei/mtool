@@ -658,6 +658,39 @@ fn handle_fs_event(event: &notify::Event, db_path: &str, conn: &mut Option<rusql
 }
 
 // ---------------------------------------------------------------------------
+// 总公司专有加解密 DLL 调用
+// ---------------------------------------------------------------------------
+#[tauri::command]
+fn hq_crypto(action: String, payload: String) -> Result<String, String> {
+    #[cfg(target_os = "windows")]
+    {
+        // 提示：要真实调用 DLL，请在 Cargo.toml 中加入 libloading 依赖，例如 `libloading = "0.8"`
+        // 并在下面补全真实的函数签名，比如：
+        // type EncryptFunc = unsafe extern "C" fn(*const i8, *mut i8) -> i32;
+        // 
+        // 示例加载代码：
+        // unsafe {
+        //     let lib = libloading::Library::new("C:\\Windows\\System32\\your_hq.dll")
+        //         .map_err(|e| format!("无法加载总公司 DLL: {}", e))?;
+        //     
+        //     if action == "encrypt" {
+        //         let func: libloading::Symbol<EncryptFunc> = lib.get(b"HqEncrypt\0")
+        //             .map_err(|e| format!("找不到加密函数: {}", e))?;
+        //         // TODO: 转换 Rust 字符串到 C 字符串并调用，再转回 Rust 字符串
+        //     } else {
+        //         // ... 解密调用
+        //     }
+        // }
+        
+        Err("当前处于 Windows 环境，由于未配置真实 DLL 签名，返回测试数据。你需要提供具体的 DLL 函数签名才能完成最终开发。".to_string())
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        Err("当前系统不支持调用总公司的 Windows DLL，请在 Windows 环境下使用该功能。".to_string())
+    }
+}
+
+// ---------------------------------------------------------------------------
 // 应用入口
 // ---------------------------------------------------------------------------
 
@@ -713,6 +746,7 @@ pub fn run() {
             jar_viewer::list_jar_entries,
             jar_viewer::read_jar_entry,
             jar_viewer::read_local_class,
+            hq_crypto,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")

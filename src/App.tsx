@@ -11,13 +11,14 @@ import { FileSearch } from './pages/FileSearch';
 import { FileDiff } from './pages/FileDiff';
 import { JarViewer } from './pages/JarViewer';
 import { EncoderDecoder } from './pages/EncoderDecoder';
+import { CryptoTool } from './pages/CryptoTool';
 import { useI18n } from './i18n';
 import { useUpdater } from './updater';
 
-export type ToolKey = 'json' | 'qr' | 'pwd' | 'sqlIn' | 'md' | 'fileSearch' | 'fileDiff' | 'jarViewer' | 'encoder';
+export type ToolKey = 'json' | 'qr' | 'pwd' | 'sqlIn' | 'md' | 'fileSearch' | 'fileDiff' | 'jarViewer' | 'encoder' | 'crypto';
 export type ToolsEnabled = Record<ToolKey, boolean>;
 
-const DEFAULT_TOOLS: ToolsEnabled = { json: true, qr: true, pwd: true, sqlIn: true, md: true, fileSearch: true, fileDiff: true, jarViewer: true, encoder: true };
+const DEFAULT_TOOLS: ToolsEnabled = { json: true, qr: true, pwd: true, sqlIn: true, md: true, fileSearch: true, fileDiff: true, jarViewer: true, encoder: true, crypto: true };
 
 export default function App() {
   const [activePage, setActivePage] = useState(() => {
@@ -75,6 +76,7 @@ export default function App() {
       fileDiff: getOld('mtool_filediff_enabled'),
       jarViewer: getOld('mtool_jarviewer_enabled'),
       encoder: getOld('mtool_encoder_enabled'),
+      crypto: getOld('mtool_crypto_enabled'),
     };
   });
 
@@ -115,6 +117,7 @@ export default function App() {
         fileDiffEnabled={toolsEnabled.fileDiff}
         jarViewerEnabled={toolsEnabled.jarViewer}
         encoderEnabled={toolsEnabled.encoder}
+        cryptoEnabled={toolsEnabled.crypto}
         hasUpdate={hasUpdate}
       />
       
@@ -130,6 +133,7 @@ export default function App() {
           {activePage === 'fileDiff' && toolsEnabled.fileDiff && <FileDiff />}
           {activePage === 'jarViewer' && toolsEnabled.jarViewer && <JarViewer />}
           {activePage === 'encoder' && toolsEnabled.encoder && <EncoderDecoder />}
+          {activePage === 'crypto' && toolsEnabled.crypto && <CryptoTool />}
           {activePage === 'settings' && (
             <SettingsPage 
               toolsEnabled={toolsEnabled}
@@ -148,7 +152,8 @@ export default function App() {
            !(activePage === 'fileSearch' && toolsEnabled.fileSearch) &&
            !(activePage === 'fileDiff' && toolsEnabled.fileDiff) &&
            !(activePage === 'jarViewer' && toolsEnabled.jarViewer) &&
-           !(activePage === 'encoder' && toolsEnabled.encoder) && (
+           !(activePage === 'encoder' && toolsEnabled.encoder) &&
+           !(activePage === 'crypto' && toolsEnabled.crypto) && (
              <div className="flex items-center justify-center h-full th-text-muted font-medium">{t('Select a tool from the sidebar')}</div>
           )}
         </main>
