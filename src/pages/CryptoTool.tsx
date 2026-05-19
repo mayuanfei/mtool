@@ -73,8 +73,16 @@ export function CryptoTool() {
   const [privateKey, setPrivateKey] = useState('');
 
   // For HQ DLL
-  const [jarPath, setJarPath] = useState('');
-  const [bizType, setBizType] = useState('A001');
+  const [jarPath, setJarPath] = useState(() => localStorage.getItem('mtool_hq_jar') || '');
+  const [bizType, setBizType] = useState(() => localStorage.getItem('mtool_hq_param') || 'A001');
+
+  useEffect(() => {
+    localStorage.setItem('mtool_hq_jar', jarPath);
+  }, [jarPath]);
+
+  useEffect(() => {
+    localStorage.setItem('mtool_hq_param', bizType);
+  }, [bizType]);
 
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
@@ -490,20 +498,13 @@ export function CryptoTool() {
               </div>
             </div>
             <div className="flex items-center gap-2">
-              <span className="font-semibold whitespace-nowrap">{t('Business Type')}</span>
-              <CustomSelect 
+              <span className="font-semibold whitespace-nowrap">{t('Custom Parameter')}</span>
+              <input 
+                type="text"
                 value={bizType}
-                onChange={(val: string) => setBizType(val)}
-                options={[
-                  { value: 'A001', label: t('Name (A001)') },
-                  { value: 'B001', label: t('PAN / Card No (B001)') },
-                  { value: 'C001', label: t('ID Card (C001)') },
-                  { value: 'D001', label: t('Phone / Tel (D001)') },
-                  { value: 'E001', label: t('Address (E001)') },
-                  { value: 'F001', label: t('Track / Bin (F001)') },
-                ]}
-                className="text-xs bg-indigo-500/10 px-3 py-1.5 rounded outline-none border border-indigo-500/20 hover:border-indigo-500/40 transition-colors cursor-pointer"
-                menuClassName="left-0 min-w-[12rem] bg-indigo-950/90 border-indigo-500/30"
+                onChange={(e) => setBizType(e.target.value)}
+                placeholder="A001"
+                className="w-48 bg-indigo-500/10 border-b border-indigo-500/30 px-3 py-1 outline-none text-xs text-indigo-300 transition-colors focus:bg-indigo-500/20"
               />
             </div>
           </div>
