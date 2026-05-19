@@ -7,7 +7,7 @@ import JSEncrypt from 'jsencrypt';
 import { invoke } from '@tauri-apps/api/core';
 
 type Category = 'hash' | 'symmetric' | 'asymmetric' | 'hq';
-type Algorithm = 'MD5' | 'SHA1' | 'SHA256' | 'SM3' | 'AES' | 'DES' | 'SM4' | 'RSA' | 'SM2' | 'HQ_DLL';
+type Algorithm = 'MD5' | 'SHA1' | 'SHA256' | 'SM3' | 'AES' | 'DES' | '3DES' | 'SM4' | 'RSA' | 'SM2' | 'HQ_DLL';
 type DataFormat = 'UTF8' | 'HEX' | 'BASE64';
 
 function CustomSelect({ options, value, onChange, disabled, className, menuClassName }: any) {
@@ -84,7 +84,7 @@ export function CryptoTool() {
 
   const algorithms: Record<Category, Algorithm[]> = {
     hash: ['MD5', 'SHA1', 'SHA256', 'SM3'],
-    symmetric: ['AES', 'DES', 'SM4'],
+    symmetric: ['AES', 'DES', '3DES', 'SM4'],
     asymmetric: ['RSA', 'SM2'],
     hq: ['HQ_DLL'],
   };
@@ -162,7 +162,7 @@ export function CryptoTool() {
       else if (category === 'symmetric') {
         if (!cryptoKey) throw new Error(t('Key is required.'));
         
-        if (algorithm === 'AES' || algorithm === 'DES') {
+        if (algorithm === 'AES' || algorithm === 'DES' || algorithm === '3DES') {
           const cfg: any = { mode: getCryptoJsMode(), padding: getCryptoJsPadding() };
           if (mode === 'CBC') {
             if (!iv) throw new Error(t('IV is required for CBC mode.'));
@@ -171,7 +171,7 @@ export function CryptoTool() {
           const keyWa = parseData(cryptoKey, keyFormat);
           const inputWa = parseData(input, inputFormat);
           
-          let engine = algorithm === 'AES' ? CryptoJS.AES : CryptoJS.DES;
+          let engine = algorithm === 'AES' ? CryptoJS.AES : algorithm === 'DES' ? CryptoJS.DES : CryptoJS.TripleDES;
 
           if (isEncrypt) {
             const encrypted = engine.encrypt(inputWa, keyWa, cfg);
