@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react';
-import { Lock, Copy, Trash2, ArrowDown, ShieldAlert, Check, ChevronDown } from 'lucide-react';
+import { Lock, Copy, Trash2, ArrowDown, Check, ChevronDown } from 'lucide-react';
 import { useI18n } from '../i18n';
 import CryptoJS from 'crypto-js';
 import { sm2, sm3, sm4 } from 'sm-crypto';
@@ -71,6 +71,10 @@ export function CryptoTool() {
   // For Asymmetric
   const [publicKey, setPublicKey] = useState('');
   const [privateKey, setPrivateKey] = useState('');
+
+  // For HQ DLL
+  const [jarPath, setJarPath] = useState('');
+  const [bizType, setBizType] = useState('A001');
 
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
@@ -274,12 +278,15 @@ export function CryptoTool() {
       else if (category === 'hq') {
         // Call Rust Backend Command
         try {
+          if (!jarPath) throw new Error(t('Please select the HQ Jar file.'));
           res = await invoke('hq_crypto', { 
-            action: isEncrypt ? 'encrypt' : 'decrypt',
-            payload: input 
+            action: isEncrypt ? 'enc' : 'dec',
+            payload: input,
+            jarPath,
+            bizType
           });
         } catch (err: any) {
-          throw new Error(`DLL Call Error: ${err}`);
+          throw new Error(`HQ DLL Error: ${err}`);
         }
       }
 
@@ -341,21 +348,23 @@ export function CryptoTool() {
         </div>
 
         {/* Algorithm Selector */}
-        <div className="flex flex-wrap gap-2 flex-shrink-0">
-          {algorithms[category].map((a) => (
-            <button
-              key={a}
-              onClick={() => handleAlgorithmChange(a)}
-              className={`px-3 py-1.5 rounded-md text-xs font-medium transition-colors border ${
-                algorithm === a 
-                  ? 'bg-indigo-500/20 text-indigo-400 border-indigo-500/30' 
-                  : 'th-bg-surface th-text-3 border-transparent hover:border-indigo-500/20'
-              }`}
-            >
-              {a}
-            </button>
-          ))}
-        </div>
+        {category !== 'hq' && (
+          <div className="flex flex-wrap gap-2 flex-shrink-0">
+            {algorithms[category].map((a) => (
+              <button
+                key={a}
+                onClick={() => handleAlgorithmChange(a)}
+                className={`px-3 py-1.5 rounded-md text-xs font-medium transition-colors border ${
+                  algorithm === a 
+                    ? 'bg-indigo-500/20 text-indigo-400 border-indigo-500/30' 
+                    : 'th-bg-surface th-text-3 border-transparent hover:border-indigo-500/20'
+                }`}
+              >
+                {a}
+              </button>
+            ))}
+          </div>
+        )}
 
         {/* Configuration Area */}
         {category === 'symmetric' && (
@@ -456,9 +465,47 @@ export function CryptoTool() {
         )}
 
         {category === 'hq' && (
-          <div className="flex items-center gap-3 shrink-0 border border-indigo-500/20 bg-indigo-500/5 rounded-xl p-4 text-sm text-indigo-400">
-            <ShieldAlert className="w-5 h-5 flex-shrink-0" />
-            <span>{t('This feature requires the HQ DLL installed in C:\\Windows\\System32. Only available on Windows environments.')}</span>
+          <div className="flex flex-col gap-3 shrink-0 border border-indigo-500/20 bg-indigo-500/5 rounded-xl p-4 text-sm text-indigo-400">
+            <div className="flex items-center gap-2">
+              <span className="font-semibold whitespace-nowrap">{t('Jar Path')}</span>
+              <div className="flex items-center gap-2 flex-1">
+                <input 
+                  type="text"
+                  value={jarPath}
+                  readOnly
+                  placeholder={t('Select the ums-sm4.jar file (Natives directory must be present)')}
+                  className="flex-1 bg-transparent border-b border-indigo-500/30 px-2 py-1 outline-none text-xs text-indigo-300 min-w-0 truncate"
+                />
+                <button 
+                  onClick={async () => {
+                    try {
+                      const path = await invoke('select_hq_jar');
+                      setJarPath(path as string);
+                    } catch (e) {}
+                  }}
+                  className="px-3 py-1 bg-indigo-500/20 rounded hover:bg-indigo-500/30 transition-colors text-xs cursor-pointer whitespace-nowrap"
+                >
+                  {t('Browse')}
+                </button>
+              </div>
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="font-semibold whitespace-nowrap">{t('Business Type')}</span>
+              <CustomSelect 
+                value={bizType}
+                onChange={(val: string) => setBizType(val)}
+                options={[
+                  { value: 'A001', label: t('Name (A001)') },
+                  { value: 'B001', label: t('PAN / Card No (B001)') },
+                  { value: 'C001', label: t('ID Card (C001)') },
+                  { value: 'D001', label: t('Phone / Tel (D001)') },
+                  { value: 'E001', label: t('Address (E001)') },
+                  { value: 'F001', label: t('Track / Bin (F001)') },
+                ]}
+                className="text-xs bg-indigo-500/10 px-3 py-1.5 rounded outline-none border border-indigo-500/20 hover:border-indigo-500/40 transition-colors cursor-pointer"
+                menuClassName="left-0 min-w-[12rem] bg-indigo-950/90 border-indigo-500/30"
+              />
+            </div>
           </div>
         )}
 
