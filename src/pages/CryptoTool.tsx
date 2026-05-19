@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react';
-import { Lock, Copy, Trash2, ArrowDown, Check, ChevronDown } from 'lucide-react';
+import { Lock, Copy, Trash2, ArrowDown, Check, ChevronDown, XCircle } from 'lucide-react';
 import { useI18n } from '../i18n';
 import CryptoJS from 'crypto-js';
 import { sm2, sm3, sm4 } from 'sm-crypto';
@@ -10,7 +10,21 @@ type Category = 'hash' | 'symmetric' | 'asymmetric' | 'hq';
 type Algorithm = 'MD5' | 'SHA1' | 'SHA256' | 'SM3' | 'AES' | 'DES' | '3DES' | 'SM4' | 'RSA' | 'SM2' | 'HQ_DLL';
 type DataFormat = 'UTF8' | 'HEX' | 'BASE64';
 
-function CustomSelect({ options, value, onChange, disabled, className, menuClassName }: any) {
+interface SelectOption<T extends string> {
+  value: T;
+  label: string;
+}
+
+interface CustomSelectProps<T extends string> {
+  options: SelectOption<T>[];
+  value: T;
+  onChange: (val: T) => void;
+  disabled?: boolean;
+  className?: string;
+  menuClassName?: string;
+}
+
+function CustomSelect<T extends string>({ options, value, onChange, disabled, className, menuClassName }: CustomSelectProps<T>) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
   
@@ -30,12 +44,12 @@ function CustomSelect({ options, value, onChange, disabled, className, menuClass
         onClick={() => setOpen(!open)}
         className={`flex items-center justify-between gap-2 bg-transparent outline-none ${disabled ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'} ${className}`}
       >
-        <span>{options.find((o: any) => o.value === value)?.label || value}</span>
+        <span>{options.find((o) => o.value === value)?.label || value}</span>
         <ChevronDown className="w-3 h-3 opacity-60" />
       </button>
       {open && !disabled && (
         <div className={`absolute z-50 mt-1 th-bg-surface border th-border rounded-lg shadow-xl overflow-hidden py-1 ${menuClassName || 'w-full left-0 min-w-[8rem]'}`}>
-          {options.map((o: any) => (
+          {options.map((o) => (
             <button
               key={o.value}
               type="button"
@@ -86,6 +100,8 @@ export function CryptoTool() {
 
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+  const [copyError, setCopyError] = useState(false);
+  const [isLoading, setIsLoading] = useState(false);
 
   const categories: { value: Category; label: string }[] = [
     { value: 'hash', label: t('Hash / Digest') },
@@ -130,7 +146,8 @@ export function CryptoTool() {
     return CryptoJS.enc.Utf8.parse(data);
   };
 
-  const stringifyData = (wordArray: any, format: DataFormat) => {
+  const stringifyData = (wordArray: CryptoJS.lib.WordArray | undefined, format: DataFormat) => {
+    if (!wordArray) return '';
     if (format === 'HEX') return CryptoJS.enc.Hex.stringify(wordArray);
     if (format === 'BASE64') return CryptoJS.enc.Base64.stringify(wordArray);
     return CryptoJS.enc.Utf8.stringify(wordArray);
@@ -144,6 +161,12 @@ export function CryptoTool() {
   };
 
   const handleAction = async (isEncrypt: boolean) => {
+    if (!input) {
+      setError(t('Payload is empty'));
+      return;
+    }
+    if (isLoading) return;
+    setIsLoading(true);
     setError(null);
     
     // Provide visual feedback for recalculation by temporarily clearing the output
@@ -203,7 +226,7 @@ export function CryptoTool() {
         } 
         else if (algorithm === 'SM4') {
           const keyHex = toHex(cryptoKey, keyFormat);
-          const cfg: any = {};
+          const cfg: Record<string, string> = {};
           if (mode === 'CBC') {
             if (!iv) throw new Error(t('IV is required for CBC mode.'));
             cfg.iv = toHex(iv, ivFormat);
@@ -278,7 +301,7 @@ export function CryptoTool() {
             res = sm2.doEncrypt(input, publicKey, 1); // 1 for cipherMode C1C3C2
           } else {
             if (!privateKey) throw new Error(t('Private Key is required for decryption.'));
-            res = sm2.doDecrypt(input, privateKey, 1, { output: 'utf8' as any });
+            res = sm2.doDecrypt(input, privateKey, 1, { output: 'string' });
           }
         }
       }
@@ -293,14 +316,16 @@ export function CryptoTool() {
             jarPath,
             bizType
           });
-        } catch (err: any) {
-          throw new Error(`HQ DLL Error: ${err}`);
+        } catch (err: unknown) {
+          throw new Error(`HQ DLL Error: ${err instanceof Error ? err.message : String(err)}`);
         }
       }
 
       setOutput(res);
-    } catch (err: any) {
-      setError(err.message || String(err));
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setIsLoading(false);
     }
   };
 
@@ -312,19 +337,32 @@ export function CryptoTool() {
       setTimeout(() => setCopied(false), 2000);
     } catch (err) {
       console.error('Failed to copy', err);
+      setCopyError(true);
+      setTimeout(() => setCopyError(false), 2000);
     }
   };
 
-  const generateKeys = () => {
-    if (algorithm === 'RSA') {
-      const encryptor = new JSEncrypt({ default_key_size: '1024' });
-      encryptor.getKey();
-      setPublicKey(encryptor.getPublicKey());
-      setPrivateKey(encryptor.getPrivateKey());
-    } else if (algorithm === 'SM2') {
-      const keypair = sm2.generateKeyPairHex();
-      setPublicKey(keypair.publicKey);
-      setPrivateKey(keypair.privateKey);
+  const generateKeys = async () => {
+    if (isLoading) return;
+    setIsLoading(true);
+    try {
+      if (algorithm === 'RSA') {
+        await new Promise<void>((resolve) => {
+          setTimeout(() => {
+            const encryptor = new JSEncrypt({ default_key_size: '1024' });
+            encryptor.getKey();
+            setPublicKey(encryptor.getPublicKey());
+            setPrivateKey(encryptor.getPrivateKey());
+            resolve();
+          }, 10);
+        });
+      } else if (algorithm === 'SM2') {
+        const keypair = sm2.generateKeyPairHex();
+        setPublicKey(keypair.publicKey);
+        setPrivateKey(keypair.privateKey);
+      }
+    } finally {
+      setIsLoading(false);
     }
   };
 
@@ -444,7 +482,8 @@ export function CryptoTool() {
               <span className="text-xs font-semibold th-text-muted uppercase">{t('Keys Configuration')}</span>
               <button 
                 onClick={generateKeys}
-                className="text-xs text-indigo-400 hover:text-indigo-300 font-medium"
+                disabled={isLoading}
+                className={`text-xs font-medium transition-colors ${isLoading ? 'text-indigo-400/50 cursor-not-allowed' : 'text-indigo-400 hover:text-indigo-300'}`}
               >
                 {t('Auto Generate Key Pair')}
               </button>
@@ -544,9 +583,10 @@ export function CryptoTool() {
 
           {/* Action Center */}
           <div className="flex flex-col justify-center gap-4 shrink-0 px-2">
-            <button
+             <button
               onClick={() => handleAction(true)}
-              className="flex flex-col items-center justify-center gap-1 min-w-[6rem] px-3 py-3 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl shadow-lg transition-all active:scale-95 text-center"
+              disabled={isLoading}
+              className={`flex flex-col items-center justify-center gap-1 min-w-[6rem] px-3 py-3 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl shadow-lg transition-all text-center ${isLoading ? 'opacity-50 cursor-not-allowed' : 'active:scale-95'}`}
             >
               <span className="font-bold text-sm">
                 {category === 'hash' ? t('Hash') : category === 'asymmetric' ? t('Public Key Encrypt') : t('Encrypt')}
@@ -556,7 +596,8 @@ export function CryptoTool() {
             {category !== 'hash' && (
               <button
                 onClick={() => handleAction(false)}
-                className="flex flex-col items-center justify-center gap-1 min-w-[6rem] px-3 py-3 th-bg-surface th-hover-surface border th-border th-text-2 rounded-xl shadow-sm transition-all active:scale-95 text-center"
+                disabled={isLoading}
+                className={`flex flex-col items-center justify-center gap-1 min-w-[6rem] px-3 py-3 th-bg-surface th-hover-surface border th-border th-text-2 rounded-xl shadow-sm transition-all text-center ${isLoading ? 'opacity-50 cursor-not-allowed' : 'active:scale-95'}`}
               >
                 <ArrowDown className="w-4 h-4 -rotate-90" />
                 <span className="font-bold text-sm">
@@ -581,10 +622,10 @@ export function CryptoTool() {
               </div>
               <button 
                 onClick={copyOutput}
-                className={`p-1.5 rounded transition-colors ${copied ? 'text-emerald-400 bg-emerald-500/10' : 'th-text-muted hover:text-emerald-400 hover:bg-emerald-500/10'}`}
-                title={copied ? t('Copied!') : t('Copy Output')}
+                className={`p-1.5 rounded transition-colors ${copied ? 'text-emerald-400 bg-emerald-500/10' : copyError ? 'text-rose-400 bg-rose-500/10' : 'th-text-muted hover:text-emerald-400 hover:bg-emerald-500/10'}`}
+                title={copied ? t('Copied!') : copyError ? t('Failed') : t('Copy Output')}
               >
-                {copied ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
+                {copied ? <Check className="w-4 h-4" /> : copyError ? <XCircle className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
               </button>
             </div>
             <div className="flex-1 relative">

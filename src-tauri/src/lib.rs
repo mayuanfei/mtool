@@ -668,22 +668,62 @@ async fn hq_crypto(
     biz_type: String
 ) -> Result<String, String> {
     tauri::async_runtime::spawn_blocking(move || {
-        let output = std::process::Command::new("java")
+        let mut command = std::process::Command::new("java");
+        command
             .arg("-jar")
             .arg(&jar_path)
             .arg(&biz_type)
             .arg(&action)
             .arg(&payload)
-            .output()
-            .map_err(|e| format!("执行 java 命令失败: {}", e))?;
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped());
 
-        if output.status.success() {
-            let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
-            Ok(stdout)
-        } else {
-            let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
-            let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
-            Err(format!("HQ 库执行错误: {}\n{}", stderr, stdout))
+        #[cfg(windows)]
+        {
+            use std::os::windows::process::CommandExt;
+            const CREATE_NO_WINDOW: u32 = 0x08000000;
+            command.creation_flags(CREATE_NO_WINDOW);
+        }
+
+        let child = command
+            .spawn()
+            .map_err(|e| format!("Failed to execute 'java': {}", e))?;
+
+        let pid = child.id();
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let _ = tx.send(child.wait_with_output());
+        });
+
+        match rx.recv_timeout(std::time::Duration::from_secs(30)) {
+            Ok(Ok(output)) => {
+                if output.status.success() {
+                    let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
+                    Ok(stdout)
+                } else {
+                    let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+                    let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
+                    Err(format!("HQ 库执行错误: {}\n{}", stderr, stdout))
+                }
+            }
+            Ok(Err(e)) => Err(e.to_string()),
+            Err(_) => {
+                #[cfg(unix)]
+                if let Ok(pid_i32) = pid.try_into() {
+                    unsafe { libc::kill(pid_i32, libc::SIGKILL); }
+                }
+                #[cfg(windows)]
+                unsafe {
+                    use windows_sys::Win32::System::Threading::{OpenProcess, TerminateProcess, PROCESS_TERMINATE};
+                    use windows_sys::Win32::Foundation::CloseHandle;
+                    let handle = OpenProcess(PROCESS_TERMINATE, 0, pid);
+                    if handle != 0 as _ {
+                        TerminateProcess(handle, 1);
+                        CloseHandle(handle);
+                    }
+                }
+                Err("执行超时 (30s)，后台进程已被强制终止。".to_string())
+            }
         }
     })
     .await

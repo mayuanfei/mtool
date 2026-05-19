@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { ArrowRightLeft, Copy, Trash2, ArrowDown, Check } from 'lucide-react';
+import { ArrowRightLeft, Copy, Trash2, ArrowDown, Check, XCircle } from 'lucide-react';
 import { useI18n } from '../i18n';
 
 type Mode = 'base64' | 'url' | 'unicode' | 'html' | 'xml';
@@ -11,6 +11,7 @@ export function EncoderDecoder() {
   const [output, setOutput] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+  const [copyError, setCopyError] = useState(false);
 
   const handleEncode = () => {
     setError(null);
@@ -79,6 +80,8 @@ export function EncoderDecoder() {
       setTimeout(() => setCopied(false), 2000);
     } catch (err) {
       console.error('Failed to copy', err);
+      setCopyError(true);
+      setTimeout(() => setCopyError(false), 2000);
     }
   };
 
@@ -165,10 +168,10 @@ export function EncoderDecoder() {
               <span className="font-semibold text-sm th-text-2 uppercase tracking-tight">{t('Output')}</span>
               <button 
                 onClick={copyOutput}
-                className={`p-1.5 rounded transition-colors ${copied ? 'text-emerald-400 bg-emerald-500/10' : 'th-text-muted hover:text-emerald-400 hover:bg-emerald-500/10'}`}
-                title={copied ? t('Copied!') : t('Copy Output')}
+                className={`p-1.5 rounded transition-colors ${copied ? 'text-emerald-400 bg-emerald-500/10' : copyError ? 'text-rose-400 bg-rose-500/10' : 'th-text-muted hover:text-emerald-400 hover:bg-emerald-500/10'}`}
+                title={copied ? t('Copied!') : copyError ? t('Failed') : t('Copy Output')}
               >
-                {copied ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
+                {copied ? <Check className="w-4 h-4" /> : copyError ? <XCircle className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
               </button>
             </div>
             <div className="flex-1 relative">
