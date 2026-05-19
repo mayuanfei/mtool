@@ -263,6 +263,7 @@ const translations = {
     'Format': 'Format',
     'UTF8': 'UTF-8',
     'BASE64': 'Base64',
+    'Data length must be a multiple of 16 bytes for NoPadding.': 'Data length must be a multiple of 16 bytes for NoPadding.',
   },
   zh: {
     // Sidebar
@@ -524,6 +525,7 @@ const translations = {
     'Format': '编码',
     'UTF8': '文本 (UTF-8)',
     'BASE64': 'Base64',
+    'Data length must be a multiple of 16 bytes for NoPadding.': 'NoPadding 模式下，数据长度必须为 16 字节的倍数。',
   }
 };
 

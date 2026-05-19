@@ -207,10 +207,37 @@ export function CryptoTool() {
           };
 
           if (isEncrypt) {
-            const outHex = sm4.encrypt(hexToBytes(inputHex), keyHex, cfg);
+            let inBytes = hexToBytes(inputHex);
+            if (padding === 'ZeroPadding') {
+              cfg.padding = 'none';
+              const paddingCount = 16 - (inBytes.length % 16);
+              if (paddingCount !== 16) {
+                for (let i = 0; i < paddingCount; i++) inBytes.push(0);
+              }
+            } else if (padding === 'NoPadding') {
+              cfg.padding = 'none';
+              if (inBytes.length % 16 !== 0) throw new Error(t('Data length must be a multiple of 16 bytes for NoPadding.'));
+            } else {
+              cfg.padding = 'pkcs#7';
+            }
+            const outHex = sm4.encrypt(inBytes, keyHex, cfg);
             res = fromHex(outHex, outputFormat);
           } else {
-            const outHex = sm4.decrypt(hexToBytes(inputHex), keyHex, cfg);
+            if (padding === 'ZeroPadding' || padding === 'NoPadding') {
+              cfg.padding = 'none';
+            } else {
+              cfg.padding = 'pkcs#7';
+            }
+            const outBytes = sm4.decrypt(hexToBytes(inputHex), keyHex, { ...cfg, output: 'array' }) as unknown as number[];
+            if (!outBytes) throw new Error(t('Decryption failed. Invalid Key/IV or data.'));
+            
+            let unpaddedBytes = outBytes;
+            if (padding === 'ZeroPadding') {
+              let len = unpaddedBytes.length;
+              while (len > 0 && unpaddedBytes[len - 1] === 0) len--;
+              unpaddedBytes = unpaddedBytes.slice(0, len);
+            }
+            const outHex = unpaddedBytes.map((b: number) => b.toString(16).padStart(2, '0')).join('');
             res = fromHex(outHex, outputFormat);
           }
         }
