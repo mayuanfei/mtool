@@ -1,5 +1,5 @@
-import { useState } from 'react';
-import { Lock, Copy, Trash2, ArrowDown, ShieldAlert, Check } from 'lucide-react';
+import { useState, useRef, useEffect } from 'react';
+import { Lock, Copy, Trash2, ArrowDown, ShieldAlert, Check, ChevronDown } from 'lucide-react';
 import { useI18n } from '../i18n';
 import CryptoJS from 'crypto-js';
 import { sm2, sm3, sm4 } from 'sm-crypto';
@@ -8,9 +8,47 @@ import { invoke } from '@tauri-apps/api/core';
 
 type Category = 'hash' | 'symmetric' | 'asymmetric' | 'hq';
 type Algorithm = 'MD5' | 'SHA1' | 'SHA256' | 'SM3' | 'AES' | 'DES' | 'SM4' | 'RSA' | 'SM2' | 'HQ_DLL';
+type DataFormat = 'UTF8' | 'HEX' | 'BASE64';
 
-function stringToHex(str: string) {
-  return Array.from(str).map(c => c.charCodeAt(0).toString(16).padStart(2, '0')).join('');
+function CustomSelect({ options, value, onChange, disabled, className, menuClassName }: any) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  return (
+    <div className="relative" ref={ref}>
+      <button
+        type="button"
+        disabled={disabled}
+        onClick={() => setOpen(!open)}
+        className={`flex items-center justify-between gap-2 bg-transparent outline-none ${disabled ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'} ${className}`}
+      >
+        <span>{options.find((o: any) => o.value === value)?.label || value}</span>
+        <ChevronDown className="w-3 h-3 opacity-60" />
+      </button>
+      {open && !disabled && (
+        <div className={`absolute z-50 mt-1 th-bg-surface border th-border rounded-lg shadow-xl overflow-hidden py-1 ${menuClassName || 'w-full left-0 min-w-[8rem]'}`}>
+          {options.map((o: any) => (
+            <button
+              key={o.value}
+              type="button"
+              className={`w-full text-left px-3 py-2 text-sm transition-colors hover:bg-indigo-500/10 ${value === o.value ? 'text-indigo-400 font-medium' : 'th-text'}`}
+              onClick={() => { onChange(o.value); setOpen(false); }}
+            >
+              {o.label}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
 }
 
 export function CryptoTool() {
@@ -23,6 +61,12 @@ export function CryptoTool() {
   const [cryptoKey, setCryptoKey] = useState('');
   const [iv, setIv] = useState('');
   const [mode, setMode] = useState('CBC');
+  const [padding, setPadding] = useState('Pkcs7');
+
+  const [inputFormat, setInputFormat] = useState<DataFormat>('UTF8');
+  const [outputFormat, setOutputFormat] = useState<DataFormat>('BASE64');
+  const [keyFormat, setKeyFormat] = useState<DataFormat>('UTF8');
+  const [ivFormat, setIvFormat] = useState<DataFormat>('UTF8');
   
   // For Asymmetric
   const [publicKey, setPublicKey] = useState('');
@@ -62,77 +106,112 @@ export function CryptoTool() {
     return mode === 'ECB' ? CryptoJS.mode.ECB : CryptoJS.mode.CBC;
   };
 
+  const getCryptoJsPadding = () => {
+    if (padding === 'ZeroPadding') return CryptoJS.pad.ZeroPadding;
+    if (padding === 'NoPadding') return CryptoJS.pad.NoPadding;
+    return CryptoJS.pad.Pkcs7;
+  };
+
+  const parseData = (data: string, format: DataFormat) => {
+    if (format === 'HEX') return CryptoJS.enc.Hex.parse(data);
+    if (format === 'BASE64') return CryptoJS.enc.Base64.parse(data);
+    return CryptoJS.enc.Utf8.parse(data);
+  };
+
+  const stringifyData = (wordArray: any, format: DataFormat) => {
+    if (format === 'HEX') return CryptoJS.enc.Hex.stringify(wordArray);
+    if (format === 'BASE64') return CryptoJS.enc.Base64.stringify(wordArray);
+    return CryptoJS.enc.Utf8.stringify(wordArray);
+  };
+
+  const toHex = (data: string, format: DataFormat) => {
+    return CryptoJS.enc.Hex.stringify(parseData(data, format));
+  };
+  const fromHex = (hexData: string, format: DataFormat) => {
+    return stringifyData(CryptoJS.enc.Hex.parse(hexData), format);
+  };
+
   const handleAction = async (isEncrypt: boolean) => {
     setError(null);
+    
+    // Provide visual feedback for recalculation by temporarily clearing the output
+    if (output) {
+      setOutput('');
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+
     try {
       let res = '';
       
       // ================= HASH =================
       if (category === 'hash') {
         if (!isEncrypt) throw new Error(t('Hash algorithms cannot be decrypted.'));
-        if (algorithm === 'MD5') {
-          res = CryptoJS.MD5(input).toString();
-        } else if (algorithm === 'SHA1') {
-          res = CryptoJS.SHA1(input).toString();
-        } else if (algorithm === 'SHA256') {
-          res = CryptoJS.SHA256(input).toString();
-        } else if (algorithm === 'SM3') {
-          res = sm3(input);
+        const inputWa = parseData(input, inputFormat);
+        let hashWa;
+        if (algorithm === 'MD5') hashWa = CryptoJS.MD5(inputWa);
+        else if (algorithm === 'SHA1') hashWa = CryptoJS.SHA1(inputWa);
+        else if (algorithm === 'SHA256') hashWa = CryptoJS.SHA256(inputWa);
+        else if (algorithm === 'SM3') {
+          // SM3 in sm-crypto takes a string or array, but we can pass hex string via config
+          const hexIn = toHex(input, inputFormat);
+          hashWa = CryptoJS.enc.Hex.parse(sm3(hexIn, { encoding: 'hex' } as any));
         }
+        res = stringifyData(hashWa, outputFormat);
       } 
       // ================= SYMMETRIC =================
       else if (category === 'symmetric') {
         if (!cryptoKey) throw new Error(t('Key is required.'));
         
-        if (algorithm === 'AES') {
-          const cfg: any = { mode: getCryptoJsMode() };
+        if (algorithm === 'AES' || algorithm === 'DES') {
+          const cfg: any = { mode: getCryptoJsMode(), padding: getCryptoJsPadding() };
           if (mode === 'CBC') {
             if (!iv) throw new Error(t('IV is required for CBC mode.'));
-            cfg.iv = CryptoJS.enc.Utf8.parse(iv);
+            cfg.iv = parseData(iv, ivFormat);
           }
-          const keyUtf8 = CryptoJS.enc.Utf8.parse(cryptoKey);
+          const keyWa = parseData(cryptoKey, keyFormat);
+          const inputWa = parseData(input, inputFormat);
           
+          let engine = algorithm === 'AES' ? CryptoJS.AES : CryptoJS.DES;
+
           if (isEncrypt) {
-            res = CryptoJS.AES.encrypt(input, keyUtf8, cfg).toString();
+            const encrypted = engine.encrypt(inputWa, keyWa, cfg);
+            res = outputFormat === 'HEX' ? encrypted.ciphertext.toString(CryptoJS.enc.Hex)
+                : outputFormat === 'UTF8' ? encrypted.ciphertext.toString(CryptoJS.enc.Utf8)
+                : encrypted.toString();
           } else {
-            const dec = CryptoJS.AES.decrypt(input, keyUtf8, cfg);
-            res = dec.toString(CryptoJS.enc.Utf8);
+            // For decryption, CryptoJS takes Base64 string or CipherParams
+            let decryptInput = input;
+            if (inputFormat === 'HEX' || inputFormat === 'UTF8') {
+              decryptInput = CryptoJS.enc.Base64.stringify(parseData(input, inputFormat));
+            }
+            const decrypted = engine.decrypt(decryptInput, keyWa, cfg);
+            res = stringifyData(decrypted, outputFormat);
             if (!res) throw new Error(t('Decryption failed. Invalid Key/IV or data.'));
           }
         } 
-        else if (algorithm === 'DES') {
-          const cfg: any = { mode: getCryptoJsMode() };
-          if (mode === 'CBC') {
-            if (!iv) throw new Error(t('IV is required for CBC mode.'));
-            cfg.iv = CryptoJS.enc.Utf8.parse(iv);
-          }
-          const keyUtf8 = CryptoJS.enc.Utf8.parse(cryptoKey);
-          
-          if (isEncrypt) {
-            res = CryptoJS.DES.encrypt(input, keyUtf8, cfg).toString();
-          } else {
-            const dec = CryptoJS.DES.decrypt(input, keyUtf8, cfg);
-            res = dec.toString(CryptoJS.enc.Utf8);
-            if (!res) throw new Error(t('Decryption failed. Invalid Key/IV or data.'));
-          }
-        }
         else if (algorithm === 'SM4') {
-          // sm-crypto SM4 requires 16 bytes hex string for key/iv by default in some usages, 
-          // but we can pass string to the library if we convert it to hex.
-          // sm4.encrypt(inArray, keyArray, {mode: 'cbc', iv: ivArray})
-          // Simplified text-based SM4 wrapper
-          const keyHex = stringToHex(cryptoKey);
+          const keyHex = toHex(cryptoKey, keyFormat);
           const cfg: any = {};
           if (mode === 'CBC') {
             if (!iv) throw new Error(t('IV is required for CBC mode.'));
-            cfg.iv = stringToHex(iv);
+            cfg.iv = toHex(iv, ivFormat);
             cfg.mode = 'cbc';
           }
           
+          const inputHex = toHex(input, inputFormat);
+          // convert hex to byte array for sm-crypto
+          const hexToBytes = (hex: string) => {
+            let bytes = [];
+            for (let c = 0; c < hex.length; c += 2) bytes.push(parseInt(hex.substr(c, 2), 16));
+            return bytes;
+          };
+
           if (isEncrypt) {
-            res = sm4.encrypt(input, keyHex, cfg);
+            const outHex = sm4.encrypt(hexToBytes(inputHex), keyHex, cfg);
+            res = fromHex(outHex, outputFormat);
           } else {
-            res = sm4.decrypt(input, keyHex, cfg);
+            const outHex = sm4.decrypt(hexToBytes(inputHex), keyHex, cfg);
+            res = fromHex(outHex, outputFormat);
           }
         }
       }
@@ -253,37 +332,63 @@ export function CryptoTool() {
 
         {/* Configuration Area */}
         {category === 'symmetric' && (
-          <div className="grid grid-cols-3 gap-4 shrink-0 border th-border rounded-xl p-4 th-bg-surface-h">
+          <div className="grid grid-cols-4 gap-4 shrink-0 border th-border rounded-xl p-4 th-bg-surface-h">
             <div className="flex flex-col gap-1.5 col-span-1">
               <label className="text-xs font-semibold th-text-muted uppercase">{t('Mode')}</label>
-              <select 
+              <CustomSelect 
                 value={mode}
-                onChange={(e) => setMode(e.target.value)}
-                className="w-full px-3 py-2 bg-transparent border th-border rounded-lg th-text text-sm focus:ring-1 focus:ring-indigo-500 outline-none"
-              >
-                <option value="CBC">CBC</option>
-                <option value="ECB">ECB</option>
-              </select>
+                onChange={(val: string) => setMode(val)}
+                options={[{ value: 'CBC', label: 'CBC' }, { value: 'ECB', label: 'ECB' }]}
+                className="w-full px-3 py-2 border th-border rounded-lg th-text text-sm focus:ring-1 focus:ring-indigo-500"
+              />
             </div>
             <div className="flex flex-col gap-1.5 col-span-1">
-              <label className="text-xs font-semibold th-text-muted uppercase">{t('Key')}</label>
+              <label className="text-xs font-semibold th-text-muted uppercase">{t('Padding')}</label>
+              <CustomSelect 
+                value={padding}
+                onChange={(val: string) => setPadding(val)}
+                options={[{ value: 'Pkcs7', label: 'PKCS7' }, { value: 'ZeroPadding', label: 'ZeroPadding' }, { value: 'NoPadding', label: 'NoPadding' }]}
+                className="w-full px-3 py-2 border th-border rounded-lg th-text text-sm focus:ring-1 focus:ring-indigo-500"
+              />
+            </div>
+            <div className="flex flex-col gap-1.5 col-span-1">
+              <div className="flex justify-between items-center">
+                <label className="text-xs font-semibold th-text-muted uppercase">{t('Key')}</label>
+                <CustomSelect 
+                  value={keyFormat}
+                  onChange={(val: DataFormat) => setKeyFormat(val)}
+                  options={[{ value: 'UTF8', label: t('UTF8') }, { value: 'HEX', label: t('HEX') }, { value: 'BASE64', label: t('BASE64') }]}
+                  className="text-[10px] th-text-3 hover:text-indigo-400 font-medium"
+                  menuClassName="right-0 min-w-[6rem]"
+                />
+              </div>
               <input 
                 type="text"
                 value={cryptoKey}
                 onChange={(e) => setCryptoKey(e.target.value)}
                 placeholder="Secret Key"
-                className="w-full px-3 py-2 bg-transparent border th-border rounded-lg th-text text-sm focus:ring-1 focus:ring-indigo-500 outline-none"
+                className="w-full px-3 py-2 bg-transparent border th-border rounded-lg th-text text-sm focus:ring-1 focus:ring-indigo-500 outline-none placeholder:text-gray-500/40"
               />
             </div>
             <div className="flex flex-col gap-1.5 col-span-1">
-              <label className="text-xs font-semibold th-text-muted uppercase">{t('IV')}</label>
+              <div className="flex justify-between items-center">
+                <label className="text-xs font-semibold th-text-muted uppercase">{t('IV')}</label>
+                <CustomSelect 
+                  value={ivFormat}
+                  onChange={(val: DataFormat) => setIvFormat(val)}
+                  disabled={mode === 'ECB'}
+                  options={[{ value: 'UTF8', label: t('UTF8') }, { value: 'HEX', label: t('HEX') }, { value: 'BASE64', label: t('BASE64') }]}
+                  className="text-[10px] th-text-3 hover:text-indigo-400 font-medium"
+                  menuClassName="right-0 min-w-[6rem]"
+                />
+              </div>
               <input 
                 type="text"
                 value={iv}
                 onChange={(e) => setIv(e.target.value)}
                 disabled={mode === 'ECB'}
                 placeholder={mode === 'ECB' ? t('Not needed for ECB') : 'Initialization Vector'}
-                className="w-full px-3 py-2 bg-transparent border th-border rounded-lg th-text text-sm focus:ring-1 focus:ring-indigo-500 outline-none disabled:opacity-50"
+                className="w-full px-3 py-2 bg-transparent border th-border rounded-lg th-text text-sm focus:ring-1 focus:ring-indigo-500 outline-none disabled:opacity-50 placeholder:text-gray-500/40"
               />
             </div>
           </div>
@@ -307,7 +412,7 @@ export function CryptoTool() {
                   value={publicKey}
                   onChange={(e) => setPublicKey(e.target.value)}
                   placeholder="-----BEGIN PUBLIC KEY-----..."
-                  className="w-full h-24 p-3 bg-transparent border th-border rounded-lg th-text text-xs font-mono resize-none focus:ring-1 focus:ring-indigo-500 outline-none"
+                  className="w-full h-24 p-3 bg-transparent border th-border rounded-lg th-text text-xs font-mono resize-none focus:ring-1 focus:ring-indigo-500 outline-none placeholder:text-gray-500/40"
                 />
               </div>
               <div className="flex flex-col gap-1.5 col-span-1">
@@ -316,7 +421,7 @@ export function CryptoTool() {
                   value={privateKey}
                   onChange={(e) => setPrivateKey(e.target.value)}
                   placeholder="-----BEGIN PRIVATE KEY-----..."
-                  className="w-full h-24 p-3 bg-transparent border th-border rounded-lg th-text text-xs font-mono resize-none focus:ring-1 focus:ring-indigo-500 outline-none"
+                  className="w-full h-24 p-3 bg-transparent border th-border rounded-lg th-text text-xs font-mono resize-none focus:ring-1 focus:ring-indigo-500 outline-none placeholder:text-gray-500/40"
                 />
               </div>
             </div>
@@ -335,7 +440,16 @@ export function CryptoTool() {
           {/* Input Panel */}
           <div className="flex-1 flex flex-col min-h-0 border th-border rounded-xl overflow-hidden shadow-sm th-bg-card">
             <div className="px-4 py-3 border-b th-border th-bg-surface-h flex items-center justify-between">
-              <span className="font-semibold text-sm th-text-2 uppercase tracking-tight">{t('Input')}</span>
+              <div className="flex items-center gap-3">
+                <span className="font-semibold text-sm th-text-2 uppercase tracking-tight">{t('Input')}</span>
+                <CustomSelect 
+                  value={inputFormat}
+                  onChange={(val: DataFormat) => setInputFormat(val)}
+                  options={[{ value: 'UTF8', label: t('UTF8') }, { value: 'HEX', label: t('HEX') }, { value: 'BASE64', label: t('BASE64') }]}
+                  className="text-xs th-text-3 hover:text-indigo-400 font-medium bg-indigo-500/5 px-2 py-1 rounded"
+                  menuClassName="left-0 min-w-[6rem]"
+                />
+              </div>
               <button 
                 onClick={() => { setInput(''); setOutput(''); setError(null); }}
                 className="p-1.5 th-text-muted hover:text-rose-400 hover:bg-rose-500/10 rounded transition-colors"
@@ -380,7 +494,16 @@ export function CryptoTool() {
           {/* Output Panel */}
           <div className="flex-1 flex flex-col min-h-0 border th-border rounded-xl overflow-hidden shadow-sm th-bg-card">
             <div className="px-4 py-3 border-b th-border th-bg-surface-h flex items-center justify-between">
-              <span className="font-semibold text-sm th-text-2 uppercase tracking-tight">{t('Output')}</span>
+              <div className="flex items-center gap-3">
+                <span className="font-semibold text-sm th-text-2 uppercase tracking-tight">{t('Output')}</span>
+                <CustomSelect 
+                  value={outputFormat}
+                  onChange={(val: DataFormat) => setOutputFormat(val)}
+                  options={[{ value: 'UTF8', label: t('UTF8') }, { value: 'HEX', label: t('HEX') }, { value: 'BASE64', label: t('BASE64') }]}
+                  className="text-xs th-text-3 hover:text-indigo-400 font-medium bg-indigo-500/5 px-2 py-1 rounded"
+                  menuClassName="left-0 min-w-[6rem]"
+                />
+              </div>
               <button 
                 onClick={copyOutput}
                 className={`p-1.5 rounded transition-colors ${copied ? 'text-emerald-400 bg-emerald-500/10' : 'th-text-muted hover:text-emerald-400 hover:bg-emerald-500/10'}`}

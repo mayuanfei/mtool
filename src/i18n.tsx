@@ -259,6 +259,10 @@ const translations = {
     'Not needed for ECB': 'Not needed for ECB',
     'Public Key Encrypt': 'Public Key Encrypt',
     'Private Key Decrypt': 'Private Key Decrypt',
+    'Padding': 'Padding',
+    'Format': 'Format',
+    'UTF8': 'UTF-8',
+    'BASE64': 'Base64',
   },
   zh: {
     // Sidebar
@@ -516,6 +520,10 @@ const translations = {
     'Not needed for ECB': 'ECB模式无需IV',
     'Public Key Encrypt': '公钥加密',
     'Private Key Decrypt': '私钥解密',
+    'Padding': '填充 (Padding)',
+    'Format': '编码',
+    'UTF8': '文本 (UTF-8)',
+    'BASE64': 'Base64',
   }
 };
 
