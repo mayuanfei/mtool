@@ -357,18 +357,22 @@ export function CryptoTool() {
           <div className="flex flex-col justify-center gap-4 shrink-0 px-2">
             <button
               onClick={() => handleAction(true)}
-              className="flex flex-col items-center justify-center gap-1 w-24 py-3 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl shadow-lg transition-all active:scale-95"
+              className="flex flex-col items-center justify-center gap-1 min-w-[6rem] px-3 py-3 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl shadow-lg transition-all active:scale-95 text-center"
             >
-              <span className="font-bold text-sm">{category === 'hash' ? t('Hash') : t('Encrypt')}</span>
+              <span className="font-bold text-sm">
+                {category === 'hash' ? t('Hash') : category === 'asymmetric' ? t('Public Key Encrypt') : t('Encrypt')}
+              </span>
               <ArrowDown className="w-4 h-4 -rotate-90" />
             </button>
             {category !== 'hash' && (
               <button
                 onClick={() => handleAction(false)}
-                className="flex flex-col items-center justify-center gap-1 w-24 py-3 th-bg-surface th-hover-surface border th-border th-text-2 rounded-xl shadow-sm transition-all active:scale-95"
+                className="flex flex-col items-center justify-center gap-1 min-w-[6rem] px-3 py-3 th-bg-surface th-hover-surface border th-border th-text-2 rounded-xl shadow-sm transition-all active:scale-95 text-center"
               >
                 <ArrowDown className="w-4 h-4 -rotate-90" />
-                <span className="font-bold text-sm">{t('Decrypt')}</span>
+                <span className="font-bold text-sm">
+                  {category === 'asymmetric' ? t('Private Key Decrypt') : t('Decrypt')}
+                </span>
               </button>
             )}
           </div>

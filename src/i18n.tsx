@@ -257,6 +257,8 @@ const translations = {
     'Key': 'Key',
     'IV': 'IV',
     'Not needed for ECB': 'Not needed for ECB',
+    'Public Key Encrypt': 'Public Key Encrypt',
+    'Private Key Decrypt': 'Private Key Decrypt',
   },
   zh: {
     // Sidebar
@@ -512,6 +514,8 @@ const translations = {
     'Key': '密钥',
     'IV': '偏移量(IV)',
     'Not needed for ECB': 'ECB模式无需IV',
+    'Public Key Encrypt': '公钥加密',
+    'Private Key Decrypt': '私钥解密',
   }
 };
 
