@@ -3,6 +3,7 @@ import { Sidebar } from './components/Sidebar';
 import { UpdateModal } from './components/UpdateModal';
 import { useI18n } from './i18n';
 import { useUpdater } from './updater';
+import { ErrorBoundary } from './components/ErrorBoundary';
 
 const JsonFormatter = lazy(() => import('./pages/JsonFormatter').then(m => ({ default: m.JsonFormatter })));
 const SettingsPage = lazy(() => import('./pages/Settings').then(m => ({ default: m.SettingsPage })));
@@ -125,44 +126,46 @@ export default function App() {
       <div className="flex-1 flex flex-col min-w-0 th-bg-main">
         
         <main className={`flex-1 overflow-y-auto ${activePage === 'jarViewer' || activePage === 'fileDiff' ? 'p-0' : 'p-6'}`}>
-          <Suspense fallback={
-            <div className="flex items-center justify-center h-full th-text-muted font-medium">
-              {t('Loading...')}
-            </div>
-          }>
-            {activePage === 'json' && toolsEnabled.json && <JsonFormatter />}
-            {activePage === 'qr' && toolsEnabled.qr && <TextToQr />}
-            {activePage === 'pwd' && toolsEnabled.pwd && <PasswordGenerator />}
-            {activePage === 'sqlIn' && toolsEnabled.sqlIn && <SqlInBuilder />}
-            {activePage === 'md' && toolsEnabled.md && <MarkdownEditor setMdDirty={setMdDirty} />}
-            {activePage === 'fileSearch' && toolsEnabled.fileSearch && <FileSearch />}
-            {activePage === 'fileDiff' && toolsEnabled.fileDiff && <FileDiff />}
-            {activePage === 'jarViewer' && toolsEnabled.jarViewer && <JarViewer />}
-            {activePage === 'encoder' && toolsEnabled.encoder && <EncoderDecoder />}
-            {activePage === 'crypto' && toolsEnabled.crypto && <CryptoTool />}
-            {activePage === 'settings' && (
-              <SettingsPage 
-                toolsEnabled={toolsEnabled}
-                toggleTool={toggleTool}
-                activePage={activePage}
-                setActivePage={handleNavigate}
-                updater={updater}
-                setShowModal={setShowUpdateModal}            />
-            )}
-            {activePage !== 'settings' &&
-             !(activePage === 'json' && toolsEnabled.json) && 
-             !(activePage === 'qr' && toolsEnabled.qr) && 
-             !(activePage === 'pwd' && toolsEnabled.pwd) && 
-             !(activePage === 'sqlIn' && toolsEnabled.sqlIn) && 
-             !(activePage === 'md' && toolsEnabled.md) && 
-             !(activePage === 'fileSearch' && toolsEnabled.fileSearch) &&
-             !(activePage === 'fileDiff' && toolsEnabled.fileDiff) &&
-             !(activePage === 'jarViewer' && toolsEnabled.jarViewer) &&
-             !(activePage === 'encoder' && toolsEnabled.encoder) &&
-             !(activePage === 'crypto' && toolsEnabled.crypto) && (
-               <div className="flex items-center justify-center h-full th-text-muted font-medium">{t('Select a tool from the sidebar')}</div>
-            )}
-          </Suspense>
+          <ErrorBoundary>
+            <Suspense fallback={
+              <div className="flex items-center justify-center h-full th-text-muted font-medium">
+                {t('Loading...')}
+              </div>
+            }>
+              {activePage === 'json' && toolsEnabled.json && <JsonFormatter />}
+              {activePage === 'qr' && toolsEnabled.qr && <TextToQr />}
+              {activePage === 'pwd' && toolsEnabled.pwd && <PasswordGenerator />}
+              {activePage === 'sqlIn' && toolsEnabled.sqlIn && <SqlInBuilder />}
+              {activePage === 'md' && toolsEnabled.md && <MarkdownEditor setMdDirty={setMdDirty} />}
+              {activePage === 'fileSearch' && toolsEnabled.fileSearch && <FileSearch />}
+              {activePage === 'fileDiff' && toolsEnabled.fileDiff && <FileDiff />}
+              {activePage === 'jarViewer' && toolsEnabled.jarViewer && <JarViewer />}
+              {activePage === 'encoder' && toolsEnabled.encoder && <EncoderDecoder />}
+              {activePage === 'crypto' && toolsEnabled.crypto && <CryptoTool />}
+              {activePage === 'settings' && (
+                <SettingsPage 
+                  toolsEnabled={toolsEnabled}
+                  toggleTool={toggleTool}
+                  activePage={activePage}
+                  setActivePage={handleNavigate}
+                  updater={updater}
+                  setShowModal={setShowUpdateModal}            />
+              )}
+              {activePage !== 'settings' &&
+               !(activePage === 'json' && toolsEnabled.json) && 
+               !(activePage === 'qr' && toolsEnabled.qr) && 
+               !(activePage === 'pwd' && toolsEnabled.pwd) && 
+               !(activePage === 'sqlIn' && toolsEnabled.sqlIn) && 
+               !(activePage === 'md' && toolsEnabled.md) && 
+               !(activePage === 'fileSearch' && toolsEnabled.fileSearch) &&
+               !(activePage === 'fileDiff' && toolsEnabled.fileDiff) &&
+               !(activePage === 'jarViewer' && toolsEnabled.jarViewer) &&
+               !(activePage === 'encoder' && toolsEnabled.encoder) &&
+               !(activePage === 'crypto' && toolsEnabled.crypto) && (
+                 <div className="flex items-center justify-center h-full th-text-muted font-medium">{t('Select a tool from the sidebar')}</div>
+              )}
+            </Suspense>
+          </ErrorBoundary>
         </main>
       </div>
 

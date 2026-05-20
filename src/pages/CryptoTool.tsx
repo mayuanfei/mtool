@@ -636,7 +636,6 @@ export function CryptoTool() {
         setPrivateKey(keypair.privateKey);
       }
     } catch (err) {
-      console.error('Failed to generate key pair', err);
       setError(err instanceof Error ? err.message : String(err));
     } finally {
       setIsLoading(false);
