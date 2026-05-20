@@ -103,11 +103,7 @@ export function CryptoTool() {
   const [copyError, setCopyError] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
 
-  useEffect(() => {
-    if (category === 'hash' && outputFormat === 'UTF8') {
-      setOutputFormat('HEX');
-    }
-  }, [category, outputFormat]);
+
 
   const categories: { value: Category; label: string }[] = [
     { value: 'hash', label: t('Hash / Digest') },
@@ -250,7 +246,9 @@ export function CryptoTool() {
           }
           hashWa = CryptoJS.enc.Hex.parse(sm3(bytes));
         }
-        res = stringifyData(hashWa, outputFormat);
+        res = (outputFormat === 'UTF8' && hashWa)
+          ? CryptoJS.enc.Base64.stringify(hashWa)
+          : stringifyData(hashWa, outputFormat);
       } 
       // ================= SYMMETRIC =================
       else if (category === 'symmetric') {
@@ -784,9 +782,7 @@ export function CryptoTool() {
                   value={outputFormat}
                   onChange={(val: DataFormat) => setOutputFormat(val)}
                   options={
-                    category === 'hash'
-                      ? [{ value: 'HEX', label: t('HEX') }, { value: 'BASE64', label: t('BASE64') }]
-                      : [{ value: 'UTF8', label: t('UTF8') }, { value: 'HEX', label: t('HEX') }, { value: 'BASE64', label: t('BASE64') }]
+                    [{ value: 'UTF8', label: t('UTF8') }, { value: 'HEX', label: t('HEX') }, { value: 'BASE64', label: t('BASE64') }]
                   }
                   className="text-xs th-text-3 hover:text-indigo-400 font-medium bg-indigo-500/5 px-2 py-1 rounded"
                   menuClassName="left-0 min-w-[6rem]"
