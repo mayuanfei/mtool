@@ -88,13 +88,13 @@ function formatAsPem(base64: string, type: 'PUBLIC' | 'PRIVATE'): string {
 async function generateRsaKeysWebCrypto(keySize: number): Promise<{ publicKey: string; privateKey: string }> {
   const keyPair = await window.crypto.subtle.generateKey(
     {
-      name: "RSASSA-PKCS1-v1_5",
+      name: "RSA-OAEP",
       modulusLength: keySize,
       publicExponent: new Uint8Array([1, 0, 1]), // 65537
       hash: "SHA-256",
     },
     true,
-    ["sign", "verify"]
+    ["encrypt", "decrypt"]
   );
 
   const spki = await window.crypto.subtle.exportKey("spki", keyPair.publicKey);
@@ -622,6 +622,7 @@ export function CryptoTool() {
 
   const generateKeys = async () => {
     if (isLoading) return;
+    setError(null);
     setIsLoading(true);
     try {
       if (algorithm === 'RSA') {
@@ -636,6 +637,7 @@ export function CryptoTool() {
       }
     } catch (err) {
       console.error('Failed to generate key pair', err);
+      setError(err instanceof Error ? err.message : String(err));
     } finally {
       setIsLoading(false);
     }
