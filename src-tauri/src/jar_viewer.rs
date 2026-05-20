@@ -5,32 +5,31 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::OnceLock;
 use std::time::Duration;
-use tauri::Manager;
 use zip::ZipArchive;
 
 static CFR_PATH: OnceLock<PathBuf> = OnceLock::new();
 
 const EXPECTED_SHA256: &str = "f686e8f3ded377d7bc87d216a90e9e9512df4156e75b06c655a16648ae8765b2";
 
-pub fn ensure_cfr(app_handle: &tauri::AppHandle) -> Result<PathBuf, String> {
+pub fn ensure_cfr(_app_handle: &tauri::AppHandle) -> Result<PathBuf, String> {
     // 1. Check OnceLock for cached path
     if let Some(path) = CFR_PATH.get() {
-        // 边缘防护机制：如果应用运行期间临时文件夹被清理软件清空，
-        // 检测到文件丢失后跳过缓存，自动从自带资源重新拷贝恢复。
         if path.exists() {
             return Ok(path.clone());
         }
     }
 
-    // 2. Resolve bundled CFR (with download fallback if not bundled)
-    let bundled = resolve_bundled_cfr(app_handle)?;
+    // 2. Get local temp path
+    let temp_path = std::env::temp_dir().join("mtool_cfr_0.152.jar");
 
-    // 3. Always copy CFR to local temp directory to ensure Java can read it,
-    // avoiding ClassNotFoundException on Windows UNC paths or network mapped drives (Z:\).
-    let cfr_path = copy_to_temp_if_needed(&bundled)?;
+    // 3. Write embedded CFR if missing or invalid
+    if !verify_sha256(&temp_path) {
+        let bytes = include_bytes!("../resources/cfr-0.152.jar");
+        fs::write(&temp_path, bytes).map_err(|e| format!("Failed to write embedded CFR to temp: {}", e))?;
+    }
 
-    let _ = CFR_PATH.set(cfr_path.clone());
-    Ok(cfr_path)
+    let _ = CFR_PATH.set(temp_path.clone());
+    Ok(temp_path)
 }
 
 fn verify_sha256(path: &Path) -> bool {
@@ -47,61 +46,6 @@ fn verify_sha256(path: &Path) -> bool {
     }
     let hash = hasher.finalize().iter().map(|b| format!("{:02x}", b)).collect::<String>();
     hash == EXPECTED_SHA256
-}
-
-fn resolve_bundled_cfr(app_handle: &tauri::AppHandle) -> Result<PathBuf, String> {
-    // "resources/cfr-0.152.jar" — Tauri 标准打包布局：资源文件位于应用程序包的 resources/ 子目录
-    // "cfr-0.152.jar"            — Tauri resource root 备用：部分打包配置会将资源直接放到根目录
-    let possible_rel_paths = ["resources/cfr-0.152.jar", "cfr-0.152.jar"];
-    for rel_path in possible_rel_paths {
-        if let Ok(path) = app_handle.path().resolve(rel_path, tauri::path::BaseDirectory::Resource) {
-            if path.exists() && verify_sha256(&path) {
-                return Ok(path);
-            }
-        }
-    }
-    
-    // Fallback: Check local temp (maybe downloaded previously)
-    let temp_path = std::env::temp_dir().join("mtool_cfr_0.152.jar");
-    if verify_sha256(&temp_path) {
-        return Ok(temp_path);
-    }
-    
-    // Final fallback: Download to local temp
-    download_cfr(&temp_path)
-}
-
-fn copy_to_temp_if_needed(src: &Path) -> Result<PathBuf, String> {
-    let dest = std::env::temp_dir().join("mtool_cfr_0.152.jar");
-    if src == dest {
-        return Ok(dest);
-    }
-    if !verify_sha256(&dest) {
-        fs::copy(src, &dest).map_err(|e| format!("Failed to copy CFR to temp for UNC support: {}", e))?;
-    }
-    Ok(dest)
-}
-
-fn download_cfr(dest: &Path) -> Result<PathBuf, String> {
-    let url = "https://github.com/leibnitz27/cfr/releases/download/0.152/cfr-0.152.jar";
-    let client = reqwest::blocking::Client::builder()
-        .timeout(Duration::from_secs(30))
-        .build()
-        .map_err(|e| format!("Failed to build download client: {}", e))?;
-        
-    let response = client.get(url).send().map_err(|e| format!("Failed to download CFR from GitHub: {}. Please check your internet connection.", e))?;
-    let bytes = response.bytes().map_err(|e| format!("Failed to read CFR bytes: {}", e))?;
-    
-    let mut hasher = Sha256::new();
-    hasher.update(&bytes);
-    let hash = hasher.finalize().iter().map(|b| format!("{:02x}", b)).collect::<String>();
-    
-    if hash != EXPECTED_SHA256 {
-        return Err(format!("CFR jar integrity check failed. Expected {}, got {}", EXPECTED_SHA256, hash));
-    }
-    
-    fs::write(dest, &bytes).map_err(|e| format!("Failed to write CFR to local temp: {}", e))?;
-    Ok(dest.to_path_buf())
 }
 
 

@@ -103,6 +103,12 @@ export function CryptoTool() {
   const [copyError, setCopyError] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
 
+  useEffect(() => {
+    if (category === 'hash' && outputFormat === 'UTF8') {
+      setOutputFormat('HEX');
+    }
+  }, [category, outputFormat]);
+
   const categories: { value: Category; label: string }[] = [
     { value: 'hash', label: t('Hash / Digest') },
     { value: 'symmetric', label: t('Symmetric') },
@@ -187,9 +193,12 @@ export function CryptoTool() {
         else if (algorithm === 'SHA1') hashWa = CryptoJS.SHA1(inputWa);
         else if (algorithm === 'SHA256') hashWa = CryptoJS.SHA256(inputWa);
         else if (algorithm === 'SM3') {
-          // SM3 in sm-crypto takes a string or array, but we can pass hex string via config
           const hexIn = toHex(input, inputFormat);
-          hashWa = CryptoJS.enc.Hex.parse(sm3(hexIn, { encoding: 'hex' } as any));
+          const bytes = [];
+          for (let c = 0; c < hexIn.length; c += 2) {
+            bytes.push(parseInt(hexIn.substr(c, 2), 16));
+          }
+          hashWa = CryptoJS.enc.Hex.parse(sm3(bytes));
         }
         res = stringifyData(hashWa, outputFormat);
       } 
@@ -284,24 +293,86 @@ export function CryptoTool() {
           if (isEncrypt) {
             if (!publicKey) throw new Error(t('Public Key is required for encryption.'));
             encryptor.setPublicKey(publicKey);
-            const encoded = encryptor.encrypt(input);
+            
+            let plaintext = input;
+            if (inputFormat === 'HEX') {
+              try {
+                plaintext = CryptoJS.enc.Utf8.stringify(CryptoJS.enc.Hex.parse(input));
+              } catch (e) {}
+            } else if (inputFormat === 'BASE64') {
+              try {
+                plaintext = CryptoJS.enc.Utf8.stringify(CryptoJS.enc.Base64.parse(input));
+              } catch (e) {}
+            }
+
+            const encoded = encryptor.encrypt(plaintext);
             if (!encoded) throw new Error(t('RSA Encryption failed.'));
-            res = encoded;
+            
+            if (outputFormat === 'HEX') {
+              res = CryptoJS.enc.Hex.stringify(CryptoJS.enc.Base64.parse(encoded));
+            } else {
+              res = encoded; // Default is BASE64
+            }
           } else {
             if (!privateKey) throw new Error(t('Private Key is required for decryption.'));
             encryptor.setPrivateKey(privateKey);
-            const decoded = encryptor.decrypt(input);
+            
+            let ciphertextBase64 = input;
+            if (inputFormat === 'HEX') {
+              ciphertextBase64 = CryptoJS.enc.Base64.stringify(CryptoJS.enc.Hex.parse(input));
+            }
+            
+            const decoded = encryptor.decrypt(ciphertextBase64);
             if (!decoded) throw new Error(t('RSA Decryption failed.'));
-            res = decoded;
+            
+            if (outputFormat === 'HEX') {
+              res = CryptoJS.enc.Hex.stringify(CryptoJS.enc.Utf8.parse(decoded));
+            } else if (outputFormat === 'BASE64') {
+              res = CryptoJS.enc.Base64.stringify(CryptoJS.enc.Utf8.parse(decoded));
+            } else {
+              res = decoded; // Default UTF-8
+            }
           }
         }
         else if (algorithm === 'SM2') {
           if (isEncrypt) {
             if (!publicKey) throw new Error(t('Public Key is required for encryption.'));
-            res = sm2.doEncrypt(input, publicKey, 1); // 1 for cipherMode C1C3C2
+            
+            let plaintext = input;
+            if (inputFormat === 'HEX') {
+              try {
+                plaintext = CryptoJS.enc.Utf8.stringify(CryptoJS.enc.Hex.parse(input));
+              } catch (e) {}
+            } else if (inputFormat === 'BASE64') {
+              try {
+                plaintext = CryptoJS.enc.Utf8.stringify(CryptoJS.enc.Base64.parse(input));
+              } catch (e) {}
+            }
+            
+            const cipherHex = sm2.doEncrypt(plaintext, publicKey, 1); // 1 for cipherMode C1C3C2
+            
+            if (outputFormat === 'BASE64') {
+              res = CryptoJS.enc.Base64.stringify(CryptoJS.enc.Hex.parse(cipherHex));
+            } else {
+              res = cipherHex; // Default is HEX
+            }
           } else {
             if (!privateKey) throw new Error(t('Private Key is required for decryption.'));
-            res = sm2.doDecrypt(input, privateKey, 1, { output: 'string' });
+            
+            let ciphertextHex = input;
+            if (inputFormat === 'BASE64') {
+              ciphertextHex = CryptoJS.enc.Hex.stringify(CryptoJS.enc.Base64.parse(input));
+            }
+            
+            const decoded = sm2.doDecrypt(ciphertextHex, privateKey, 1, { output: 'string' });
+            
+            if (outputFormat === 'HEX') {
+              res = CryptoJS.enc.Hex.stringify(CryptoJS.enc.Utf8.parse(decoded));
+            } else if (outputFormat === 'BASE64') {
+              res = CryptoJS.enc.Base64.stringify(CryptoJS.enc.Utf8.parse(decoded));
+            } else {
+              res = decoded; // Default UTF-8
+            }
           }
         }
       }
@@ -615,7 +686,11 @@ export function CryptoTool() {
                 <CustomSelect 
                   value={outputFormat}
                   onChange={(val: DataFormat) => setOutputFormat(val)}
-                  options={[{ value: 'UTF8', label: t('UTF8') }, { value: 'HEX', label: t('HEX') }, { value: 'BASE64', label: t('BASE64') }]}
+                  options={
+                    category === 'hash'
+                      ? [{ value: 'HEX', label: t('HEX') }, { value: 'BASE64', label: t('BASE64') }]
+                      : [{ value: 'UTF8', label: t('UTF8') }, { value: 'HEX', label: t('HEX') }, { value: 'BASE64', label: t('BASE64') }]
+                  }
                   className="text-xs th-text-3 hover:text-indigo-400 font-medium bg-indigo-500/5 px-2 py-1 rounded"
                   menuClassName="left-0 min-w-[6rem]"
                 />

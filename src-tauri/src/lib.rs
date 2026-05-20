@@ -667,6 +667,22 @@ async fn hq_crypto(
     jar_path: String,
     biz_type: String
 ) -> Result<String, String> {
+    if action != "enc" && action != "dec" {
+        return Err("Invalid action. Must be 'enc' or 'dec'.".to_string());
+    }
+
+    if biz_type.is_empty() 
+        || biz_type.len() > 64 
+        || !biz_type.chars().all(|c| c.is_alphanumeric() || c == '_' || c == '-') 
+    {
+        return Err("Invalid bizType format. Only alphanumeric characters, underscores, and hyphens are allowed (max 64 chars).".to_string());
+    }
+
+    let path = std::path::Path::new(&jar_path);
+    if !path.exists() || path.extension().map_or(true, |ext| ext != "jar") {
+        return Err("Invalid JAR path: file must exist and have a .jar extension.".to_string());
+    }
+
     tauri::async_runtime::spawn_blocking(move || {
         let mut command = std::process::Command::new("java");
         command

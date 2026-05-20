@@ -144,7 +144,6 @@ export function Sidebar({ activePage, onNavigate, jsonEnabled, qrEnabled, pwdEna
           </span>
           {!collapsed && <span className="text-[13px] truncate">{t('Settings')}</span>}
         </button>
-        {/* User feature coming soon: <NavItem item={{ id: 'user', label: t('User'), icon: User }} /> */}
       </div>
     </aside>
   );

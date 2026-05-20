@@ -200,7 +200,8 @@ export function PasswordGenerator() {
   // When options change, generate new one automatically (without adding to history for slider drag)
   useEffect(() => {
     generatePassword(false);
-  }, [length, useUpper, useLower, useNumbers, useSymbols, customSymbols, excludeChars, generateCount, generatePassword]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [length, useUpper, useLower, useNumbers, useSymbols, customSymbols, excludeChars, generateCount]);
 
   const handleCopy = async (text: string, isHistoryId: string | null = null) => {
     if (!text) return;

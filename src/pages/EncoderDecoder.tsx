@@ -18,7 +18,7 @@ export function EncoderDecoder() {
     try {
       let res = '';
       if (mode === 'base64') {
-        res = btoa(unescape(encodeURIComponent(input)));
+        res = btoa(String.fromCharCode(...new TextEncoder().encode(input)));
       } else if (mode === 'url') {
         res = encodeURIComponent(input);
       } else if (mode === 'unicode') {
@@ -49,7 +49,9 @@ export function EncoderDecoder() {
     try {
       let res = '';
       if (mode === 'base64') {
-        res = decodeURIComponent(escape(atob(input)));
+        const binString = atob(input);
+        const bytes = Uint8Array.from(binString, (m) => m.codePointAt(0)!);
+        res = new TextDecoder().decode(bytes);
       } else if (mode === 'url') {
         res = decodeURIComponent(input);
       } else if (mode === 'unicode') {

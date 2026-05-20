@@ -27,7 +27,7 @@ export default function App() {
   });
   const { t } = useI18n();
   const updater = useUpdater();
-  const { hasUpdate, checkForUpdate } = updater;
+  const { hasUpdate, checkForUpdate, updateInfo } = updater;
 
   const [showUpdateModal, setShowUpdateModal] = useState(false);
 
@@ -40,13 +40,13 @@ export default function App() {
   }, [checkForUpdate]);
 
   useEffect(() => {
-    if (hasUpdate && updater.updateInfo) {
+    if (hasUpdate && updateInfo) {
       const skipped = localStorage.getItem('mtool_skipped_version');
-      if (skipped !== updater.updateInfo.version) {
+      if (skipped !== updateInfo.version) {
         setShowUpdateModal(true);
       }
     }
-  }, [hasUpdate, updater.updateInfo?.version]);
+  }, [hasUpdate, updateInfo]);
 
   const handleSkip = () => {
     if (updater.updateInfo) {

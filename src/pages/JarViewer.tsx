@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useRef } from 'react';
+import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { FileUp, FileArchive, Folder, File as FileIcon, FileJson, FileCode2, ChevronRight, ChevronDown, Package } from 'lucide-react';
 import { invoke } from '@tauri-apps/api/core';
 import { getCurrentWebview } from '@tauri-apps/api/webview';
@@ -185,7 +185,7 @@ export function JarViewer() {
     return () => { cleanup.then(fn => fn()); };
   }, []);
 
-  const loadEntryContent = async (basePath: string, entryPath: string, isJarEntry: boolean) => {
+  const loadEntryContent = useCallback(async (basePath: string, entryPath: string, isJarEntry: boolean) => {
     setSelectedEntry(entryPath || basePath);
     setLoading(true);
     setContent('');
@@ -207,18 +207,18 @@ export function JarViewer() {
         setLoading(false);
       }
     }
-  };
+  }, []);
 
-  const toggleDir = (path: string) => {
+  const toggleDir = useCallback((path: string) => {
     setExpandedDirs(prev => {
       const next = new Set(prev);
       if (next.has(path)) next.delete(path);
       else next.add(path);
       return next;
     });
-  };
+  }, []);
 
-  const renderTree = (node: TreeNode, depth = 0) => {
+  const renderTree = useCallback((node: TreeNode, depth = 0): React.ReactNode => {
     const entries = Object.values(node.children).sort((a, b) => {
       if (a.isDir && !b.isDir) return -1;
       if (!a.isDir && b.isDir) return 1;
@@ -262,7 +262,7 @@ export function JarViewer() {
         </div>
       );
     });
-  };
+  }, [expandedDirs, selectedEntry, filePath, isJar, toggleDir, loadEntryContent]);
 
   const { highlightedContent, lineCount } = useMemo(() => {
     if (!content) return { highlightedContent: '', lineCount: 0 };
@@ -282,7 +282,7 @@ export function JarViewer() {
   // Memoize tree rendering to prevent lag on large jars during sidebar resize
   const renderedTree = useMemo(() => {
     return tree ? renderTree(tree) : null;
-  }, [tree, expandedDirs, selectedEntry, filePath, isJar]);
+  }, [tree, renderTree]);
 
   if (!filePath) {
     return (
