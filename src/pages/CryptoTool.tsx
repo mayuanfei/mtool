@@ -78,7 +78,7 @@ export function CryptoTool() {
   const [padding, setPadding] = useState('Pkcs7');
 
   const [inputFormat, setInputFormat] = useState<DataFormat>('UTF8');
-  const [outputFormat, setOutputFormat] = useState<DataFormat>('BASE64');
+  const [outputFormat, setOutputFormat] = useState<DataFormat>('UTF8');
   const [keyFormat, setKeyFormat] = useState<DataFormat>('UTF8');
   const [ivFormat, setIvFormat] = useState<DataFormat>('UTF8');
   
