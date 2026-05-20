@@ -224,9 +224,14 @@ export function CryptoTool() {
                 : encrypted.toString();
           } else {
             // For decryption, CryptoJS takes Base64 string or CipherParams
-            let decryptInput = input;
-            if (inputFormat === 'HEX' || inputFormat === 'UTF8') {
-              decryptInput = CryptoJS.enc.Base64.stringify(parseData(input, inputFormat));
+            let decryptInput = input.trim();
+            if (inputFormat === 'HEX') {
+              decryptInput = CryptoJS.enc.Base64.stringify(CryptoJS.enc.Hex.parse(decryptInput));
+            } else if (inputFormat === 'UTF8') {
+              const isHex = /^[0-9a-fA-F]+$/.test(decryptInput);
+              if (isHex) {
+                decryptInput = CryptoJS.enc.Base64.stringify(CryptoJS.enc.Hex.parse(decryptInput));
+              }
             }
             const decrypted = engine.decrypt(decryptInput, keyWa, cfg);
             res = stringifyData(decrypted, outputFormat);
@@ -242,7 +247,29 @@ export function CryptoTool() {
             cfg.mode = 'cbc';
           }
           
-          const inputHex = toHex(input, inputFormat);
+          let inputHex = '';
+          if (isEncrypt) {
+            inputHex = toHex(input, inputFormat);
+          } else {
+            const cipherText = input.trim();
+            if (inputFormat === 'BASE64') {
+              inputHex = CryptoJS.enc.Hex.stringify(CryptoJS.enc.Base64.parse(cipherText));
+            } else if (inputFormat === 'HEX') {
+              inputHex = cipherText;
+            } else {
+              // inputFormat === 'UTF8'
+              const isHex = /^[0-9a-fA-F]+$/.test(cipherText);
+              if (isHex) {
+                inputHex = cipherText;
+              } else {
+                try {
+                  inputHex = CryptoJS.enc.Hex.stringify(CryptoJS.enc.Base64.parse(cipherText));
+                } catch (e) {
+                  inputHex = cipherText;
+                }
+              }
+            }
+          }
           // convert hex to byte array for sm-crypto
           const hexToBytes = (hex: string) => {
             let bytes = [];
