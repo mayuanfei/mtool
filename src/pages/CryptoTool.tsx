@@ -65,6 +65,50 @@ function CustomSelect<T extends string>({ options, value, onChange, disabled, cl
   );
 }
 
+function arrayBufferToBase64(buffer: ArrayBuffer): string {
+  let binary = '';
+  const bytes = new Uint8Array(buffer);
+  const len = bytes.byteLength;
+  for (let i = 0; i < len; i++) {
+    binary += String.fromCharCode(bytes[i]);
+  }
+  return window.btoa(binary);
+}
+
+function formatAsPem(base64: string, type: 'PUBLIC' | 'PRIVATE'): string {
+  const lines: string[] = [];
+  lines.push(`-----BEGIN ${type} KEY-----`);
+  for (let i = 0; i < base64.length; i += 64) {
+    lines.push(base64.slice(i, i + 64));
+  }
+  lines.push(`-----END ${type} KEY-----`);
+  return lines.join('\n');
+}
+
+async function generateRsaKeysWebCrypto(keySize: number): Promise<{ publicKey: string; privateKey: string }> {
+  const keyPair = await window.crypto.subtle.generateKey(
+    {
+      name: "RSASSA-PKCS1-v1_5",
+      modulusLength: keySize,
+      publicExponent: new Uint8Array([1, 0, 1]), // 65537
+      hash: "SHA-256",
+    },
+    true,
+    ["sign", "verify"]
+  );
+
+  const spki = await window.crypto.subtle.exportKey("spki", keyPair.publicKey);
+  const pkcs8 = await window.crypto.subtle.exportKey("pkcs8", keyPair.privateKey);
+
+  const pubBase64 = arrayBufferToBase64(spki);
+  const privBase64 = arrayBufferToBase64(pkcs8);
+
+  return {
+    publicKey: formatAsPem(pubBase64, 'PUBLIC'),
+    privateKey: formatAsPem(privBase64, 'PRIVATE')
+  };
+}
+
 export function CryptoTool() {
   const { t } = useI18n();
   const [category, setCategory] = useState<Category>('hash');
@@ -347,8 +391,8 @@ export function CryptoTool() {
         
         if (algorithm === 'AES' || algorithm === 'DES' || algorithm === '3DES') {
           const cfg: {
-            mode: any;
-            padding: any;
+            mode: typeof CryptoJS.mode.CBC;
+            padding: typeof CryptoJS.pad.Pkcs7;
             iv?: CryptoJS.lib.WordArray;
           } = { mode: getCryptoJsMode(), padding: getCryptoJsPadding() };
           if (mode === 'CBC') {
@@ -581,20 +625,17 @@ export function CryptoTool() {
     setIsLoading(true);
     try {
       if (algorithm === 'RSA') {
-        await new Promise<void>((resolve) => {
-          setTimeout(() => {
-            const encryptor = new JSEncrypt({ default_key_size: rsaKeySize });
-            encryptor.getKey();
-            setPublicKey(encryptor.getPublicKey());
-            setPrivateKey(encryptor.getPrivateKey());
-            resolve();
-          }, 10);
-        });
+        const size = parseInt(rsaKeySize, 10);
+        const keys = await generateRsaKeysWebCrypto(size);
+        setPublicKey(keys.publicKey);
+        setPrivateKey(keys.privateKey);
       } else if (algorithm === 'SM2') {
         const keypair = sm2.generateKeyPairHex();
         setPublicKey(keypair.publicKey);
         setPrivateKey(keypair.privateKey);
       }
+    } catch (err) {
+      console.error('Failed to generate key pair', err);
     } finally {
       setIsLoading(false);
     }

@@ -587,7 +587,7 @@ export function I18nProvider({ children }: { children: React.ReactNode }) {
     let text = translations[language][key] || key;
     if (params) {
       Object.entries(params).forEach(([k, v]) => {
-        text = text.replace(`{${k}}`, String(v));
+        text = text.split(`{${k}}`).join(String(v));
       });
     }
     return text;
