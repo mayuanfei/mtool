@@ -218,52 +218,6 @@ export function JarViewer() {
     });
   }, []);
 
-  const renderTree = useCallback((node: TreeNode, depth = 0): React.ReactNode => {
-    const entries = Object.values(node.children).sort((a, b) => {
-      if (a.isDir && !b.isDir) return -1;
-      if (!a.isDir && b.isDir) return 1;
-      return a.name.localeCompare(b.name);
-    });
-
-    return entries.map(child => {
-      const isExpanded = expandedDirs.has(child.path);
-      const isSelected = selectedEntry === child.path;
-
-      if (child.isDir) {
-        return (
-          <div key={child.path}>
-            <div 
-              className={`flex items-center gap-1.5 px-2 py-1 cursor-pointer select-none text-xs th-text-2 th-hover-surface transition-colors`}
-              style={{ paddingLeft: `${depth * 12 + 8}px` }}
-              onClick={() => toggleDir(child.path)}
-            >
-              <div className="w-4 h-4 flex items-center justify-center text-slate-400">
-                {isExpanded ? <ChevronDown className="w-3.5 h-3.5" /> : <ChevronRight className="w-3.5 h-3.5" />}
-              </div>
-              <Folder className="w-4 h-4 text-blue-400 flex-shrink-0" fill="currentColor" fillOpacity={0.2} />
-              <span className="truncate">{child.name}</span>
-            </div>
-            {isExpanded && renderTree(child, depth + 1)}
-          </div>
-        );
-      }
-
-      return (
-        <div 
-          key={child.path}
-          className={`flex items-center gap-2 px-2 py-1 cursor-pointer select-none text-xs transition-colors ${
-            isSelected ? 'bg-indigo-500/15 text-indigo-400 font-medium' : 'th-text-2 th-hover-surface'
-          }`}
-          style={{ paddingLeft: `${depth * 12 + 28}px` }}
-          onClick={() => loadEntryContent(filePath, child.path, isJar)}
-        >
-          {getIconForFile(child.name)}
-          <span className="truncate">{child.name}</span>
-        </div>
-      );
-    });
-  }, [expandedDirs, selectedEntry, filePath, isJar, toggleDir, loadEntryContent]);
-
   const { highlightedContent, lineCount } = useMemo(() => {
     if (!content) return { highlightedContent: '', lineCount: 0 };
 
@@ -281,8 +235,56 @@ export function JarViewer() {
 
   // Memoize tree rendering to prevent lag on large jars during sidebar resize
   const renderedTree = useMemo(() => {
-    return tree ? renderTree(tree) : null;
-  }, [tree, renderTree]);
+    if (!tree) return null;
+
+    const renderNode = (node: TreeNode, depth = 0): React.ReactNode => {
+      const entries = Object.values(node.children).sort((a, b) => {
+        if (a.isDir && !b.isDir) return -1;
+        if (!a.isDir && b.isDir) return 1;
+        return a.name.localeCompare(b.name);
+      });
+
+      return entries.map(child => {
+        const isExpanded = expandedDirs.has(child.path);
+        const isSelected = selectedEntry === child.path;
+
+        if (child.isDir) {
+          return (
+            <div key={child.path}>
+              <div 
+                className={`flex items-center gap-1.5 px-2 py-1 cursor-pointer select-none text-xs th-text-2 th-hover-surface transition-colors`}
+                style={{ paddingLeft: `${depth * 12 + 8}px` }}
+                onClick={() => toggleDir(child.path)}
+              >
+                <div className="w-4 h-4 flex items-center justify-center text-slate-400">
+                  {isExpanded ? <ChevronDown className="w-3.5 h-3.5" /> : <ChevronRight className="w-3.5 h-3.5" />}
+                </div>
+                <Folder className="w-4 h-4 text-blue-400 flex-shrink-0" fill="currentColor" fillOpacity={0.2} />
+                <span className="truncate">{child.name}</span>
+              </div>
+              {isExpanded && renderNode(child, depth + 1)}
+            </div>
+          );
+        }
+
+        return (
+          <div 
+            key={child.path}
+            className={`flex items-center gap-2 px-2 py-1 cursor-pointer select-none text-xs transition-colors ${
+              isSelected ? 'bg-indigo-500/15 text-indigo-400 font-medium' : 'th-text-2 th-hover-surface'
+            }`}
+            style={{ paddingLeft: `${depth * 12 + 28}px` }}
+            onClick={() => loadEntryContent(filePath, child.path, isJar)}
+          >
+            {getIconForFile(child.name)}
+            <span className="truncate">{child.name}</span>
+          </div>
+        );
+      });
+    };
+
+    return renderNode(tree);
+  }, [tree, expandedDirs, selectedEntry, filePath, isJar, toggleDir, loadEntryContent]);
 
   if (!filePath) {
     return (

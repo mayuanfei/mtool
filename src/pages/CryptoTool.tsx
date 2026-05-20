@@ -124,6 +124,9 @@ export function CryptoTool() {
     setAlgorithm(algorithms[c][0]);
     setOutput('');
     setError(null);
+    if (c === 'hash' && outputFormat === 'UTF8') {
+      setOutputFormat('HEX');
+    }
   };
 
   const handleAlgorithmChange = (a: Algorithm) => {
@@ -227,6 +230,12 @@ export function CryptoTool() {
       await new Promise((resolve) => setTimeout(resolve, 50));
     }
 
+    let currentOutputFormat = outputFormat;
+    if (isEncrypt && outputFormat === 'UTF8') {
+      currentOutputFormat = 'BASE64';
+      setOutputFormat('BASE64');
+    }
+
     try {
       let res = '';
       
@@ -242,20 +251,24 @@ export function CryptoTool() {
           const hexIn = toHex(input, inputFormat);
           const bytes = [];
           for (let c = 0; c < hexIn.length; c += 2) {
-            bytes.push(parseInt(hexIn.substr(c, 2), 16));
+            bytes.push(parseInt(hexIn.slice(c, c + 2), 16));
           }
           hashWa = CryptoJS.enc.Hex.parse(sm3(bytes));
         }
-        res = (outputFormat === 'UTF8' && hashWa)
+        res = (currentOutputFormat === 'UTF8' && hashWa)
           ? CryptoJS.enc.Base64.stringify(hashWa)
-          : stringifyData(hashWa, outputFormat);
+          : stringifyData(hashWa, currentOutputFormat);
       } 
       // ================= SYMMETRIC =================
       else if (category === 'symmetric') {
         if (!cryptoKey) throw new Error(t('Key is required.'));
         
         if (algorithm === 'AES' || algorithm === 'DES' || algorithm === '3DES') {
-          const cfg: any = { mode: getCryptoJsMode(), padding: getCryptoJsPadding() };
+          const cfg: {
+            mode: any;
+            padding: any;
+            iv?: CryptoJS.lib.WordArray;
+          } = { mode: getCryptoJsMode(), padding: getCryptoJsPadding() };
           if (mode === 'CBC') {
             if (!iv) throw new Error(t('IV is required for CBC mode.'));
             cfg.iv = adjustIvSize(parseData(iv, ivFormat), algorithm);
@@ -267,8 +280,8 @@ export function CryptoTool() {
 
           if (isEncrypt) {
             const encrypted = engine.encrypt(inputWa, keyWa, cfg);
-            res = outputFormat === 'HEX' ? encrypted.ciphertext.toString(CryptoJS.enc.Hex)
-                : outputFormat === 'UTF8' ? encrypted.toString() // Fallback to Base64 for binary ciphertext
+            res = currentOutputFormat === 'HEX' ? encrypted.ciphertext.toString(CryptoJS.enc.Hex)
+                : currentOutputFormat === 'UTF8' ? encrypted.toString() // Fallback to Base64 for binary ciphertext
                 : encrypted.toString();
           } else {
             // For decryption, CryptoJS takes Base64 string or CipherParams
@@ -282,7 +295,7 @@ export function CryptoTool() {
               }
             }
             const decrypted = engine.decrypt(decryptInput, keyWa, cfg);
-            res = stringifyData(decrypted, outputFormat);
+            res = stringifyData(decrypted, currentOutputFormat);
             if (!res) throw new Error(t('Decryption failed. Invalid Key/IV or data.'));
           }
         } 
@@ -323,7 +336,7 @@ export function CryptoTool() {
           // convert hex to byte array for sm-crypto
           const hexToBytes = (hex: string) => {
             let bytes = [];
-            for (let c = 0; c < hex.length; c += 2) bytes.push(parseInt(hex.substr(c, 2), 16));
+            for (let c = 0; c < hex.length; c += 2) bytes.push(parseInt(hex.slice(c, c + 2), 16));
             return bytes;
           };
 
@@ -342,9 +355,9 @@ export function CryptoTool() {
               cfg.padding = 'pkcs#7';
             }
             const outHex = sm4.encrypt(inBytes, keyHex, cfg);
-            res = outputFormat === 'UTF8'
+            res = currentOutputFormat === 'UTF8'
               ? CryptoJS.enc.Base64.stringify(CryptoJS.enc.Hex.parse(outHex))
-              : fromHex(outHex, outputFormat);
+              : fromHex(outHex, currentOutputFormat);
           } else {
             if (padding === 'ZeroPadding' || padding === 'NoPadding') {
               cfg.padding = 'none';
@@ -361,7 +374,7 @@ export function CryptoTool() {
               unpaddedBytes = unpaddedBytes.slice(0, len);
             }
             const outHex = unpaddedBytes.map((b: number) => b.toString(16).padStart(2, '0')).join('');
-            res = fromHex(outHex, outputFormat);
+            res = fromHex(outHex, currentOutputFormat);
           }
         }
       }
@@ -387,7 +400,7 @@ export function CryptoTool() {
             const encoded = encryptor.encrypt(plaintext);
             if (!encoded) throw new Error(t('RSA Encryption failed.'));
             
-            if (outputFormat === 'HEX') {
+            if (currentOutputFormat === 'HEX') {
               res = CryptoJS.enc.Hex.stringify(CryptoJS.enc.Base64.parse(encoded));
             } else {
               res = encoded; // Default is BASE64
@@ -409,9 +422,9 @@ export function CryptoTool() {
             const decoded = encryptor.decrypt(ciphertextBase64);
             if (!decoded) throw new Error(t('RSA Decryption failed.'));
             
-            if (outputFormat === 'HEX') {
+            if (currentOutputFormat === 'HEX') {
               res = CryptoJS.enc.Hex.stringify(CryptoJS.enc.Utf8.parse(decoded));
-            } else if (outputFormat === 'BASE64') {
+            } else if (currentOutputFormat === 'BASE64') {
               res = CryptoJS.enc.Base64.stringify(CryptoJS.enc.Utf8.parse(decoded));
             } else {
               res = decoded; // Default UTF-8
@@ -435,7 +448,7 @@ export function CryptoTool() {
             
             const cipherHex = sm2.doEncrypt(plaintext, publicKey, 1); // 1 for cipherMode C1C3C2
             
-            if (outputFormat === 'BASE64' || outputFormat === 'UTF8') {
+            if (currentOutputFormat === 'BASE64' || currentOutputFormat === 'UTF8') {
               res = CryptoJS.enc.Base64.stringify(CryptoJS.enc.Hex.parse(cipherHex));
             } else {
               res = cipherHex; // Default is HEX
@@ -456,10 +469,11 @@ export function CryptoTool() {
             }
             
             const decoded = sm2.doDecrypt(ciphertextHex, privateKey, 1, { output: 'string' });
+            if (!decoded) throw new Error(t('SM2 Decryption failed.'));
             
-            if (outputFormat === 'HEX') {
+            if (currentOutputFormat === 'HEX') {
               res = CryptoJS.enc.Hex.stringify(CryptoJS.enc.Utf8.parse(decoded));
-            } else if (outputFormat === 'BASE64') {
+            } else if (currentOutputFormat === 'BASE64') {
               res = CryptoJS.enc.Base64.stringify(CryptoJS.enc.Utf8.parse(decoded));
             } else {
               res = decoded; // Default UTF-8
@@ -782,7 +796,9 @@ export function CryptoTool() {
                   value={outputFormat}
                   onChange={(val: DataFormat) => setOutputFormat(val)}
                   options={
-                    [{ value: 'UTF8', label: t('UTF8') }, { value: 'HEX', label: t('HEX') }, { value: 'BASE64', label: t('BASE64') }]
+                    category === 'hash'
+                      ? [{ value: 'HEX', label: t('HEX') }, { value: 'BASE64', label: t('BASE64') }]
+                      : [{ value: 'UTF8', label: t('UTF8') }, { value: 'HEX', label: t('HEX') }, { value: 'BASE64', label: t('BASE64') }]
                   }
                   className="text-xs th-text-3 hover:text-indigo-400 font-medium bg-indigo-500/5 px-2 py-1 rounded"
                   menuClassName="left-0 min-w-[6rem]"
