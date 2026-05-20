@@ -319,9 +319,14 @@ export function CryptoTool() {
             if (!privateKey) throw new Error(t('Private Key is required for decryption.'));
             encryptor.setPrivateKey(privateKey);
             
-            let ciphertextBase64 = input;
+            let ciphertextBase64 = input.trim();
             if (inputFormat === 'HEX') {
-              ciphertextBase64 = CryptoJS.enc.Base64.stringify(CryptoJS.enc.Hex.parse(input));
+              ciphertextBase64 = CryptoJS.enc.Base64.stringify(CryptoJS.enc.Hex.parse(ciphertextBase64));
+            } else if (inputFormat === 'UTF8') {
+              const isHex = /^[0-9a-fA-F]+$/.test(ciphertextBase64);
+              if (isHex) {
+                ciphertextBase64 = CryptoJS.enc.Base64.stringify(CryptoJS.enc.Hex.parse(ciphertextBase64));
+              }
             }
             
             const decoded = encryptor.decrypt(ciphertextBase64);
@@ -361,9 +366,16 @@ export function CryptoTool() {
           } else {
             if (!privateKey) throw new Error(t('Private Key is required for decryption.'));
             
-            let ciphertextHex = input;
+            let ciphertextHex = input.trim();
             if (inputFormat === 'BASE64') {
-              ciphertextHex = CryptoJS.enc.Hex.stringify(CryptoJS.enc.Base64.parse(input));
+              ciphertextHex = CryptoJS.enc.Hex.stringify(CryptoJS.enc.Base64.parse(ciphertextHex));
+            } else if (inputFormat === 'UTF8') {
+              const isHex = /^[0-9a-fA-F]+$/.test(ciphertextHex);
+              if (!isHex) {
+                try {
+                  ciphertextHex = CryptoJS.enc.Hex.stringify(CryptoJS.enc.Base64.parse(ciphertextHex));
+                } catch (e) {}
+              }
             }
             
             const decoded = sm2.doDecrypt(ciphertextHex, privateKey, 1, { output: 'string' });
