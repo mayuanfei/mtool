@@ -2,7 +2,7 @@
 
 > 一款面向开发者的跨平台桌面效率工具箱，基于 **Tauri v2 + React 19 + TypeScript** 构建。
 
-[![Version](https://img.shields.io/badge/version-1.0.5-blue)](https://github.com/mayuanfei/mtool)
+[![Version](https://img.shields.io/badge/version-1.0.9-blue)](https://github.com/mayuanfei/mtool)
 [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 [![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Windows-lightgrey)]()
 
@@ -20,6 +20,8 @@
 | 📷 文本转二维码 | 将任意文本/URL 生成高清 PNG 二维码，支持自定义颜色 |
 | 🔍 文件对比 | 双栏并排对比两份文本内容，支持行级与词级差异高亮 |
 | 📦 JAR 查看器 | 浏览 JAR/ZIP 归档结构，反编译 `.class` 文件查看 Java 源码 |
+| 🔄 编码/解码 | 支持 Base64、URL、Unicode、HTML Entity、XML Entity 的相互编解码 |
+| 🔑 加密/解密 | 支持多种哈希（MD5、SHA、SM3 等）、对称加密（AES、DES、3DES）与非对称加密（RSA、SM2） |
 
 ---
 
@@ -205,6 +207,31 @@ npm run tauri build
 
 ---
 
+### 🔄 编码/解码
+
+支持常见的编码转换格式，可快速进行字符串的编码与解码：
+
+1. **选择模式**：支持 Base64、URL、Unicode、HTML Entity、XML Entity。
+2. **输入内容**：在左侧「Input」文本框中输入需要处理的字符串。
+3. **编解码操作**：
+   - 点击「Encode」进行编码，结果输出在右侧。
+   - 点击「Decode」进行解码，结果输出在右侧。
+4. **复制**：点击右侧「Copy」按钮将结果复制到剪贴板。
+
+---
+
+### 🔑 加密/解密
+
+提供全面的哈希计算与对称/非对称密码学算法支持：
+
+1. **算法分类**：
+   - **哈希 (Hash)**：支持 MD5, SHA-1, SHA-224, SHA-256, SHA-384, SHA-512, RIPEMD-160, SM3（支持输入 UTF8/Hex 格式，输出 Hex/Base64/UTF8 格式）。
+   - **对称加密 (Symmetric)**：支持 AES, DES, 3DES。支持选择 CBC, ECB, CFB, OFB, CTR 等模式，以及 Pkcs7, ZeroPadding, NoPadding 等填充方式，智能提示并矫正密钥/IV长度（对 3DES 16字节密钥支持标准的 K3=K1 双密钥复制）。
+   - **非对称加密 (Asymmetric)**：支持 RSA、国密 SM2。支持在客户端非阻塞异步生成强密钥对，并完成数据的加密与解密。
+2. **错误自愈与安全检测**：当输入的密钥/IV长度或格式不符合算法规范时，工具会提供醒目的黄色警告提示并自动进行截断或标准补零/自愈。
+
+---
+
 ## ⚙️ 设置
 
 | 选项 | 说明 |
@@ -231,6 +258,8 @@ mtool/
 │   │   ├── TextToQr      # 文本转二维码
 │   │   ├── FileDiff      # 文件对比
 │   │   ├── JarViewer     # JAR 查看器
+│   │   ├── EncoderDecoder# 编码/解码
+│   │   ├── CryptoTool    # 加密/解密
 │   │   └── Settings      # 设置页面
 │   ├── components/       # 公共 UI 组件
 │   ├── App.tsx           # 应用主入口与路由状态
@@ -255,6 +284,7 @@ mtool/
 - **数据库**：SQLite (FTS5 全文索引) via `rusqlite`
 - **差异对比**：Myers diff 算法（前端纯 TypeScript 实现）
 - **反编译**：CFR (Class File Reader) — Java 字节码反编译器
+- **密码与加密**：CryptoJS · sm-crypto (国密 SM2/SM3) · JSEncrypt · Web Crypto API (异步非阻塞密钥生成)
 - **二维码**：`qrcode` crate
 - **Markdown**：`marked` + `highlight.js`
 
