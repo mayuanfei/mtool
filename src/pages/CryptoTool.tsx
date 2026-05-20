@@ -220,7 +220,7 @@ export function CryptoTool() {
           if (isEncrypt) {
             const encrypted = engine.encrypt(inputWa, keyWa, cfg);
             res = outputFormat === 'HEX' ? encrypted.ciphertext.toString(CryptoJS.enc.Hex)
-                : outputFormat === 'UTF8' ? encrypted.ciphertext.toString(CryptoJS.enc.Utf8)
+                : outputFormat === 'UTF8' ? encrypted.toString() // Fallback to Base64 for binary ciphertext
                 : encrypted.toString();
           } else {
             // For decryption, CryptoJS takes Base64 string or CipherParams
@@ -265,7 +265,9 @@ export function CryptoTool() {
               cfg.padding = 'pkcs#7';
             }
             const outHex = sm4.encrypt(inBytes, keyHex, cfg);
-            res = fromHex(outHex, outputFormat);
+            res = outputFormat === 'UTF8'
+              ? CryptoJS.enc.Base64.stringify(CryptoJS.enc.Hex.parse(outHex))
+              : fromHex(outHex, outputFormat);
           } else {
             if (padding === 'ZeroPadding' || padding === 'NoPadding') {
               cfg.padding = 'none';
@@ -351,7 +353,7 @@ export function CryptoTool() {
             
             const cipherHex = sm2.doEncrypt(plaintext, publicKey, 1); // 1 for cipherMode C1C3C2
             
-            if (outputFormat === 'BASE64') {
+            if (outputFormat === 'BASE64' || outputFormat === 'UTF8') {
               res = CryptoJS.enc.Base64.stringify(CryptoJS.enc.Hex.parse(cipherHex));
             } else {
               res = cipherHex; // Default is HEX
