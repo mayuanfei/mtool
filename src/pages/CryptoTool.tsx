@@ -85,6 +85,7 @@ export function CryptoTool() {
   // For Asymmetric
   const [publicKey, setPublicKey] = useState('');
   const [privateKey, setPrivateKey] = useState('');
+  const [rsaKeySize, setRsaKeySize] = useState('2048');
 
   // For HQ DLL
   const [jarPath, setJarPath] = useState(() => localStorage.getItem('mtool_hq_jar') || '');
@@ -215,6 +216,74 @@ export function CryptoTool() {
     return ivWa;
   };
 
+  const getKeyIvWarnings = () => {
+    if (category !== 'symmetric') return { keyWarning: null, ivWarning: null };
+    if (!cryptoKey) return { keyWarning: null, ivWarning: null };
+
+    let keyWarning: string | null = null;
+    let ivWarning: string | null = null;
+
+    try {
+      const parsedKey = parseData(cryptoKey, keyFormat);
+      const keyBytes = parsedKey.sigBytes;
+      let targetKeyBytes = 0;
+
+      if (algorithm === 'AES') {
+        if (keyBytes > 0 && keyBytes !== 16 && keyBytes !== 24 && keyBytes !== 32) {
+          targetKeyBytes = keyBytes <= 16 ? 16 : keyBytes <= 24 ? 24 : 32;
+        }
+      } else if (algorithm === 'DES') {
+        if (keyBytes > 0 && keyBytes !== 8) {
+          targetKeyBytes = 8;
+        }
+      } else if (algorithm === '3DES') {
+        if (keyBytes > 0 && keyBytes !== 24) {
+          targetKeyBytes = 24;
+        }
+      } else if (algorithm === 'SM4') {
+        if (keyBytes > 0 && keyBytes !== 16) {
+          targetKeyBytes = 16;
+        }
+      }
+
+      if (targetKeyBytes > 0) {
+        const actionStr = keyBytes < targetKeyBytes ? t('padded') : t('truncated');
+        keyWarning = `${t('Key length mismatch (current: ')}${keyBytes}${t(') will be ')}${actionStr}${t(' to ')}${targetKeyBytes}${t(' bytes.')}`;
+      }
+    } catch (e) {
+      keyWarning = t('Invalid key format');
+    }
+
+    if (mode === 'CBC' && iv) {
+      try {
+        const parsedIv = parseData(iv, ivFormat);
+        const ivBytes = parsedIv.sigBytes;
+        let targetIvBytes = 0;
+
+        if (algorithm === 'AES' || algorithm === 'SM4') {
+          if (ivBytes > 0 && ivBytes !== 16) {
+            targetIvBytes = 16;
+          }
+        } else if (algorithm === 'DES' || algorithm === '3DES') {
+          if (ivBytes > 0 && ivBytes !== 8) {
+            targetIvBytes = 8;
+          }
+        }
+
+        if (targetIvBytes > 0) {
+          const actionStr = ivBytes < targetIvBytes ? t('padded') : t('truncated');
+          ivWarning = `${t('IV length mismatch (current: ')}${ivBytes}${t(') will be ')}${actionStr}${t(' to ')}${targetIvBytes}${t(' bytes.')}`;
+        }
+      } catch (e) {
+        ivWarning = t('Invalid IV format');
+      }
+    }
+
+    return { keyWarning, ivWarning };
+  };
+
+  const { keyWarning, ivWarning } = getKeyIvWarnings();
+
   const handleAction = async (isEncrypt: boolean) => {
     if (!input) {
       setError(t('Payload is empty'));
@@ -233,7 +302,6 @@ export function CryptoTool() {
     let currentOutputFormat = outputFormat;
     if (isEncrypt && outputFormat === 'UTF8') {
       currentOutputFormat = 'BASE64';
-      setOutputFormat('BASE64');
     }
 
     try {
@@ -288,11 +356,6 @@ export function CryptoTool() {
             let decryptInput = input.trim();
             if (inputFormat === 'HEX') {
               decryptInput = CryptoJS.enc.Base64.stringify(CryptoJS.enc.Hex.parse(decryptInput));
-            } else if (inputFormat === 'UTF8') {
-              const isHex = /^[0-9a-fA-F]+$/.test(decryptInput);
-              if (isHex) {
-                decryptInput = CryptoJS.enc.Base64.stringify(CryptoJS.enc.Hex.parse(decryptInput));
-              }
             }
             const decrypted = engine.decrypt(decryptInput, keyWa, cfg);
             res = stringifyData(decrypted, currentOutputFormat);
@@ -315,22 +378,10 @@ export function CryptoTool() {
             inputHex = toHex(input, inputFormat);
           } else {
             const cipherText = input.trim();
-            if (inputFormat === 'BASE64') {
+            if (inputFormat === 'BASE64' || inputFormat === 'UTF8') {
               inputHex = CryptoJS.enc.Hex.stringify(CryptoJS.enc.Base64.parse(cipherText));
             } else if (inputFormat === 'HEX') {
               inputHex = cipherText;
-            } else {
-              // inputFormat === 'UTF8'
-              const isHex = /^[0-9a-fA-F]+$/.test(cipherText);
-              if (isHex) {
-                inputHex = cipherText;
-              } else {
-                try {
-                  inputHex = CryptoJS.enc.Hex.stringify(CryptoJS.enc.Base64.parse(cipherText));
-                } catch (e) {
-                  inputHex = cipherText;
-                }
-              }
             }
           }
           // convert hex to byte array for sm-crypto
@@ -412,11 +463,6 @@ export function CryptoTool() {
             let ciphertextBase64 = input.trim();
             if (inputFormat === 'HEX') {
               ciphertextBase64 = CryptoJS.enc.Base64.stringify(CryptoJS.enc.Hex.parse(ciphertextBase64));
-            } else if (inputFormat === 'UTF8') {
-              const isHex = /^[0-9a-fA-F]+$/.test(ciphertextBase64);
-              if (isHex) {
-                ciphertextBase64 = CryptoJS.enc.Base64.stringify(CryptoJS.enc.Hex.parse(ciphertextBase64));
-              }
             }
             
             const decoded = encryptor.decrypt(ciphertextBase64);
@@ -447,6 +493,7 @@ export function CryptoTool() {
             }
             
             const cipherHex = sm2.doEncrypt(plaintext, publicKey, 1); // 1 for cipherMode C1C3C2
+            if (!cipherHex || cipherHex === 'null') throw new Error(t('SM2 Encryption failed.'));
             
             if (currentOutputFormat === 'BASE64' || currentOutputFormat === 'UTF8') {
               res = CryptoJS.enc.Base64.stringify(CryptoJS.enc.Hex.parse(cipherHex));
@@ -457,15 +504,8 @@ export function CryptoTool() {
             if (!privateKey) throw new Error(t('Private Key is required for decryption.'));
             
             let ciphertextHex = input.trim();
-            if (inputFormat === 'BASE64') {
+            if (inputFormat === 'BASE64' || inputFormat === 'UTF8') {
               ciphertextHex = CryptoJS.enc.Hex.stringify(CryptoJS.enc.Base64.parse(ciphertextHex));
-            } else if (inputFormat === 'UTF8') {
-              const isHex = /^[0-9a-fA-F]+$/.test(ciphertextHex);
-              if (!isHex) {
-                try {
-                  ciphertextHex = CryptoJS.enc.Hex.stringify(CryptoJS.enc.Base64.parse(ciphertextHex));
-                } catch (e) {}
-              }
             }
             
             const decoded = sm2.doDecrypt(ciphertextHex, privateKey, 1, { output: 'string' });
@@ -529,7 +569,7 @@ export function CryptoTool() {
       if (algorithm === 'RSA') {
         await new Promise<void>((resolve) => {
           setTimeout(() => {
-            const encryptor = new JSEncrypt({ default_key_size: '1024' });
+            const encryptor = new JSEncrypt({ default_key_size: rsaKeySize });
             encryptor.getKey();
             setPublicKey(encryptor.getPublicKey());
             setPrivateKey(encryptor.getPrivateKey());
@@ -631,6 +671,12 @@ export function CryptoTool() {
                 placeholder="Secret Key"
                 className="w-full px-3 py-2 bg-transparent border th-border rounded-lg th-text text-sm focus:ring-1 focus:ring-indigo-500 outline-none placeholder:text-gray-500/40"
               />
+              {keyWarning && (
+                <span className="text-[10px] text-amber-500 font-medium leading-normal flex items-start gap-1">
+                  <span>⚠️</span>
+                  <span>{keyWarning}</span>
+                </span>
+              )}
             </div>
             <div className="flex flex-col gap-1.5 col-span-1">
               <div className="flex justify-between items-center">
@@ -652,6 +698,12 @@ export function CryptoTool() {
                 placeholder={mode === 'ECB' ? t('Not needed for ECB') : 'Initialization Vector'}
                 className="w-full px-3 py-2 bg-transparent border th-border rounded-lg th-text text-sm focus:ring-1 focus:ring-indigo-500 outline-none disabled:opacity-50 placeholder:text-gray-500/40"
               />
+              {ivWarning && (
+                <span className="text-[10px] text-amber-500 font-medium leading-normal flex items-start gap-1">
+                  <span>⚠️</span>
+                  <span>{ivWarning}</span>
+                </span>
+              )}
             </div>
           </div>
         )}
@@ -660,13 +712,27 @@ export function CryptoTool() {
           <div className="flex flex-col gap-4 shrink-0 border th-border rounded-xl p-4 th-bg-surface-h">
             <div className="flex justify-between items-center">
               <span className="text-xs font-semibold th-text-muted uppercase">{t('Keys Configuration')}</span>
-              <button 
-                onClick={generateKeys}
-                disabled={isLoading}
-                className={`text-xs font-medium transition-colors ${isLoading ? 'text-indigo-400/50 cursor-not-allowed' : 'text-indigo-400 hover:text-indigo-300'}`}
-              >
-                {t('Auto Generate Key Pair')}
-              </button>
+              <div className="flex items-center gap-3">
+                {algorithm === 'RSA' && (
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-[10px] th-text-3 font-medium">{t('Key Size')}:</span>
+                    <CustomSelect 
+                      value={rsaKeySize}
+                      onChange={(val: string) => setRsaKeySize(val)}
+                      options={[{ value: '1024', label: '1024' }, { value: '2048', label: '2048' }, { value: '4096', label: '4096' }]}
+                      className="text-[10px] th-text-3 hover:text-indigo-400 font-medium"
+                      menuClassName="right-0 min-w-[6rem]"
+                    />
+                  </div>
+                )}
+                <button 
+                  onClick={generateKeys}
+                  disabled={isLoading}
+                  className={`text-xs font-medium transition-colors ${isLoading ? 'text-indigo-400/50 cursor-not-allowed' : 'text-indigo-400 hover:text-indigo-300'}`}
+                >
+                  {t('Auto Generate Key Pair')}
+                </button>
+              </div>
             </div>
             <div className="grid grid-cols-2 gap-4">
               <div className="flex flex-col gap-1.5 col-span-1">
