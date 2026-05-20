@@ -34,3 +34,7 @@
 ## Change Guidance
 - Keep frontend changes aligned with the existing single-state page switch unless you are intentionally introducing routing.
 - If you add a new native command, register it in `src-tauri/src/lib.rs` via `invoke_handler`; nothing else in the repo auto-discovers Rust commands.
+
+## Communication
+- Always communicate with the user in Chinese. 和用户沟通时，务必使用中文。
+
