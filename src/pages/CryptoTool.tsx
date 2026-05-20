@@ -406,7 +406,11 @@ export function CryptoTool() {
         }
       }
 
-      setOutput(res);
+      if (res === 'null' || res === null || res === undefined) {
+        setOutput('');
+      } else {
+        setOutput(res);
+      }
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
