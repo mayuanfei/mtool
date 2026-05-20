@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useMemo } from 'react';
 import { Lock, Copy, Trash2, ArrowDown, Check, ChevronDown, XCircle } from 'lucide-react';
 import { useI18n } from '../i18n';
 import CryptoJS from 'crypto-js';
@@ -195,6 +195,14 @@ export function CryptoTool() {
       return forceSize(keyWa, 8);
     }
     if (algo === '3DES') {
+      const bytes = keyWa.sigBytes;
+      if (bytes === 16) {
+        // Copy first 8 bytes to the end (K3 = K1)
+        const words = [...keyWa.words];
+        words[4] = words[0];
+        words[5] = words[1];
+        return CryptoJS.lib.WordArray.create(words, 24);
+      }
       return forceSize(keyWa, 24);
     }
     if (algo === 'SM4') {
@@ -216,7 +224,7 @@ export function CryptoTool() {
     return ivWa;
   };
 
-  const getKeyIvWarnings = () => {
+  const { keyWarning, ivWarning } = useMemo(() => {
     if (category !== 'symmetric') return { keyWarning: null, ivWarning: null };
     if (!cryptoKey) return { keyWarning: null, ivWarning: null };
 
@@ -237,7 +245,7 @@ export function CryptoTool() {
           targetKeyBytes = 8;
         }
       } else if (algorithm === '3DES') {
-        if (keyBytes > 0 && keyBytes !== 24) {
+        if (keyBytes > 0 && keyBytes !== 24 && keyBytes !== 16) {
           targetKeyBytes = 24;
         }
       } else if (algorithm === 'SM4') {
@@ -248,7 +256,11 @@ export function CryptoTool() {
 
       if (targetKeyBytes > 0) {
         const actionStr = keyBytes < targetKeyBytes ? t('padded') : t('truncated');
-        keyWarning = `${t('Key length mismatch (current: ')}${keyBytes}${t(') will be ')}${actionStr}${t(' to ')}${targetKeyBytes}${t(' bytes.')}`;
+        keyWarning = t('Key length mismatch (current: {current}B), it will be {action} to {target}B.', {
+          current: keyBytes,
+          action: actionStr,
+          target: targetKeyBytes
+        });
       }
     } catch (e) {
       keyWarning = t('Invalid key format');
@@ -272,7 +284,11 @@ export function CryptoTool() {
 
         if (targetIvBytes > 0) {
           const actionStr = ivBytes < targetIvBytes ? t('padded') : t('truncated');
-          ivWarning = `${t('IV length mismatch (current: ')}${ivBytes}${t(') will be ')}${actionStr}${t(' to ')}${targetIvBytes}${t(' bytes.')}`;
+          ivWarning = t('IV length mismatch (current: {current}B), it will be {action} to {target}B.', {
+            current: ivBytes,
+            action: actionStr,
+            target: targetIvBytes
+          });
         }
       } catch (e) {
         ivWarning = t('Invalid IV format');
@@ -280,9 +296,7 @@ export function CryptoTool() {
     }
 
     return { keyWarning, ivWarning };
-  };
-
-  const { keyWarning, ivWarning } = getKeyIvWarnings();
+  }, [category, cryptoKey, keyFormat, algorithm, mode, iv, ivFormat, t]);
 
   const handleAction = async (isEncrypt: boolean) => {
     if (!input) {
@@ -730,7 +744,7 @@ export function CryptoTool() {
                   disabled={isLoading}
                   className={`text-xs font-medium transition-colors ${isLoading ? 'text-indigo-400/50 cursor-not-allowed' : 'text-indigo-400 hover:text-indigo-300'}`}
                 >
-                  {t('Auto Generate Key Pair')}
+                  {isLoading ? t('Generating...') : t('Auto Generate Key Pair')}
                 </button>
               </div>
             </div>

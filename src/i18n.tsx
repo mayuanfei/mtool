@@ -251,13 +251,11 @@ const translations = {
     'Key Size': 'Key Size',
     'padded': 'padded',
     'truncated': 'truncated',
-    'Key length mismatch (current: ': 'Key length mismatch (current: ',
-    ') will be ': ') will be ',
-    ' to ': ' to ',
-    ' bytes.': ' bytes.',
-    'IV length mismatch (current: ': 'IV length mismatch (current: ',
+    'Key length mismatch (current: {current}B), it will be {action} to {target}B.': 'Key length mismatch (current: {current}B), it will be {action} to {target}B.',
+    'IV length mismatch (current: {current}B), it will be {action} to {target}B.': 'IV length mismatch (current: {current}B), it will be {action} to {target}B.',
     'Invalid key format': 'Invalid key format',
     'Invalid IV format': 'Invalid IV format',
+    'Generating...': 'Generating...',
     'Keys Configuration': 'Keys Configuration',
     'Auto Generate Key Pair': 'Auto Generate Key Pair',
     'Public Key': 'Public Key',
@@ -532,13 +530,11 @@ const translations = {
     'Key Size': '密钥长度',
     'padded': '补零',
     'truncated': '截断',
-    'Key length mismatch (current: ': '密钥长度不符（当前为 ',
-    ') will be ': ' 字节），将被',
-    ' to ': '至 ',
-    ' bytes.': ' 字节。',
-    'IV length mismatch (current: ': '偏移量(IV)长度不符（当前为 ',
+    'Key length mismatch (current: {current}B), it will be {action} to {target}B.': '密钥长度不符（当前为 {current} 字节），将被{action}至 {target} 字节。',
+    'IV length mismatch (current: {current}B), it will be {action} to {target}B.': '偏移量(IV)长度不符（当前为 {current} 字节），将被{action}至 {target} 字节。',
     'Invalid key format': '密钥格式无效',
     'Invalid IV format': '偏移量(IV)格式无效',
+    'Generating...': '生成中...',
     'Keys Configuration': '密钥配置',
     'Auto Generate Key Pair': '一键生成密钥对',
     'Public Key': '公钥',
@@ -572,7 +568,7 @@ export type TranslationKey = keyof typeof translations.en;
 type I18nContextType = {
   language: Language;
   setLanguage: (lang: Language) => void;
-  t: (key: TranslationKey) => string;
+  t: (key: TranslationKey, params?: Record<string, string | number>) => string;
 };
 
 const I18nContext = createContext<I18nContextType | undefined>(undefined);
@@ -587,8 +583,14 @@ export function I18nProvider({ children }: { children: React.ReactNode }) {
     localStorage.setItem('mtool_language', language);
   }, [language]);
 
-  const t = useCallback((key: TranslationKey) => {
-    return translations[language][key] || key;
+  const t = useCallback((key: TranslationKey, params?: Record<string, string | number>) => {
+    let text = translations[language][key] || key;
+    if (params) {
+      Object.entries(params).forEach(([k, v]) => {
+        text = text.replace(`{${k}}`, String(v));
+      });
+    }
+    return text;
   }, [language]);
 
   return (
