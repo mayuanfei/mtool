@@ -166,6 +166,56 @@ export function CryptoTool() {
     return stringifyData(CryptoJS.enc.Hex.parse(hexData), format);
   };
 
+  const forceSize = (wordArray: CryptoJS.lib.WordArray, targetBytes: number) => {
+    const words = wordArray.words;
+    
+    const newWords = [];
+    for (let i = 0; i < Math.ceil(targetBytes / 4); i++) {
+      newWords.push(words[i] || 0);
+    }
+    
+    const lastWordIndex = Math.ceil(targetBytes / 4) - 1;
+    const remainingBytes = targetBytes % 4;
+    if (remainingBytes !== 0 && newWords[lastWordIndex] !== undefined) {
+      const mask = 0xffffffff << (8 * (4 - remainingBytes));
+      newWords[lastWordIndex] &= mask;
+    }
+    
+    return CryptoJS.lib.WordArray.create(newWords, targetBytes);
+  };
+
+  const adjustKeySize = (keyWa: CryptoJS.lib.WordArray, algo: string) => {
+    if (algo === 'AES') {
+      const bytes = keyWa.sigBytes;
+      if (bytes <= 16) return forceSize(keyWa, 16);
+      if (bytes <= 24) return forceSize(keyWa, 24);
+      return forceSize(keyWa, 32);
+    }
+    if (algo === 'DES') {
+      return forceSize(keyWa, 8);
+    }
+    if (algo === '3DES') {
+      return forceSize(keyWa, 24);
+    }
+    if (algo === 'SM4') {
+      return forceSize(keyWa, 16);
+    }
+    return keyWa;
+  };
+
+  const adjustIvSize = (ivWa: CryptoJS.lib.WordArray, algo: string) => {
+    if (algo === 'AES') {
+      return forceSize(ivWa, 16);
+    }
+    if (algo === 'DES' || algo === '3DES') {
+      return forceSize(ivWa, 8);
+    }
+    if (algo === 'SM4') {
+      return forceSize(ivWa, 16);
+    }
+    return ivWa;
+  };
+
   const handleAction = async (isEncrypt: boolean) => {
     if (!input) {
       setError(t('Payload is empty'));
@@ -210,9 +260,9 @@ export function CryptoTool() {
           const cfg: any = { mode: getCryptoJsMode(), padding: getCryptoJsPadding() };
           if (mode === 'CBC') {
             if (!iv) throw new Error(t('IV is required for CBC mode.'));
-            cfg.iv = parseData(iv, ivFormat);
+            cfg.iv = adjustIvSize(parseData(iv, ivFormat), algorithm);
           }
-          const keyWa = parseData(cryptoKey, keyFormat);
+          const keyWa = adjustKeySize(parseData(cryptoKey, keyFormat), algorithm);
           const inputWa = parseData(input, inputFormat);
           
           let engine = algorithm === 'AES' ? CryptoJS.AES : algorithm === 'DES' ? CryptoJS.DES : CryptoJS.TripleDES;
@@ -239,11 +289,13 @@ export function CryptoTool() {
           }
         } 
         else if (algorithm === 'SM4') {
-          const keyHex = toHex(cryptoKey, keyFormat);
+          const rawKeyWa = parseData(cryptoKey, keyFormat);
+          const keyHex = CryptoJS.enc.Hex.stringify(adjustKeySize(rawKeyWa, 'SM4'));
           const cfg: Record<string, string> = {};
           if (mode === 'CBC') {
             if (!iv) throw new Error(t('IV is required for CBC mode.'));
-            cfg.iv = toHex(iv, ivFormat);
+            const rawIvWa = parseData(iv, ivFormat);
+            cfg.iv = CryptoJS.enc.Hex.stringify(adjustIvSize(rawIvWa, 'SM4'));
             cfg.mode = 'cbc';
           }
           
