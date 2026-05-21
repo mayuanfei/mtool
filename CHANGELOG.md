@@ -1,5 +1,10 @@
 # Changelog
 
+## [1.1.0]
+
+- **加解密工具 (CryptoTool)**:
+  - **动态链接库加密 (HQ DLL) 乱码问题修复**：修复 Windows 平台由于系统默认编码（通常为 GBK）与 Rust 后端默认解码编码（UTF-8）不一致导致的解密输出乱码问题。通过在 Rust 子进程调用 `java -jar` 时强制传入 `-Dfile.encoding=UTF-8` 参数解决。
+
 ## [1.0.9]
 
 - **加解密工具 (CryptoTool)**:

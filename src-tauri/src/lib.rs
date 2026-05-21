@@ -686,6 +686,7 @@ async fn hq_crypto(
     tauri::async_runtime::spawn_blocking(move || {
         let mut command = std::process::Command::new("java");
         command
+            .arg("-Dfile.encoding=UTF-8")
             .arg("-jar")
             .arg(&jar_path)
             .arg(&biz_type)
