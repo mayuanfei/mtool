@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useMemo } from 'react';
-import { Lock, Copy, Trash2, ArrowDown, Check, ChevronDown, XCircle } from 'lucide-react';
+import { Lock, Copy, Trash2, ArrowDown, Check, ChevronDown, XCircle, Loader2 } from 'lucide-react';
 import { useI18n } from '../i18n';
 import CryptoJS from 'crypto-js';
 import { sm2, sm3, sm4 } from 'sm-crypto';
@@ -349,12 +349,12 @@ export function CryptoTool() {
     return { keyWarning, ivWarning };
   }, [category, cryptoKey, keyFormat, algorithm, mode, iv, ivFormat, t]);
 
-  const handleAction = async (isEncrypt: boolean) => {
+  const handleAction = async (doEncrypt: boolean) => {
     if (!input) {
       setError(t('Payload is empty'));
       return;
     }
-    if (!isEncrypt && inputFormat === 'UTF8') {
+    if (!doEncrypt && inputFormat === 'UTF8') {
       setError(t('Decryption requires binary ciphertext. Please select HEX or BASE64 as the input format.'));
       return;
     }
@@ -369,7 +369,7 @@ export function CryptoTool() {
     }
 
     let currentOutputFormat = outputFormat;
-    if (isEncrypt && outputFormat === 'UTF8') {
+    if (doEncrypt && outputFormat === 'UTF8') {
       currentOutputFormat = 'BASE64';
     }
 
@@ -378,7 +378,7 @@ export function CryptoTool() {
       
       // ================= HASH =================
       if (category === 'hash') {
-        if (!isEncrypt) throw new Error(t('Hash algorithms cannot be decrypted.'));
+        if (!doEncrypt) throw new Error(t('Hash algorithms cannot be decrypted.'));
         const inputWa = parseData(input, inputFormat);
         let hashWa;
         if (algorithm === 'MD5') hashWa = CryptoJS.MD5(inputWa);
@@ -415,7 +415,7 @@ export function CryptoTool() {
           
           let engine = algorithm === 'AES' ? CryptoJS.AES : algorithm === 'DES' ? CryptoJS.DES : CryptoJS.TripleDES;
 
-          if (isEncrypt) {
+          if (doEncrypt) {
             const encrypted = engine.encrypt(inputWa, keyWa, cfg);
             res = currentOutputFormat === 'HEX' ? encrypted.ciphertext.toString(CryptoJS.enc.Hex)
                 : currentOutputFormat === 'UTF8' ? encrypted.toString() // Fallback to Base64 for binary ciphertext
@@ -443,7 +443,7 @@ export function CryptoTool() {
           }
           
           let inputHex = '';
-          if (isEncrypt) {
+          if (doEncrypt) {
             inputHex = toHex(input, inputFormat);
           } else {
             const cipherText = input.trim();
@@ -460,7 +460,7 @@ export function CryptoTool() {
             return bytes;
           };
 
-          if (isEncrypt) {
+          if (doEncrypt) {
             let inBytes = hexToBytes(inputHex);
             if (padding === 'ZeroPadding') {
               cfg.padding = 'none';
@@ -505,7 +505,7 @@ export function CryptoTool() {
             setTimeout(() => {
               try {
                 const encryptor = new JSEncrypt();
-                if (isEncrypt) {
+                if (doEncrypt) {
                   if (!publicKey) return reject(new Error(t('Public Key is required for encryption.')));
                   encryptor.setPublicKey(publicKey);
                   
@@ -520,8 +520,20 @@ export function CryptoTool() {
                     } catch (e) {}
                   }
 
-                  // 尺寸预检
-                  const keySizeNum = parseInt(rsaKeySize, 10);
+                  // 尺寸预检：提取实际 modulus 位数
+                  let keySizeNum = parseInt(rsaKeySize, 10);
+                  const keyObj = encryptor.getKey();
+                  const n = (keyObj as any).n;
+                  if (n) {
+                    const bitLen = n.bitLength();
+                    if (bitLen <= 1024) {
+                      keySizeNum = 1024;
+                    } else if (bitLen <= 2048) {
+                      keySizeNum = 2048;
+                    } else {
+                      keySizeNum = 4096;
+                    }
+                  }
                   const maxBytes = { 1024: 117, 2048: 245, 4096: 501 }[keySizeNum] || 245;
                   const byteLen = new TextEncoder().encode(plaintext).length;
                   if (byteLen > maxBytes) {
@@ -571,7 +583,7 @@ export function CryptoTool() {
           });
         }
         else if (algorithm === 'SM2') {
-          if (isEncrypt) {
+          if (doEncrypt) {
             if (!publicKey) throw new Error(t('Public Key is required for encryption.'));
             
             let plaintext = input;
@@ -620,7 +632,7 @@ export function CryptoTool() {
         try {
           if (!jarPath) throw new Error(t('Please select the HQ Jar file.'));
           res = await invoke('hq_crypto', { 
-            action: isEncrypt ? 'enc' : 'dec',
+            action: doEncrypt ? 'enc' : 'dec',
             payload: input,
             jarPath,
             bizType
@@ -941,17 +953,19 @@ export function CryptoTool() {
             <div className="px-4 py-3 border-b th-border th-bg-surface-h flex items-center justify-between">
               <div className="flex items-center gap-3">
                 <span className="font-semibold text-sm th-text-2 uppercase tracking-tight">{t('Input')}</span>
-                <CustomSelect 
-                  value={inputFormat}
-                  onChange={(val: DataFormat) => setInputFormat(val)}
-                  options={
-                    (!isEncrypt && category !== 'hash')
-                      ? [{ value: 'HEX', label: t('HEX') }, { value: 'BASE64', label: t('BASE64') }]
-                      : [{ value: 'UTF8', label: t('UTF8') }, { value: 'HEX', label: t('HEX') }, { value: 'BASE64', label: t('BASE64') }]
-                  }
-                  className="text-xs th-text-3 hover:text-indigo-400 font-medium bg-indigo-500/5 px-2 py-1 rounded"
-                  menuClassName="left-0 min-w-[6rem]"
-                />
+                {category !== 'hq' && (
+                  <CustomSelect 
+                    value={inputFormat}
+                    onChange={(val: DataFormat) => setInputFormat(val)}
+                    options={
+                      (!isEncrypt && category !== 'hash')
+                        ? [{ value: 'HEX', label: t('HEX') }, { value: 'BASE64', label: t('BASE64') }]
+                        : [{ value: 'UTF8', label: t('UTF8') }, { value: 'HEX', label: t('HEX') }, { value: 'BASE64', label: t('BASE64') }]
+                    }
+                    className="text-xs th-text-3 hover:text-indigo-400 font-medium bg-indigo-500/5 px-2 py-1 rounded"
+                    menuClassName="left-0 min-w-[6rem]"
+                  />
+                )}
               </div>
               <button 
                 onClick={() => { setInput(''); setOutput(''); setError(null); }}
@@ -985,7 +999,11 @@ export function CryptoTool() {
                     : (category === 'asymmetric' ? t('Private Key Decrypt') : t('Decrypt'))
                 }
               </span>
-              <ArrowDown className="w-4 h-4 -rotate-90" />
+              {isLoading ? (
+                <Loader2 className="w-4 h-4 animate-spin" />
+              ) : (
+                <ArrowDown className="w-4 h-4 -rotate-90" />
+              )}
             </button>
           </div>
 
