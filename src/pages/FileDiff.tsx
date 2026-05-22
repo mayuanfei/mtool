@@ -402,9 +402,11 @@ interface DiffViewProps {
   currentDiffIdx: number;
   onNavigate: (idx: number) => void;
   userNavRef: React.RefObject<boolean>;
+  wrapLines: boolean;
+  contentWidth: number;
 }
 
-function DiffView({ rows, diffIndices, currentDiffIdx, onNavigate, userNavRef }: DiffViewProps) {
+function DiffView({ rows, diffIndices, currentDiffIdx, onNavigate, userNavRef, wrapLines, contentWidth }: DiffViewProps) {
   const containerRef = useRef<HTMLDivElement>(null);
 
   // Scroll within the diff-scroll-area only when user explicitly navigates
@@ -424,16 +426,18 @@ function DiffView({ rows, diffIndices, currentDiffIdx, onNavigate, userNavRef }:
   }, [currentDiffIdx, diffIndices, userNavRef]);
 
   const gutterWidth = Math.max(String(rows.length).length * 8 + 16, 40);
+  const tableWidth = wrapLines ? '100%' : `${gutterWidth * 2 + contentWidth * 2}px`;
+  const contentColWidth = wrapLines ? `calc(50% - ${gutterWidth}px)` : `${contentWidth}px`;
 
   return (
     <div className="diff-view-wrapper">
       <div ref={containerRef} className="diff-scroll-area font-mono text-xs leading-5">
-        <table className="w-full border-collapse" style={{ tableLayout: 'fixed' }}>
+        <table className="min-w-full border-collapse" style={{ tableLayout: 'fixed', width: tableWidth }}>
           <colgroup>
             <col style={{ width: `${gutterWidth}px` }} />
-            <col style={{ width: `calc(50% - ${gutterWidth}px)` }} />
+            <col style={{ width: contentColWidth }} />
             <col style={{ width: `${gutterWidth}px` }} />
-            <col style={{ width: `calc(50% - ${gutterWidth}px)` }} />
+            <col style={{ width: contentColWidth }} />
           </colgroup>
           <tbody>
             {rows.map((row, i) => {
@@ -454,7 +458,9 @@ function DiffView({ rows, diffIndices, currentDiffIdx, onNavigate, userNavRef }:
                     {row.leftNum ?? ''}
                   </td>
                   {/* Left content */}
-                  <td className={`px-2 whitespace-pre overflow-hidden ${
+                  <td className={`px-2 overflow-hidden ${
+                    wrapLines ? 'whitespace-pre-wrap break-all' : 'whitespace-pre'
+                  } ${
                     row.leftType === 'delete' ? 'diff-line-del' :
                     row.leftType === 'empty' ? 'diff-line-empty' : 'diff-line-eq'
                   }`}>
@@ -474,7 +480,9 @@ function DiffView({ rows, diffIndices, currentDiffIdx, onNavigate, userNavRef }:
                     {row.rightNum ?? ''}
                   </td>
                   {/* Right content */}
-                  <td className={`px-2 whitespace-pre overflow-hidden ${
+                  <td className={`px-2 overflow-hidden ${
+                    wrapLines ? 'whitespace-pre-wrap break-all' : 'whitespace-pre'
+                  } ${
                     row.rightType === 'insert' ? 'diff-line-ins' :
                     row.rightType === 'empty' ? 'diff-line-empty' : 'diff-line-eq'
                   }`}>
@@ -518,6 +526,7 @@ export function FileDiff() {
   const [currentDiffIdx, setCurrentDiffIdx] = useState(0);
   const [fileError, setFileError] = useState<string | null>(null);
   const userNavRef = useRef(false);
+  const [wrapLines, setWrapLines] = useState(false);
 
   const leftContentRef = useRef(leftContent);
   const rightContentRef = useRef(rightContent);
@@ -672,6 +681,24 @@ export function FileDiff() {
     return { rows, diffIndices: indices, totalDiffs: indices.length, isTruncated: skipWordDiff };
   }, [leftContent, rightContent]);
 
+  const maxLineLength = useMemo(() => {
+    if (rows.length === 0) return 0;
+    let max = 0;
+    for (let i = 0; i < rows.length; i++) {
+      const r = rows[i];
+      if (r.leftText.length > max) max = r.leftText.length;
+      if (r.rightText.length > max) max = r.rightText.length;
+    }
+    return max;
+  }, [rows]);
+
+  const contentWidth = useMemo(() => {
+    if (maxLineLength === 0) return 0;
+    const charWidth = 7.5;
+    const padding = 24;
+    return Math.min(4000, maxLineLength * charWidth + padding);
+  }, [maxLineLength]);
+
   // Reset current diff index when diff changes
   useEffect(() => {
     setCurrentDiffIdx(0);
@@ -732,6 +759,20 @@ export function FileDiff() {
               className="px-2 py-1 text-xs rounded th-text-3 th-hover-surface transition-colors border th-border-muted"
             >
               {showInput ? t('Hide Input') : t('Show Input')}
+            </button>
+          )}
+
+          {/* Toggle line wrapping */}
+          {hasBothContent && (
+            <button
+              onClick={() => setWrapLines(prev => !prev)}
+              className={`px-2 py-1 text-xs rounded transition-colors border ${
+                wrapLines
+                  ? 'bg-indigo-500/15 text-indigo-400 border-indigo-500/30'
+                  : 'th-text-3 th-hover-surface border-th-border-muted'
+              }`}
+            >
+              {wrapLines ? t('Unwrap Lines') : t('Wrap Lines')}
             </button>
           )}
 
@@ -827,6 +868,8 @@ export function FileDiff() {
             currentDiffIdx={currentDiffIdx}
             onNavigate={setCurrentDiffIdx}
             userNavRef={userNavRef}
+            wrapLines={wrapLines}
+            contentWidth={contentWidth}
           />
         </div>
       ) : (

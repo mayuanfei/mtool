@@ -202,6 +202,8 @@ const translations = {
     'Text exceeds 10MB limit': 'Text exceeds 10MB limit',
     'Files exceed 10000 lines. Diff is approximate.': 'Files exceed 10000 lines. Diff is approximate.',
     'Paste text here, or drop a file': 'Paste text here, or drop a file',
+    'Wrap Lines': 'Wrap Lines',
+    'Unwrap Lines': 'Unwrap Lines',
 
     // JarViewer
     'Jar Viewer': 'Jar Viewer',
@@ -489,6 +491,8 @@ const translations = {
     'Text exceeds 10MB limit': '文本超过 10MB 限制',
     'Files exceed 10000 lines. Diff is approximate.': '文件超过 10000 行，仅显示粗略差异结果',
     'Paste text here, or drop a file': '在此粘贴文本，或拖拽文件到此处',
+    'Wrap Lines': '折行显示',
+    'Unwrap Lines': '单行显示',
 
     // JarViewer
     'Jar Viewer': 'Jar 浏览器',
