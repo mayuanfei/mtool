@@ -465,9 +465,7 @@ export function CryptoTool() {
             if (padding === 'ZeroPadding') {
               cfg.padding = 'none';
               const paddingCount = 16 - (inBytes.length % 16);
-              if (paddingCount !== 16) {
-                for (let i = 0; i < paddingCount; i++) inBytes.push(0);
-              }
+              for (let i = 0; i < paddingCount; i++) inBytes.push(0);
             } else if (padding === 'NoPadding') {
               cfg.padding = 'none';
               if (inBytes.length % 16 !== 0) throw new Error(t('Data length must be a multiple of 16 bytes for NoPadding.'));
@@ -475,9 +473,7 @@ export function CryptoTool() {
               cfg.padding = 'pkcs#7';
             }
             const outHex = sm4.encrypt(inBytes, keyHex, cfg);
-            res = currentOutputFormat === 'UTF8'
-              ? CryptoJS.enc.Base64.stringify(CryptoJS.enc.Hex.parse(outHex))
-              : fromHex(outHex, currentOutputFormat);
+            res = fromHex(outHex, currentOutputFormat);
           } else {
             if (padding === 'ZeroPadding' || padding === 'NoPadding') {
               cfg.padding = 'none';
@@ -594,7 +590,7 @@ export function CryptoTool() {
             const cipherHex = sm2.doEncrypt(plaintext, publicKey, parseInt(sm2CipherMode, 10) as 0 | 1);
             if (!cipherHex || cipherHex === 'null') throw new Error(t('SM2 Encryption failed.'));
             
-            if (currentOutputFormat === 'BASE64' || currentOutputFormat === 'UTF8') {
+            if (currentOutputFormat === 'BASE64') {
               res = CryptoJS.enc.Base64.stringify(CryptoJS.enc.Hex.parse(cipherHex));
             } else {
               res = cipherHex; // Default is HEX

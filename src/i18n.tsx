@@ -284,6 +284,11 @@ const translations = {
     'RSA plaintext is too long ({len} bytes). For {size}-bit key, the maximum is {max} bytes.': 'RSA plaintext is too long ({len} bytes). For {size}-bit key, the maximum is {max} bytes.',
     'Cipher Mode': 'Cipher Mode',
     'Decryption requires binary ciphertext. Please select HEX or BASE64 as the input format.': 'Decryption requires binary ciphertext. Please select HEX or BASE64 as the input format.',
+    
+    // ErrorBoundary
+    'Failed to load components, please restart the app or refresh': 'Failed to load components, please restart the app or refresh',
+    'Unknown error occurred': 'Unknown error occurred',
+    'Reload': 'Reload',
   },
   zh: {
     // Sidebar
@@ -566,6 +571,11 @@ const translations = {
     'RSA plaintext is too long ({len} bytes). For {size}-bit key, the maximum is {max} bytes.': 'RSA 明文过长（当前为 {len} 字节）。对于 {size} 位密钥，最大长度为 {max} 字节。',
     'Cipher Mode': '密文排列方式',
     'Decryption requires binary ciphertext. Please select HEX or BASE64 as the input format.': '解密操作需要二进制密文，请选择 HEX 或 BASE64 作为输入编码。',
+    
+    // ErrorBoundary
+    'Failed to load components, please restart the app or refresh': '加载失败，请重启应用或刷新',
+    'Unknown error occurred': '发生未知错误',
+    'Reload': '重新加载',
   }
 };
 

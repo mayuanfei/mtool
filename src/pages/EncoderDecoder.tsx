@@ -18,7 +18,13 @@ export function EncoderDecoder() {
     try {
       let res = '';
       if (mode === 'base64') {
-        res = btoa(String.fromCharCode(...new TextEncoder().encode(input)));
+        const bytes = new TextEncoder().encode(input);
+        let binary = '';
+        const len = bytes.byteLength;
+        for (let i = 0; i < len; i++) {
+          binary += String.fromCharCode(bytes[i]);
+        }
+        res = btoa(binary);
       } else if (mode === 'url') {
         res = encodeURIComponent(input);
       } else if (mode === 'unicode') {
