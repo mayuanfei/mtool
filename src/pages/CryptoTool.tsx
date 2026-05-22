@@ -417,9 +417,9 @@ export function CryptoTool() {
 
           if (doEncrypt) {
             const encrypted = engine.encrypt(inputWa, keyWa, cfg);
-            res = currentOutputFormat === 'HEX' ? encrypted.ciphertext.toString(CryptoJS.enc.Hex)
-                : currentOutputFormat === 'UTF8' ? encrypted.toString() // Fallback to Base64 for binary ciphertext
-                : encrypted.toString();
+            res = currentOutputFormat === 'HEX'
+              ? encrypted.ciphertext.toString(CryptoJS.enc.Hex)
+              : encrypted.toString();
           } else {
             // For decryption, CryptoJS takes Base64 string or CipherParams
             let decryptInput = input.trim();
@@ -520,26 +520,20 @@ export function CryptoTool() {
                     } catch (e) {}
                   }
 
-                  // 尺寸预检：提取实际 modulus 位数
-                  let keySizeNum = parseInt(rsaKeySize, 10);
+                  // 尺寸预检：根据 modulus 位数或配置的 keySize 计算最大允许字节数
+                  // JSEncrypt 默认使用 PKCS#1 v1.5 填充，最大可加密数据长度为：模长(字节数) - 11
+                  let bitLen = parseInt(rsaKeySize, 10);
                   const keyObj = encryptor.getKey();
                   const n = (keyObj as any).n;
                   if (n) {
-                    const bitLen = n.bitLength();
-                    if (bitLen <= 1024) {
-                      keySizeNum = 1024;
-                    } else if (bitLen <= 2048) {
-                      keySizeNum = 2048;
-                    } else {
-                      keySizeNum = 4096;
-                    }
+                    bitLen = n.bitLength();
                   }
-                  const maxBytes = { 1024: 117, 2048: 245, 4096: 501 }[keySizeNum] || 245;
+                  const maxBytes = Math.floor(bitLen / 8) - 11;
                   const byteLen = new TextEncoder().encode(plaintext).length;
                   if (byteLen > maxBytes) {
                     return reject(new Error(t('RSA plaintext is too long ({len} bytes). For {size}-bit key, the maximum is {max} bytes.', {
                       len: byteLen,
-                      size: keySizeNum,
+                      size: bitLen,
                       max: maxBytes
                     })));
                   }
