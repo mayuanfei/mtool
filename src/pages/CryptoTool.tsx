@@ -354,7 +354,7 @@ export function CryptoTool() {
       setError(t('Payload is empty'));
       return;
     }
-    if (!doEncrypt && inputFormat === 'UTF8') {
+    if (!doEncrypt && category !== 'hq' && inputFormat === 'UTF8') {
       setError(t('Decryption requires binary ciphertext. Please select HEX or BASE64 as the input format.'));
       return;
     }
@@ -725,41 +725,7 @@ export function CryptoTool() {
           </div>
         )}
 
-        {/* Operation Mode Toggle */}
-        {category !== 'hash' && (
-          <div className="flex gap-2 flex-shrink-0 bg-indigo-500/5 p-1 border th-border rounded-lg max-w-[16rem]">
-            <button
-              onClick={() => {
-                setIsEncrypt(true);
-                if (outputFormat === 'UTF8') {
-                  setOutputFormat('BASE64');
-                }
-              }}
-              className={`flex-1 px-3 py-1.5 rounded-md text-xs font-semibold transition-all ${
-                isEncrypt
-                  ? 'bg-indigo-600 text-white shadow-sm'
-                  : 'th-text-2 hover:bg-indigo-500/10'
-              }`}
-            >
-              {category === 'asymmetric' ? t('Public Key Encrypt') : t('Encrypt')}
-            </button>
-            <button
-              onClick={() => {
-                setIsEncrypt(false);
-                if (inputFormat === 'UTF8') {
-                  setInputFormat('BASE64');
-                }
-              }}
-              className={`flex-1 px-3 py-1.5 rounded-md text-xs font-semibold transition-all ${
-                !isEncrypt
-                  ? 'bg-indigo-600 text-white shadow-sm'
-                  : 'th-text-2 hover:bg-indigo-500/10'
-              }`}
-            >
-              {category === 'asymmetric' ? t('Private Key Decrypt') : t('Decrypt')}
-            </button>
-          </div>
-        )}
+
 
         {/* Configuration Area */}
         {category === 'symmetric' && (
@@ -976,25 +942,65 @@ export function CryptoTool() {
 
           {/* Action Center */}
           <div className="flex flex-col justify-center gap-4 shrink-0 px-2">
-             <button
-              onClick={() => handleAction(isEncrypt)}
-              disabled={isLoading}
-              className={`flex flex-col items-center justify-center gap-1 min-w-[6rem] px-3 py-3 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl shadow-lg transition-all text-center ${isLoading ? 'opacity-50 cursor-not-allowed' : 'active:scale-95'}`}
-            >
-              <span className="font-bold text-sm">
-                {category === 'hash'
-                  ? t('Hash')
-                  : isEncrypt
-                    ? (category === 'asymmetric' ? t('Public Key Encrypt') : t('Encrypt'))
-                    : (category === 'asymmetric' ? t('Private Key Decrypt') : t('Decrypt'))
-                }
-              </span>
-              {isLoading ? (
-                <Loader2 className="w-4 h-4 animate-spin" />
-              ) : (
-                <ArrowDown className="w-4 h-4 -rotate-90" />
-              )}
-            </button>
+            {category === 'hash' ? (
+              <button
+                onClick={() => handleAction(true)}
+                disabled={isLoading}
+                className={`flex flex-col items-center justify-center gap-1 min-w-[6rem] px-3 py-3 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl shadow-lg transition-all text-center ${isLoading ? 'opacity-50 cursor-not-allowed' : 'active:scale-95'}`}
+              >
+                <span className="font-bold text-sm">
+                  {t('Hash')}
+                </span>
+                {isLoading ? (
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                ) : (
+                  <ArrowDown className="w-4 h-4 -rotate-90" />
+                )}
+              </button>
+            ) : (
+              <>
+                <button
+                  onClick={() => {
+                    setIsEncrypt(true);
+                    if (outputFormat === 'UTF8') {
+                      setOutputFormat('BASE64');
+                    }
+                    handleAction(true);
+                  }}
+                  disabled={isLoading}
+                  className={`flex flex-col items-center justify-center gap-1 min-w-[6rem] px-3 py-3 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl shadow-lg transition-all text-center ${isLoading ? 'opacity-50 cursor-not-allowed' : 'active:scale-95'}`}
+                >
+                  <span className="font-bold text-sm">
+                    {category === 'asymmetric' ? t('Public Key Encrypt') : t('Encrypt')}
+                  </span>
+                  {isLoading ? (
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                  ) : (
+                    <ArrowDown className="w-4 h-4 -rotate-90" />
+                  )}
+                </button>
+                <button
+                  onClick={() => {
+                    setIsEncrypt(false);
+                    if (inputFormat === 'UTF8') {
+                      setInputFormat('BASE64');
+                    }
+                    handleAction(false);
+                  }}
+                  disabled={isLoading}
+                  className={`flex flex-col items-center justify-center gap-1 min-w-[6rem] px-3 py-3 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl shadow-lg transition-all text-center ${isLoading ? 'opacity-50 cursor-not-allowed' : 'active:scale-95'}`}
+                >
+                  <span className="font-bold text-sm">
+                    {category === 'asymmetric' ? t('Private Key Decrypt') : t('Decrypt')}
+                  </span>
+                  {isLoading ? (
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                  ) : (
+                    <ArrowDown className="w-4 h-4 -rotate-90" />
+                  )}
+                </button>
+              </>
+            )}
           </div>
 
           {/* Output Panel */}
