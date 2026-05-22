@@ -39,8 +39,8 @@ export function EncoderDecoder() {
           .replace(/'/g, '&apos;');
       }
       setOutput(res);
-    } catch (err: any) {
-      setError(err.message || String(err));
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : String(err));
     }
   };
 
@@ -69,8 +69,8 @@ export function EncoderDecoder() {
           .replace(/&amp;/g, '&');
       }
       setOutput(res);
-    } catch (err: any) {
-      setError(err.message || String(err));
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : String(err));
     }
   };
 

@@ -281,6 +281,9 @@ const translations = {
     'UTF8': 'UTF-8',
     'BASE64': 'Base64',
     'Data length must be a multiple of 16 bytes for NoPadding.': 'Data length must be a multiple of 16 bytes for NoPadding.',
+    'RSA plaintext is too long ({len} bytes). For {size}-bit key, the maximum is {max} bytes.': 'RSA plaintext is too long ({len} bytes). For {size}-bit key, the maximum is {max} bytes.',
+    'Cipher Mode': 'Cipher Mode',
+    'Decryption requires binary ciphertext. Please select HEX or BASE64 as the input format.': 'Decryption requires binary ciphertext. Please select HEX or BASE64 as the input format.',
   },
   zh: {
     // Sidebar
@@ -560,6 +563,9 @@ const translations = {
     'UTF8': '文本 (UTF-8)',
     'BASE64': 'Base64',
     'Data length must be a multiple of 16 bytes for NoPadding.': 'NoPadding 模式下，数据长度必须为 16 字节的倍数。',
+    'RSA plaintext is too long ({len} bytes). For {size}-bit key, the maximum is {max} bytes.': 'RSA 明文过长（当前为 {len} 字节）。对于 {size} 位密钥，最大长度为 {max} 字节。',
+    'Cipher Mode': '密文排列方式',
+    'Decryption requires binary ciphertext. Please select HEX or BASE64 as the input format.': '解密操作需要二进制密文，请选择 HEX 或 BASE64 作为输入编码。',
   }
 };
 
