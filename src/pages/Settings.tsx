@@ -116,6 +116,18 @@ export function SettingsPage({ toolsEnabled, toggleTool, activePage, setActivePa
 
             <div className="px-6 py-5 flex items-center justify-between th-hover-surface transition-colors">
               <div>
+                <p className="text-base font-medium th-text-2 mb-1">{t('File Transfer')}</p>
+                <p className="text-sm th-text-muted">{t('Transfer files securely and fast within your local network.')}</p>
+              </div>
+              <Toggle checked={toolsEnabled.fileTransfer} onChange={() => {
+                const next = !toolsEnabled.fileTransfer;
+                toggleTool('fileTransfer', next);
+                if (!next && activePage === 'fileTransfer') setActivePage('settings');
+              }} />
+            </div>
+
+            <div className="px-6 py-5 flex items-center justify-between th-hover-surface transition-colors">
+              <div>
                 <p className="text-base font-medium th-text-2 mb-1">{t('File Compare')}</p>
                 <p className="text-sm th-text-muted">{t('Compare two text files and highlight differences.')}</p>
               </div>

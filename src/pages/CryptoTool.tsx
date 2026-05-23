@@ -1,69 +1,15 @@
-import { useState, useRef, useEffect, useMemo } from 'react';
-import { Lock, Copy, Trash2, ArrowDown, Check, ChevronDown, XCircle, Loader2 } from 'lucide-react';
+import { useState, useEffect, useMemo } from 'react';
+import { Lock, Copy, Trash2, ArrowDown, Check, XCircle, Loader2 } from 'lucide-react';
 import { useI18n } from '../i18n';
 import CryptoJS from 'crypto-js';
 import { sm2, sm3, sm4 } from 'sm-crypto';
 import JSEncrypt from 'jsencrypt';
 import { invoke } from '@tauri-apps/api/core';
+import { CustomSelect } from '../components/CustomSelect';
 
 type Category = 'hash' | 'symmetric' | 'asymmetric' | 'hq';
 type Algorithm = 'MD5' | 'SHA1' | 'SHA256' | 'SM3' | 'AES' | 'DES' | '3DES' | 'SM4' | 'RSA' | 'SM2' | 'HQ_DLL';
 type DataFormat = 'UTF8' | 'HEX' | 'BASE64';
-
-interface SelectOption<T extends string> {
-  value: T;
-  label: string;
-}
-
-interface CustomSelectProps<T extends string> {
-  options: SelectOption<T>[];
-  value: T;
-  onChange: (val: T) => void;
-  disabled?: boolean;
-  className?: string;
-  menuClassName?: string;
-}
-
-function CustomSelect<T extends string>({ options, value, onChange, disabled, className, menuClassName }: CustomSelectProps<T>) {
-  const [open, setOpen] = useState(false);
-  const ref = useRef<HTMLDivElement>(null);
-  
-  useEffect(() => {
-    const handleClickOutside = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
-    };
-    document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, []);
-
-  return (
-    <div className="relative" ref={ref}>
-      <button
-        type="button"
-        disabled={disabled}
-        onClick={() => setOpen(!open)}
-        className={`flex items-center justify-between gap-2 bg-transparent outline-none ${disabled ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'} ${className}`}
-      >
-        <span>{options.find((o) => o.value === value)?.label || value}</span>
-        <ChevronDown className="w-3 h-3 opacity-60" />
-      </button>
-      {open && !disabled && (
-        <div className={`absolute z-50 mt-1 th-bg-surface border th-border rounded-lg shadow-xl overflow-hidden py-1 ${menuClassName || 'w-full left-0 min-w-[8rem]'}`}>
-          {options.map((o) => (
-            <button
-              key={o.value}
-              type="button"
-              className={`w-full text-left px-3 py-2 text-sm transition-colors hover:bg-indigo-500/10 ${value === o.value ? 'text-indigo-400 font-medium' : 'th-text'}`}
-              onClick={() => { onChange(o.value); setOpen(false); }}
-            >
-              {o.label}
-            </button>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
 
 function arrayBufferToBase64(buffer: ArrayBuffer): string {
   let binary = '';

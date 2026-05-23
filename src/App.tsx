@@ -16,11 +16,12 @@ const FileDiff = lazy(() => import('./pages/FileDiff').then(m => ({ default: m.F
 const JarViewer = lazy(() => import('./pages/JarViewer').then(m => ({ default: m.JarViewer })));
 const EncoderDecoder = lazy(() => import('./pages/EncoderDecoder').then(m => ({ default: m.EncoderDecoder })));
 const CryptoTool = lazy(() => import('./pages/CryptoTool').then(m => ({ default: m.CryptoTool })));
+const FileTransfer = lazy(() => import('./pages/FileTransfer').then(m => ({ default: m.FileTransfer })));
 
-export type ToolKey = 'json' | 'qr' | 'pwd' | 'sqlIn' | 'md' | 'fileSearch' | 'fileDiff' | 'jarViewer' | 'encoder' | 'crypto';
+export type ToolKey = 'json' | 'qr' | 'pwd' | 'sqlIn' | 'md' | 'fileSearch' | 'fileDiff' | 'jarViewer' | 'encoder' | 'crypto' | 'fileTransfer';
 export type ToolsEnabled = Record<ToolKey, boolean>;
 
-const DEFAULT_TOOLS: ToolsEnabled = { json: true, qr: true, pwd: true, sqlIn: true, md: true, fileSearch: true, fileDiff: true, jarViewer: true, encoder: true, crypto: true };
+const DEFAULT_TOOLS: ToolsEnabled = { json: true, qr: true, pwd: true, sqlIn: true, md: true, fileSearch: true, fileDiff: true, jarViewer: true, encoder: true, crypto: true, fileTransfer: true };
 
 export default function App() {
   const [activePage, setActivePage] = useState(() => {
@@ -79,6 +80,7 @@ export default function App() {
       jarViewer: getOld('mtool_jarviewer_enabled'),
       encoder: getOld('mtool_encoder_enabled'),
       crypto: getOld('mtool_crypto_enabled'),
+      fileTransfer: getOld('mtool_filetransfer_enabled'),
     };
   });
 
@@ -120,6 +122,7 @@ export default function App() {
         jarViewerEnabled={toolsEnabled.jarViewer}
         encoderEnabled={toolsEnabled.encoder}
         cryptoEnabled={toolsEnabled.crypto}
+        fileTransferEnabled={toolsEnabled.fileTransfer}
         hasUpdate={hasUpdate}
       />
       
@@ -142,6 +145,7 @@ export default function App() {
               {activePage === 'jarViewer' && toolsEnabled.jarViewer && <JarViewer />}
               {activePage === 'encoder' && toolsEnabled.encoder && <EncoderDecoder />}
               {activePage === 'crypto' && toolsEnabled.crypto && <CryptoTool />}
+              {activePage === 'fileTransfer' && toolsEnabled.fileTransfer && <FileTransfer />}
               {activePage === 'settings' && (
                 <SettingsPage 
                   toolsEnabled={toolsEnabled}
@@ -161,7 +165,8 @@ export default function App() {
                !(activePage === 'fileDiff' && toolsEnabled.fileDiff) &&
                !(activePage === 'jarViewer' && toolsEnabled.jarViewer) &&
                !(activePage === 'encoder' && toolsEnabled.encoder) &&
-               !(activePage === 'crypto' && toolsEnabled.crypto) && (
+               !(activePage === 'crypto' && toolsEnabled.crypto) &&
+               !(activePage === 'fileTransfer' && toolsEnabled.fileTransfer) && (
                  <div className="flex items-center justify-center h-full th-text-muted font-medium">{t('Select a tool from the sidebar')}</div>
               )}
             </Suspense>

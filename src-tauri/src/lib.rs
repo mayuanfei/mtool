@@ -1,5 +1,6 @@
 mod file_search;
 mod jar_viewer;
+mod file_transfer;
 use base64::prelude::*;
 use std::fs;
 use std::io::Cursor;
@@ -793,6 +794,13 @@ pub fn run() {
 
             app.manage(engine);
 
+            let transfer_state = file_transfer::TransferState::new();
+            app.manage(transfer_state.clone());
+            let app_handle = app.handle().clone();
+            let transfer_state_clone = transfer_state.clone();
+            tauri::async_runtime::spawn(async move {
+                file_transfer::start_file_transfer_server(app_handle, transfer_state_clone).await;
+            });
 
             Ok(())
         })
@@ -821,6 +829,18 @@ pub fn run() {
             jar_viewer::read_local_class,
             hq_crypto,
             select_hq_jar,
+            file_transfer::get_local_transfer_info,
+            file_transfer::get_transfer_config,
+            file_transfer::update_save_dir,
+            file_transfer::select_save_dir,
+            file_transfer::remove_trusted_peer,
+            file_transfer::update_peer_alias,
+            file_transfer::send_friend_request,
+            file_transfer::respond_friend_request,
+            file_transfer::send_file,
+            file_transfer::select_file_to_send,
+            file_transfer::cancel_transfer,
+            file_transfer::delete_local_file,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
