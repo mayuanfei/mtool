@@ -640,14 +640,11 @@ export function FileTransfer() {
   return (
     <div className="max-w-6xl mx-auto w-full space-y-6">
       {/* Title */}
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-4xl font-bold tracking-tight th-text mb-2 flex items-center gap-2">
-            <Network className="w-8 h-8 text-indigo-500 animate-pulse" />
-            {t('Lan File Transfer')}
-          </h1>
-          <p className="th-text-3">{t('Transfer files securely and fast within your local network.')}</p>
-        </div>
+      <div className="flex justify-between items-center mb-6 border-b th-border pb-4 shrink-0">
+        <h2 className="th-text font-semibold text-lg flex items-center gap-2">
+          <Network className="w-5 h-5 text-indigo-400" />
+          {t('Lan File Transfer')}
+        </h2>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
