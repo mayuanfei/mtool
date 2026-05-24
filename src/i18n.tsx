@@ -337,6 +337,7 @@ const translations = {
     'Are you sure you want to delete this history record?': 'Are you sure you want to delete this history record?',
     'Are you sure you want to clear all history records?': 'Are you sure you want to clear all history records?',
     'Confirm': 'Confirm',
+    'Receive failed': 'Receive failed',
   },
   zh: {
     // Sidebar
@@ -672,6 +673,7 @@ const translations = {
     'Are you sure you want to delete this history record?': '确定要删除此条传输记录吗？',
     'Are you sure you want to clear all history records?': '确定要清空所有传输历史记录吗？',
     'Confirm': '确认',
+    'Receive failed': '接收失败',
   }
 };
 

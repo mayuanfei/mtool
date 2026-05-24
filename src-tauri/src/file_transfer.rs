@@ -266,6 +266,7 @@ async fn handle_incoming_connection(
             }
         }
         "TransferRequest" => {
+            let sender_port = req["sender_port"].as_u64().unwrap_or(0) as u16;
             let sender_name = req["sender_name"].as_str().unwrap_or("Unknown Device").to_string();
             let transfer_id = req["transfer_id"].as_str().ok_or("Missing transfer_id")?.to_string();
             let filename = req["filename"].as_str().ok_or("Missing filename")?.to_string();
@@ -273,7 +274,13 @@ async fn handle_incoming_connection(
 
             let is_trusted = {
                 let conf = state.config.read().await;
-                conf.trusted_peers.iter().any(|p| p.ip == peer_ip)
+                conf.trusted_peers.iter().any(|p| {
+                    if sender_port > 0 {
+                        p.ip == peer_ip && p.port == sender_port && p.hostname == sender_name
+                    } else {
+                        p.ip == peer_ip
+                    }
+                })
             };
 
             if !is_trusted {
@@ -297,8 +304,17 @@ async fn handle_incoming_connection(
             let transfer_id_clone = transfer_id.clone();
             
             let handle = tokio::spawn(async move {
+                let transfer_id_err = transfer_id_clone.clone();
+                let app_err = app_clone.clone();
+                let state_err = state_clone.clone();
                 if let Err(e) = recv_file_task(app_clone, state_clone, transfer_id_clone, stream, filename, filesize, sender_name).await {
                     eprintln!("[mtool server] receive file err: {}", e);
+                    app_err.emit("recv-error", serde_json::json!({
+                        "transfer_id": transfer_id_err,
+                        "error_message": e,
+                    })).ok();
+                    let mut active = state_err.active_transfers.lock().await;
+                    active.remove(&transfer_id_err);
                 }
             });
 
@@ -439,11 +455,16 @@ async fn send_file_task(
 ) -> Result<(), String> {
     let mut stream = TcpStream::connect(&receiver_addr).await.map_err(|e| format!("Failed to connect to {}: {}", receiver_addr, e))?;
 
+    let my_local_port = {
+        let p = state.local_port.lock().await;
+        *p
+    };
     let my_hostname = get_system_hostname();
     let req = serde_json::json!({
         "type": "TransferRequest",
         "transfer_id": transfer_id,
         "sender_name": my_hostname,
+        "sender_port": my_local_port,
         "filename": filename,
         "filesize": filesize,
     });
@@ -494,6 +515,10 @@ async fn send_file_task(
                 "speed": speed,
             })).ok();
         }
+    }
+
+    if bytes_sent < filesize {
+        return Err(format!("File read completed prematurely: sent {} of {} bytes", bytes_sent, filesize));
     }
 
     stream.flush().await.ok();
@@ -679,10 +704,12 @@ pub async fn send_file(
 
     let handle = tokio::spawn(async move {
         if let Err(e) = send_file_task(app_clone.clone(), state_clone, transfer_id_task.clone(), receiver_addr, file_path_clone, filename, filesize).await {
-            app_clone.emit("send-error", serde_json::json!({
-                "transfer_id": transfer_id_task,
-                "error_message": e,
-            })).ok();
+            if !e.starts_with("Rejected:") {
+                app_clone.emit("send-error", serde_json::json!({
+                    "transfer_id": transfer_id_task,
+                    "error_message": e,
+                })).ok();
+            }
         }
     });
 

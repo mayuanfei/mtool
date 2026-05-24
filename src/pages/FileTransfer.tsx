@@ -365,6 +365,30 @@ export function FileTransfer() {
               return next;
             });
             alert(`Transfer request rejected: ${reason}`);
+          }),
+
+          // 11. Receive error listener
+          listen<{ transfer_id: string; error_message: string }>('recv-error', (event) => {
+            const { transfer_id, error_message } = event.payload;
+            setTransmissions(prev => {
+              const t = prev[transfer_id];
+              if (t) {
+                saveHistoryRecord({
+                  id: transfer_id,
+                  direction: 'recv',
+                  filename: t.filename,
+                  filesize: t.filesize,
+                  peerName: t.peerName || 'Sender',
+                  peerIp: '',
+                  status: 'failed',
+                  timestamp: Date.now(),
+                });
+              }
+              const next = { ...prev };
+              delete next[transfer_id];
+              return next;
+            });
+            alert(`${t('Receive failed')}: ${error_message}`);
           })
         ];
 
