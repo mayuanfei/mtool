@@ -251,15 +251,15 @@ export function FileTransfer() {
           }>('recv-success', (event) => {
             const { transfer_id, save_path } = event.payload;
             setTransmissions(prev => {
-              const t = prev[transfer_id];
-              if (t) {
+              const tx = prev[transfer_id];
+              if (tx) {
                 saveHistoryRecord({
                   id: transfer_id,
                   direction: 'recv',
-                  filename: t.filename,
-                  filesize: t.filesize,
-                  peerName: t.peerName,
-                  peerIp: t.peerIp || '',
+                  filename: tx.filename,
+                  filesize: tx.filesize,
+                  peerName: tx.peerName,
+                  peerIp: tx.peerIp || '',
                   status: 'success',
                   timestamp: Date.now(),
                   savePath: save_path,
@@ -322,15 +322,15 @@ export function FileTransfer() {
           listen<{ transfer_id: string }>('send-success', (event) => {
             const { transfer_id } = event.payload;
             setTransmissions(prev => {
-              const t = prev[transfer_id];
-              if (t) {
+              const tx = prev[transfer_id];
+              if (tx) {
                 saveHistoryRecord({
                   id: transfer_id,
                   direction: 'send',
-                  filename: t.filename,
-                  filesize: t.filesize,
-                  peerName: t.peerName || 'Receiver',
-                  peerIp: t.peerIp || '',
+                  filename: tx.filename,
+                  filesize: tx.filesize,
+                  peerName: tx.peerName || 'Receiver',
+                  peerIp: tx.peerIp || '',
                   status: 'success',
                   timestamp: Date.now(),
                 });
@@ -345,15 +345,15 @@ export function FileTransfer() {
           listen<{ transfer_id: string; error_message: string }>('send-error', (event) => {
             const { transfer_id, error_message } = event.payload;
             setTransmissions(prev => {
-              const t = prev[transfer_id];
-              if (t) {
+              const tx = prev[transfer_id];
+              if (tx) {
                 saveHistoryRecord({
                   id: transfer_id,
                   direction: 'send',
-                  filename: t.filename,
-                  filesize: t.filesize,
-                  peerName: t.peerName || 'Receiver',
-                  peerIp: t.peerIp || '',
+                  filename: tx.filename,
+                  filesize: tx.filesize,
+                  peerName: tx.peerName || 'Receiver',
+                  peerIp: tx.peerIp || '',
                   status: 'failed',
                   timestamp: Date.now(),
                 });
@@ -369,15 +369,15 @@ export function FileTransfer() {
           listen<{ transfer_id: string; reason: string }>('send-rejected', (event) => {
             const { transfer_id, reason } = event.payload;
             setTransmissions(prev => {
-              const t = prev[transfer_id];
-              if (t) {
+              const tx = prev[transfer_id];
+              if (tx) {
                 saveHistoryRecord({
                   id: transfer_id,
                   direction: 'send',
-                  filename: t.filename,
-                  filesize: t.filesize,
-                  peerName: t.peerName || 'Receiver',
-                  peerIp: t.peerIp || '',
+                  filename: tx.filename,
+                  filesize: tx.filesize,
+                  peerName: tx.peerName || 'Receiver',
+                  peerIp: tx.peerIp || '',
                   status: 'rejected',
                   timestamp: Date.now(),
                 });
@@ -393,15 +393,15 @@ export function FileTransfer() {
           listen<{ transfer_id: string; error_message: string }>('recv-error', (event) => {
             const { transfer_id, error_message } = event.payload;
             setTransmissions(prev => {
-              const t = prev[transfer_id];
-              if (t) {
+              const tx = prev[transfer_id];
+              if (tx) {
                 saveHistoryRecord({
                   id: transfer_id,
                   direction: 'recv',
-                  filename: t.filename,
-                  filesize: t.filesize,
-                  peerName: t.peerName || 'Sender',
-                  peerIp: t.peerIp || '',
+                  filename: tx.filename,
+                  filesize: tx.filesize,
+                  peerName: tx.peerName || 'Sender',
+                  peerIp: tx.peerIp || '',
                   status: 'failed',
                   timestamp: Date.now(),
                 });

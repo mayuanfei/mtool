@@ -774,6 +774,35 @@ pub async fn cancel_transfer(
 }
 
 #[tauri::command]
-pub async fn delete_local_file(path: String) -> Result<(), String> {
-    std::fs::remove_file(path).map_err(|e| e.to_string())
+pub async fn delete_local_file(
+    state: tauri::State<'_, TransferState>,
+    path: String,
+) -> Result<(), String> {
+    let save_dir = {
+        let conf = state.config.read().await;
+        conf.save_dir.clone()
+    };
+    
+    let save_dir_path = match save_dir {
+        Some(p) => std::path::PathBuf::from(p),
+        None => dirs::download_dir().ok_or_else(|| "Could not locate Downloads directory".to_string())?,
+    };
+
+    let target_path = std::path::Path::new(&path);
+    if !target_path.exists() {
+        return Err("File does not exist".to_string());
+    }
+
+    let canonical_target = target_path.canonicalize().map_err(|e| format!("Invalid target path: {}", e))?;
+    
+    if !save_dir_path.exists() {
+        std::fs::create_dir_all(&save_dir_path).map_err(|e| format!("Failed to create save directory: {}", e))?;
+    }
+    let canonical_save_dir = save_dir_path.canonicalize().map_err(|e| format!("Invalid save directory: {}", e))?;
+
+    if !canonical_target.starts_with(&canonical_save_dir) {
+        return Err("Access denied: path is outside the save directory".to_string());
+    }
+
+    std::fs::remove_file(canonical_target).map_err(|e| e.to_string())
 }

@@ -455,11 +455,15 @@ export function CryptoTool() {
                   if (inputFormat === 'HEX') {
                     try {
                       plaintext = CryptoJS.enc.Utf8.stringify(CryptoJS.enc.Hex.parse(input));
-                    } catch (e) {}
+                    } catch (e) {
+                      throw new Error(t('Invalid HEX/BASE64 input'));
+                    }
                   } else if (inputFormat === 'BASE64') {
                     try {
                       plaintext = CryptoJS.enc.Utf8.stringify(CryptoJS.enc.Base64.parse(input));
-                    } catch (e) {}
+                    } catch (e) {
+                      throw new Error(t('Invalid HEX/BASE64 input'));
+                    }
                   }
 
                   // 尺寸预检：根据 modulus 位数或配置的 keySize 计算最大允许字节数
@@ -526,11 +530,15 @@ export function CryptoTool() {
             if (inputFormat === 'HEX') {
               try {
                 plaintext = CryptoJS.enc.Utf8.stringify(CryptoJS.enc.Hex.parse(input));
-              } catch (e) {}
+              } catch (e) {
+                throw new Error(t('Invalid HEX/BASE64 input'));
+              }
             } else if (inputFormat === 'BASE64') {
               try {
                 plaintext = CryptoJS.enc.Utf8.stringify(CryptoJS.enc.Base64.parse(input));
-              } catch (e) {}
+              } catch (e) {
+                throw new Error(t('Invalid HEX/BASE64 input'));
+              }
             }
             
             const cipherHex = sm2.doEncrypt(plaintext, publicKey, parseInt(sm2CipherMode, 10) as 0 | 1);

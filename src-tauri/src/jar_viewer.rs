@@ -117,6 +117,9 @@ pub async fn list_jar_entries(path: String) -> Result<Vec<String>, String> {
     tauri::async_runtime::spawn_blocking(move || {
         let file = File::open(&path).map_err(|e| e.to_string())?;
         let mut archive = ZipArchive::new(file).map_err(|e| e.to_string())?;
+        if archive.len() >= 50_000 {
+            return Err("Too many entries in the ZIP/JAR file (maximum 50,000 allowed)".to_string());
+        }
         let mut entries = Vec::new();
         for i in 0..archive.len() {
             if let Ok(file) = archive.by_index(i) {
