@@ -248,11 +248,31 @@ function FilePanel({ side, fileName, content, onFileOpen, onFileError }: FilePan
     e.stopPropagation();
     setDragOver(false);
 
-    const text = e.dataTransfer.getData('text/plain');
-    if (text) {
-      onFileOpen(t('Pasted Text'), text);
+    const files = e.dataTransfer.files;
+    if (files && files.length > 0) {
+      const file = files[0];
+      if (file.size > 10 * 1024 * 1024) {
+        onFileError?.(t('File size exceeds 10MB limit'));
+        return;
+      }
+      const reader = new FileReader();
+      reader.onload = (event) => {
+        const text = event.target?.result;
+        if (typeof text === 'string') {
+          onFileOpen(file.name, text);
+        }
+      };
+      reader.onerror = () => {
+        onFileError?.(t('Failed to open file'));
+      };
+      reader.readAsText(file);
+    } else {
+      const text = e.dataTransfer.getData('text/plain');
+      if (text) {
+        onFileOpen(t('Pasted Text'), text);
+      }
     }
-  }, [onFileOpen, t]);
+  }, [onFileOpen, onFileError, t]);
 
   const handleOpenFile = useCallback(async () => {
     try {

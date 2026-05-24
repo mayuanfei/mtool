@@ -63,9 +63,7 @@ export function EncoderDecoder() {
       } else if (mode === 'unicode') {
         res = input.replace(/\\u([0-9a-fA-F]{4})/g, (_, grp) => String.fromCharCode(parseInt(grp, 16)));
       } else if (mode === 'html') {
-        const txt = document.createElement('textarea');
-        txt.innerHTML = input;
-        res = txt.value;
+        res = new DOMParser().parseFromString(input, 'text/html').body.textContent || '';
       } else if (mode === 'xml') {
         res = input
           .replace(/&apos;/g, "'")

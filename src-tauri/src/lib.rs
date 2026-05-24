@@ -478,6 +478,9 @@ async fn disable_file_search(
 
 #[tauri::command]
 fn reveal_in_explorer(path: String) -> Result<(), String> {
+    if !std::path::Path::new(&path).exists() {
+        return Err("File or directory does not exist".to_string());
+    }
     #[cfg(target_os = "windows")]
     {
         use std::os::windows::process::CommandExt;
@@ -510,6 +513,9 @@ fn reveal_in_explorer(path: String) -> Result<(), String> {
 
 #[tauri::command]
 fn open_file(path: String) -> Result<(), String> {
+    if !std::path::Path::new(&path).exists() {
+        return Err("File or directory does not exist".to_string());
+    }
     #[cfg(target_os = "macos")]
     {
         std::process::Command::new("open")
@@ -723,7 +729,7 @@ async fn hq_crypto(
                 } else {
                     let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
                     let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
-                    Err(format!("HQ 库执行错误: {}\n{}", stderr, stdout))
+                    Err(format!("HQ library execution error: {}\n{}", stderr, stdout))
                 }
             }
             Ok(Err(e)) => Err(e.to_string()),
@@ -742,7 +748,7 @@ async fn hq_crypto(
                         CloseHandle(handle);
                     }
                 }
-                Err("执行超时 (30s)，后台进程已被强制终止。".to_string())
+                Err("Execution timeout (30s), background process has been force terminated.".to_string())
             }
         }
     })

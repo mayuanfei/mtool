@@ -19,6 +19,7 @@ interface Transmission {
   filename: string;
   filesize: number;
   peerName: string;
+  peerIp?: string;
   progress: number;
   bytesTransferred: number;
   speed: number;
@@ -88,6 +89,16 @@ export function FileTransfer() {
   // Peer editing states
   const [editingPeerKey, setEditingPeerKey] = useState<string | null>(null);
   const [editAliasInput, setEditAliasInput] = useState('');
+
+  // Toast state
+  const [toastMessage, setToastMessage] = useState<{ text: string; isError: boolean } | null>(null);
+
+  const showToast = (text: string, isError: boolean = false) => {
+    setToastMessage({ text, isError });
+    setTimeout(() => {
+      setToastMessage(prev => prev?.text === text ? null : prev);
+    }, 4000);
+  };
 
   // Fetch local info and config on mount
   useEffect(() => {
@@ -179,9 +190,10 @@ export function FileTransfer() {
             filename: string;
             filesize: number;
             sender_name: string;
+            sender_ip: string;
             save_path: string;
           }>('recv-started', (event) => {
-            const { transfer_id, filename, filesize, sender_name } = event.payload;
+            const { transfer_id, filename, filesize, sender_name, sender_ip } = event.payload;
             setTransmissions(prev => ({
               ...prev,
               [transfer_id]: {
@@ -190,6 +202,7 @@ export function FileTransfer() {
                 filename,
                 filesize,
                 peerName: sender_name,
+                peerIp: sender_ip,
                 progress: 0,
                 bytesTransferred: 0,
                 speed: 0,
@@ -237,7 +250,7 @@ export function FileTransfer() {
                   filename: t.filename,
                   filesize: t.filesize,
                   peerName: t.peerName,
-                  peerIp: '',
+                  peerIp: t.peerIp || '',
                   status: 'success',
                   timestamp: Date.now(),
                   savePath: save_path,
@@ -308,7 +321,7 @@ export function FileTransfer() {
                   filename: t.filename,
                   filesize: t.filesize,
                   peerName: t.peerName || 'Receiver',
-                  peerIp: '',
+                  peerIp: t.peerIp || '',
                   status: 'success',
                   timestamp: Date.now(),
                 });
@@ -331,7 +344,7 @@ export function FileTransfer() {
                   filename: t.filename,
                   filesize: t.filesize,
                   peerName: t.peerName || 'Receiver',
-                  peerIp: '',
+                  peerIp: t.peerIp || '',
                   status: 'failed',
                   timestamp: Date.now(),
                 });
@@ -340,7 +353,7 @@ export function FileTransfer() {
               delete next[transfer_id];
               return next;
             });
-            alert(`Send failed: ${error_message}`);
+            showToast(t('Failed') + `: ${error_message}`, true);
           }),
 
           // 10. Send rejected listener
@@ -355,7 +368,7 @@ export function FileTransfer() {
                   filename: t.filename,
                   filesize: t.filesize,
                   peerName: t.peerName || 'Receiver',
-                  peerIp: '',
+                  peerIp: t.peerIp || '',
                   status: 'rejected',
                   timestamp: Date.now(),
                 });
@@ -364,7 +377,7 @@ export function FileTransfer() {
               delete next[transfer_id];
               return next;
             });
-            alert(`Transfer request rejected: ${reason}`);
+            showToast(t('Friend Request Rejected') + `: ${reason}`, true);
           }),
 
           // 11. Receive error listener
@@ -379,7 +392,7 @@ export function FileTransfer() {
                   filename: t.filename,
                   filesize: t.filesize,
                   peerName: t.peerName || 'Sender',
-                  peerIp: '',
+                  peerIp: t.peerIp || '',
                   status: 'failed',
                   timestamp: Date.now(),
                 });
@@ -388,7 +401,7 @@ export function FileTransfer() {
               delete next[transfer_id];
               return next;
             });
-            alert(`${t('Receive failed')}: ${error_message}`);
+            showToast(`${t('Receive failed')}: ${error_message}`, true);
           })
         ];
 
@@ -555,6 +568,7 @@ export function FileTransfer() {
           filename: selectedFile.name,
           filesize: selectedFile.size,
           peerName: peerDisplayName,
+          peerIp: ip,
           progress: 0,
           bytesTransferred: 0,
           speed: 0,
@@ -564,7 +578,7 @@ export function FileTransfer() {
 
       setSelectedFile(null);
     } catch (e) {
-      alert(`Failed to start transfer: ${e}`);
+      showToast(t('Failed to send request') + `: ${e}`, true);
     }
   };
 
@@ -618,7 +632,7 @@ export function FileTransfer() {
     try {
       await invoke('open_file', { path });
     } catch (e) {
-      alert(`${t('Failed to open file')}: ${e}`);
+      showToast(`${t('Failed to open file')}: ${e}`, true);
     }
   };
 
@@ -1206,6 +1220,20 @@ export function FileTransfer() {
                 </button>
               </div>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Floating Toast Notification */}
+      {toastMessage && (
+        <div className="fixed bottom-5 right-5 z-50 animate-fade-in">
+          <div className={`px-4 py-3 rounded-xl shadow-2xl border backdrop-blur-md text-xs font-semibold flex items-center gap-2 ${
+            toastMessage.isError 
+              ? 'bg-rose-500/10 border-rose-500/25 text-rose-400' 
+              : 'bg-indigo-500/10 border-indigo-500/25 text-indigo-400'
+          }`}>
+            <span className={`w-2 h-2 rounded-full ${toastMessage.isError ? 'bg-rose-500 animate-pulse' : 'bg-indigo-500 animate-pulse'}`} />
+            {toastMessage.text}
           </div>
         </div>
       )}

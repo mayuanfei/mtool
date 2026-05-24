@@ -107,6 +107,8 @@ export default function App() {
     setActivePage(page);
   };
 
+  const isToolActive = activePage !== 'settings' && activePage in toolsEnabled && toolsEnabled[activePage as ToolKey];
+
   return (
     <div className="flex h-screen overflow-hidden font-sans th-text-2 antialiased th-bg-app">
       <Sidebar 
@@ -155,18 +157,7 @@ export default function App() {
                   updater={updater}
                   setShowModal={setShowUpdateModal}            />
               )}
-              {activePage !== 'settings' &&
-               !(activePage === 'json' && toolsEnabled.json) && 
-               !(activePage === 'qr' && toolsEnabled.qr) && 
-               !(activePage === 'pwd' && toolsEnabled.pwd) && 
-               !(activePage === 'sqlIn' && toolsEnabled.sqlIn) && 
-               !(activePage === 'md' && toolsEnabled.md) && 
-               !(activePage === 'fileSearch' && toolsEnabled.fileSearch) &&
-               !(activePage === 'fileDiff' && toolsEnabled.fileDiff) &&
-               !(activePage === 'jarViewer' && toolsEnabled.jarViewer) &&
-               !(activePage === 'encoder' && toolsEnabled.encoder) &&
-               !(activePage === 'crypto' && toolsEnabled.crypto) &&
-               !(activePage === 'fileTransfer' && toolsEnabled.fileTransfer) && (
+              {activePage !== 'settings' && !isToolActive && (
                  <div className="flex items-center justify-center h-full th-text-muted font-medium">{t('Select a tool from the sidebar')}</div>
               )}
             </Suspense>

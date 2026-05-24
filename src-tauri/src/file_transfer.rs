@@ -217,7 +217,7 @@ async fn handle_incoming_connection(
         "FriendRequest" => {
             let sender_name = req["sender_name"].as_str().unwrap_or("Unknown Device").to_string();
             let sender_port = req["sender_port"].as_u64().unwrap_or(52026) as u16;
-            let request_id = format!("req-{}", SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis());
+            let request_id = format!("req-{}", SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_millis()).unwrap_or(0));
             let (tx, rx) = oneshot::channel();
             
             {
@@ -259,7 +259,7 @@ async fn handle_incoming_connection(
                     port: sender_port,
                     hostname: sender_name,
                     alias: String::new(),
-                    added_at: SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs(),
+                    added_at: SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0),
                 });
                 state.save_config(&conf)?;
                 app.emit("trusted-peers-updated", ()).ok();
@@ -271,6 +271,17 @@ async fn handle_incoming_connection(
             let transfer_id = req["transfer_id"].as_str().ok_or("Missing transfer_id")?.to_string();
             let filename = req["filename"].as_str().ok_or("Missing filename")?.to_string();
             let filesize = req["filesize"].as_u64().ok_or("Missing filesize")?;
+
+            // Limit check: max 10GB (10 * 1024 * 1024 * 1024)
+            if filesize > 10 * 1024 * 1024 * 1024 {
+                let resp = serde_json::json!({
+                    "type": "TransferResponse",
+                    "accepted": false,
+                    "reason": "File size exceeds 10GB limit",
+                });
+                write_frame(&mut stream, &resp.to_string()).await?;
+                return Err("File size exceeds 10GB limit".to_string());
+            }
 
             let is_trusted = {
                 let conf = state.config.read().await;
@@ -302,12 +313,13 @@ async fn handle_incoming_connection(
             let app_clone = app.clone();
             let state_clone = state.clone();
             let transfer_id_clone = transfer_id.clone();
+            let peer_ip_clone = peer_ip.clone();
             
             let handle = tokio::spawn(async move {
                 let transfer_id_err = transfer_id_clone.clone();
                 let app_err = app_clone.clone();
                 let state_err = state_clone.clone();
-                if let Err(e) = recv_file_task(app_clone, state_clone, transfer_id_clone, stream, filename, filesize, sender_name).await {
+                if let Err(e) = recv_file_task(app_clone, state_clone, transfer_id_clone, stream, filename, filesize, sender_name, peer_ip_clone).await {
                     eprintln!("[mtool server] receive file err: {}", e);
                     app_err.emit("recv-error", serde_json::json!({
                         "transfer_id": transfer_id_err,
@@ -353,6 +365,7 @@ async fn recv_file_task(
     filename: String,
     filesize: u64,
     sender_name: String,
+    sender_ip: String,
 ) -> Result<(), String> {
     let save_dir = {
         let conf = state.config.read().await;
@@ -366,7 +379,12 @@ async fn recv_file_task(
 
     std::fs::create_dir_all(&save_dir_path).map_err(|e| format!("Failed to create save directory: {}", e))?;
 
-    let mut target_path = save_dir_path.join(&filename);
+    let safe_filename = std::path::Path::new(&filename)
+        .file_name()
+        .map(|n| n.to_string_lossy().to_string())
+        .unwrap_or_else(|| "file".to_string());
+
+    let mut target_path = save_dir_path.join(&safe_filename);
     let mut file_idx = 1;
     let path_clone = target_path.clone();
     let stem = path_clone.file_stem().unwrap_or_default().to_string_lossy().to_string();
@@ -386,9 +404,10 @@ async fn recv_file_task(
 
     app.emit("recv-started", serde_json::json!({
         "transfer_id": transfer_id,
-        "filename": target_path.file_name().unwrap().to_string_lossy().to_string(),
+        "filename": target_path.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_else(|| safe_filename.clone()),
         "filesize": filesize,
         "sender_name": sender_name,
+        "sender_ip": sender_ip,
         "save_path": target_path.to_string_lossy().to_string(),
     })).ok();
 
@@ -655,7 +674,7 @@ pub async fn send_friend_request(
             port: peer_port,
             hostname: peer_hostname.clone(),
             alias: String::new(),
-            added_at: SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs(),
+            added_at: SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0),
         });
         state.save_config(&conf)?;
         app.emit("trusted-peers-updated", ()).ok();
@@ -692,9 +711,9 @@ pub async fn send_file(
     if !path.is_file() {
         return Err("File not found".to_string());
     }
-    let filename = path.file_name().unwrap().to_string_lossy().to_string();
+    let filename = path.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_else(|| "file".to_string());
     let filesize = std::fs::metadata(path).map_err(|e| e.to_string())?.len();
-    let transfer_id = format!("send-{}", SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis());
+    let transfer_id = format!("send-{}", SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_millis()).unwrap_or(0));
     let transfer_id_task = transfer_id.clone();
 
     let state_clone = state.inner().clone();
