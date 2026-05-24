@@ -68,6 +68,7 @@ fn generate_qr(payload: &str, redundancy: &str, resolution: u32, color: &str, bg
     if payload.is_empty() {
         return Err("Payload is empty".to_string());
     }
+    let resolution = resolution.clamp(64, 2048);
     let ec_level = match redundancy {
         "L" => EcLevel::L, "M" => EcLevel::M, "Q" => EcLevel::Q, "H" => EcLevel::H,
         _ => EcLevel::M,
@@ -688,6 +689,10 @@ async fn hq_crypto(
         || !biz_type.chars().all(|c| c.is_alphanumeric() || c == '_' || c == '-') 
     {
         return Err("Invalid bizType format. Only alphanumeric characters, underscores, and hyphens are allowed (max 64 chars).".to_string());
+    }
+
+    if payload.len() > 1 * 1024 * 1024 {
+        return Err("Payload too large (max 1 MB)".to_string());
     }
 
     let path = std::path::Path::new(&jar_path);
