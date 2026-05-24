@@ -381,9 +381,10 @@ fn get_index_status(state: tauri::State<'_, IndexEngine>) -> IndexStatus {
 #[tauri::command]
 async fn search_files(
     query: String,
-    limit: usize,
+    mut limit: usize,
     state: tauri::State<'_, IndexEngine>,
 ) -> Result<Vec<FileEntry>, String> {
+    limit = limit.min(2_000);
     if query.trim().is_empty() {
         return Ok(Vec::new());
     }

@@ -185,7 +185,12 @@ export function FileTransfer() {
         const listeners = [
           // 1. Friend request listener
           listen<PendingRequest>('friend-request', (event) => {
-            setPendingFriendRequest(event.payload);
+            setPendingFriendRequest(prev => {
+              if (prev) {
+                invoke('respond_friend_request', { requestId: prev.request_id, accept: false }).catch(() => {});
+              }
+              return event.payload;
+            });
           }),
 
           // 2. Trusted peers updated listener

@@ -232,9 +232,13 @@ async fn handle_incoming_connection(
                 "sender_port": sender_port,
             })).ok();
 
-            let accepted = match rx.await {
-                Ok(ans) => ans,
-                Err(_) => false,
+            let accepted = match tokio::time::timeout(std::time::Duration::from_secs(60), rx).await {
+                Ok(Ok(ans)) => ans,
+                _ => {
+                    let mut pending = state.pending_friends.lock().await;
+                    pending.remove(&request_id);
+                    false
+                }
             };
 
             let my_hostname = get_system_hostname();
