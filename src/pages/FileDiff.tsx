@@ -255,6 +255,10 @@ function FilePanel({ side, fileName, content, onFileOpen, onFileError }: FilePan
         onFileError?.(t('File size exceeds 10MB limit'));
         return;
       }
+      if (!isTextFile(file.name)) {
+        onFileError?.(t('Only text files are supported'));
+        return;
+      }
       const reader = new FileReader();
       reader.onload = (event) => {
         const text = event.target?.result;

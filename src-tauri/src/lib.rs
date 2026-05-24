@@ -407,7 +407,9 @@ async fn search_files(
     }
 
     // ── content 过滤 → SQLite 取候选，rayon 并行扫文件内容 ─────────────────────
-    let content_needle = parsed.content_filter.as_ref().unwrap().as_bytes().to_vec();
+    let content_needle = parsed.content_filter.as_ref()
+        .expect("content_filter checked above")
+        .as_bytes().to_vec();
     let results = tauri::async_runtime::spawn_blocking(move || {
         let candidates = search_in_db(&db_path, &parsed, 100_000, fts5_ready);
         let mut matched: Vec<FileEntry> = candidates

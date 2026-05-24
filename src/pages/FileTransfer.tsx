@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { Network, Send, Download, History, UserPlus, Trash2, FolderOpen, FileCheck, XCircle, Copy, Check, RefreshCw, Eye, Sparkles, Edit3 } from 'lucide-react';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
@@ -92,11 +92,15 @@ export function FileTransfer() {
 
   // Toast state
   const [toastMessage, setToastMessage] = useState<{ text: string; isError: boolean } | null>(null);
+  const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const showToast = (text: string, isError: boolean = false) => {
+    if (toastTimerRef.current) {
+      clearTimeout(toastTimerRef.current);
+    }
     setToastMessage({ text, isError });
-    setTimeout(() => {
-      setToastMessage(prev => prev?.text === text ? null : prev);
+    toastTimerRef.current = setTimeout(() => {
+      setToastMessage(null);
     }, 4000);
   };
 
@@ -105,6 +109,11 @@ export function FileTransfer() {
     loadLocalInfo();
     loadPeersAndConfig();
     loadHistory();
+    return () => {
+      if (toastTimerRef.current) {
+        clearTimeout(toastTimerRef.current);
+      }
+    };
   }, []);
 
   const loadLocalInfo = async () => {
