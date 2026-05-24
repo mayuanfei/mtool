@@ -638,7 +638,7 @@ export function FileTransfer() {
   };
 
   return (
-    <div className="max-w-6xl mx-auto w-full space-y-6">
+    <div className="w-full space-y-6">
       {/* Title */}
       <div className="flex justify-between items-center mb-6 border-b th-border pb-4 shrink-0">
         <h2 className="th-text font-semibold text-lg flex items-center gap-2">

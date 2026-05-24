@@ -480,8 +480,10 @@ async fn disable_file_search(
 fn reveal_in_explorer(path: String) -> Result<(), String> {
     #[cfg(target_os = "windows")]
     {
+        use std::os::windows::process::CommandExt;
+        let clean_path = path.replace("/", "\\");
         std::process::Command::new("explorer")
-            .arg(format!("/select,{}", path))
+            .raw_arg(format!(r#"/select,"{}""#, clean_path))
             .spawn()
             .map_err(|e| e.to_string())?;
     }
