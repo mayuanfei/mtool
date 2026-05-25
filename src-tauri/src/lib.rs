@@ -167,6 +167,9 @@ fn open_md_file() -> Result<(String, String), String> {
 
 #[tauri::command]
 fn save_md_file(path: &str, content: &str) -> Result<String, String> {
+    if content.len() > 10 * 1024 * 1024 {
+        return Err("Content too large (max 10 MB)".to_string());
+    }
     if path.is_empty() {
         if let Some(save_path) = rfd::FileDialog::new()
             .add_filter("Markdown", &["md", "markdown"])
@@ -187,6 +190,9 @@ fn save_md_file(path: &str, content: &str) -> Result<String, String> {
 
 #[tauri::command]
 fn save_md_file_as(content: &str) -> Result<String, String> {
+    if content.len() > 10 * 1024 * 1024 {
+        return Err("Content too large (max 10 MB)".to_string());
+    }
     if let Some(save_path) = rfd::FileDialog::new()
         .add_filter("Markdown", &["md", "markdown"])
         .set_file_name("untitled.md")
@@ -385,6 +391,9 @@ async fn search_files(
     mut limit: usize,
     state: tauri::State<'_, IndexEngine>,
 ) -> Result<Vec<FileEntry>, String> {
+    if query.len() > 1024 {
+        return Err("Query too long (max 1024 chars)".to_string());
+    }
     limit = limit.min(2_000);
     if query.trim().is_empty() {
         return Ok(Vec::new());
