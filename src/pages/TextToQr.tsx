@@ -1,4 +1,4 @@
-import { Copy, Download, Clipboard, Trash2, QrCode, Check, XCircle } from 'lucide-react';
+import { Copy, Download, Clipboard, Trash2, QrCode, Check, XCircle, Clock, X } from 'lucide-react';
 import { useState, useEffect, useRef, useMemo } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { useI18n, TranslationKey } from '../i18n';
@@ -36,6 +36,13 @@ export function TextToQr() {
   useEffect(() => {
     localStorage.setItem('mtool_qr_color', selectedColor);
   }, [selectedColor]);
+  interface HistoryItem {
+    id: string;
+    payload: string;
+    timestamp: number;
+    timeStr: string;
+  }
+
   const [qrBase64, setQrBase64] = useState('');
   const [genError, setGenError] = useState('');
   const [isGenerating, setIsGenerating] = useState(false);
@@ -43,12 +50,30 @@ export function TextToQr() {
   const [copyError, setCopyError] = useState(false);
   const [downloadError, setDownloadError] = useState(false);
   const [pasteError, setPasteError] = useState(false);
+  const [history, setHistory] = useState<HistoryItem[]>(() => {
+    const saved = localStorage.getItem('mtool_qr_history');
+    if (saved) {
+      try {
+        const parsed = JSON.parse(saved);
+        return Array.isArray(parsed) ? parsed.slice(0, 10) : [];
+      } catch (e) {
+        return [];
+      }
+    }
+    return [];
+  });
+  const [historyCopiedId, setHistoryCopiedId] = useState<string | null>(null);
+  const [historyCopyErrorId, setHistoryCopyErrorId] = useState<string | null>(null);
   const genIdRef = useRef(0);
 
   const bgColor = useMemo(() => {
     return getComputedStyle(document.documentElement)
       .getPropertyValue('--bg-card').trim() || (theme === 'dark' ? '#0f172a' : '#ffffff');
   }, [theme]);
+
+  useEffect(() => {
+    localStorage.setItem('mtool_qr_history', JSON.stringify(history));
+  }, [history]);
 
   useEffect(() => {
     if (!payload.trim()) {
@@ -82,6 +107,39 @@ export function TextToQr() {
     }, 300);
     return () => clearTimeout(timer);
   }, [payload, redundancy, resolution, selectedColor, bgColor, theme]);
+
+  const handleCopyText = async (text: string, id: string) => {
+    if (!text) return;
+    try {
+      await navigator.clipboard.writeText(text);
+      setHistoryCopiedId(id);
+      setTimeout(() => setHistoryCopiedId(null), 2000);
+    } catch (e) {
+      console.error(e);
+      setHistoryCopyErrorId(id);
+      setTimeout(() => setHistoryCopyErrorId(null), 2000);
+    }
+  };
+
+  const handleBlur = () => {
+    if (!payload.trim()) return;
+    const now = Date.now();
+    const pad = (n: number) => String(n).padStart(2, '0');
+    const d = new Date(now);
+    const timeStr = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+    
+    setHistory(prev => {
+      const newHistory = [...prev];
+      const existingIndex = newHistory.findIndex(h => h.payload === payload);
+      if (existingIndex !== -1) {
+        newHistory.splice(existingIndex, 1);
+        newHistory.unshift({ id: crypto.randomUUID(), payload, timestamp: now, timeStr });
+      } else {
+        newHistory.unshift({ id: crypto.randomUUID(), payload, timestamp: now, timeStr });
+      }
+      return newHistory.slice(0, 10);
+    });
+  };
 
   const handleCopyImage = async () => {
     if (!qrBase64) return;
@@ -132,6 +190,7 @@ export function TextToQr() {
             <textarea
               value={payload}
               onChange={(e) => setPayload(e.target.value)}
+              onBlur={handleBlur}
               maxLength={2048}
               autoCapitalize="none"
               autoCorrect="off"
@@ -216,6 +275,75 @@ export function TextToQr() {
                 </div>
              </div>
           </div>
+
+          {/* Recent Records */}
+          {history.length > 0 && (
+            <div className="th-bg-card border th-border rounded-xl p-5 shadow-2xl flex flex-col min-h-0">
+              <div className="flex justify-between items-center mb-4 pb-2 border-b th-border">
+                <div className="flex items-center gap-2">
+                  <Clock className="w-4 h-4 text-indigo-400" />
+                  <h3 className="text-[11px] font-bold th-text-3 uppercase tracking-tighter">
+                    {t('Recent Records')}
+                  </h3>
+                  <span className="text-[10px] th-text-muted font-mono flex items-center">
+                    ({t('Last 10 items')})
+                  </span>
+                </div>
+                <button
+                  onClick={() => setHistory([])}
+                  className="p-1 text-xs th-text-muted hover:text-red-400 th-hover-surface rounded transition-colors"
+                  title={t('Clear History')}
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                </button>
+              </div>
+
+              <div className="max-h-60 overflow-y-auto pr-1 space-y-2">
+                {history.map((item) => (
+                  <div
+                    key={item.id}
+                    className="flex items-center justify-between p-2 rounded-lg th-bg-input-alt border th-border-muted th-hover-surface group transition-colors"
+                  >
+                    <div
+                      onClick={() => setPayload(item.payload)}
+                      className="flex-1 min-w-0 cursor-pointer pr-3"
+                      title={t('Click to apply')}
+                    >
+                      <div className="text-xs th-text-2 font-mono truncate">
+                        {item.payload}
+                      </div>
+                      <div className="text-[9px] th-text-muted mt-0.5">
+                        {item.timeStr}
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-1.5 shrink-0 opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity">
+                      <button
+                        onClick={() => handleCopyText(item.payload, item.id)}
+                        className="p-1.5 th-text-muted hover:th-text rounded transition-colors"
+                        title={t('Copy')}
+                      >
+                        {historyCopyErrorId === item.id ? (
+                          <XCircle className="w-3.5 h-3.5 text-rose-400" />
+                        ) : historyCopiedId === item.id ? (
+                          <Check className="w-3.5 h-3.5 text-emerald-400" />
+                        ) : (
+                          <Copy className="w-3.5 h-3.5" />
+                        )}
+                      </button>
+                      <button
+                        onClick={() => setHistory((prev) => prev.filter((h) => h.id !== item.id))}
+                        className="p-1.5 th-text-muted hover:text-red-400 rounded transition-colors"
+                        title={t('Delete')}
+                      >
+                        <X className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
 
         </div>
 
