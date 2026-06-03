@@ -764,6 +764,25 @@ pub async fn select_file_to_send() -> Result<Option<SelectedFileInfo>, String> {
 }
 
 #[tauri::command]
+pub fn get_file_info(path: String) -> Result<SelectedFileInfo, String> {
+    let p = std::path::Path::new(&path);
+    if !p.is_file() {
+        return Err("Not a file".to_string());
+    }
+    let name = p
+        .file_name()
+        .unwrap_or_default()
+        .to_string_lossy()
+        .to_string();
+    let size = std::fs::metadata(p).map(|m| m.len()).unwrap_or(0);
+    Ok(SelectedFileInfo {
+        path,
+        name,
+        size,
+    })
+}
+
+#[tauri::command]
 pub async fn cancel_transfer(
     state: tauri::State<'_, TransferState>,
     transfer_id: String,

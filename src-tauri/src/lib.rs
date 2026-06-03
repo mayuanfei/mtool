@@ -864,6 +864,7 @@ pub fn run() {
             file_transfer::respond_friend_request,
             file_transfer::send_file,
             file_transfer::select_file_to_send,
+            file_transfer::get_file_info,
             file_transfer::cancel_transfer,
             file_transfer::delete_local_file,
         ])

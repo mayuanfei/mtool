@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { Network, Send, Download, History, UserPlus, Trash2, FolderOpen, FileCheck, XCircle, Copy, Check, RefreshCw, Eye, Sparkles, Edit3 } from 'lucide-react';
 import { invoke } from '@tauri-apps/api/core';
+import { getCurrentWebview } from '@tauri-apps/api/webview';
 import { listen } from '@tauri-apps/api/event';
 import { useI18n } from '../i18n';
 import { CustomSelect } from '../components/CustomSelect';
@@ -89,6 +90,9 @@ export function FileTransfer() {
   // Peer editing states
   const [editingPeerKey, setEditingPeerKey] = useState<string | null>(null);
   const [editAliasInput, setEditAliasInput] = useState('');
+
+  // Drag-and-drop state
+  const [dragOver, setDragOver] = useState(false);
 
   // Toast state
   const [toastMessage, setToastMessage] = useState<{ text: string; isError: boolean } | null>(null);
@@ -437,6 +441,33 @@ export function FileTransfer() {
       active = false;
       localUnlistens.forEach(fn => fn());
     };
+  }, []);
+
+  // Drag-and-drop file support via Tauri webview events
+  useEffect(() => {
+    const setup = async () => {
+      const unlisten = await getCurrentWebview().onDragDropEvent(async (event) => {
+        if (event.payload.type === 'drop') {
+          setDragOver(false);
+          const paths = event.payload.paths;
+          if (!paths || paths.length === 0) return;
+          const filePath = paths[0];
+          try {
+            const info = await invoke<{ path: string; name: string; size: number }>('get_file_info', { path: filePath });
+            setSelectedFile(info);
+          } catch (e) {
+            console.error('Failed to get file info for dropped file:', e);
+          }
+        } else if (event.payload.type === 'enter' || event.payload.type === 'over') {
+          setDragOver(true);
+        } else if (event.payload.type === 'leave') {
+          setDragOver(false);
+        }
+      });
+      return unlisten;
+    };
+    const cleanup = setup();
+    return () => { cleanup.then(fn => fn()); };
   }, []);
 
   // Synchronize history across different instances/tabs sharing localStorage
@@ -926,9 +957,13 @@ export function FileTransfer() {
               {/* File selection dropzone */}
               <div
                 onClick={handleSelectFile}
-                className="border-2 border-dashed th-border hover:border-indigo-500 bg-black/5 hover:bg-indigo-500/5 transition-all rounded-xl p-6 flex flex-col items-center justify-center cursor-pointer text-center group"
+                className={`border-2 border-dashed transition-all rounded-xl p-6 flex flex-col items-center justify-center cursor-pointer text-center group ${
+                  dragOver
+                    ? 'border-indigo-500 bg-indigo-500/10 scale-[1.02]'
+                    : 'th-border hover:border-indigo-500 bg-black/5 hover:bg-indigo-500/5'
+                }`}
               >
-                <Send className="w-10 h-10 mb-3 th-text-muted group-hover:text-indigo-400 transition-colors" />
+                <Send className={`w-10 h-10 mb-3 transition-colors ${dragOver ? 'text-indigo-400 animate-bounce' : 'th-text-muted group-hover:text-indigo-400'}`} />
                 <span className="text-xs th-text-2 font-medium mb-1">{t('Select File')}</span>
                 <span className="text-[10px] th-text-muted">{t('Drag and drop a file here, or click to browse.')}</span>
               </div>
