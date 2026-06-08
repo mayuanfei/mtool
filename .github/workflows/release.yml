@@ -44,6 +44,8 @@ jobs:
           cargo --version
 
       - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: './src-tauri -> target'
 
       - run: npm install
 
