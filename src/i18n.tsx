@@ -222,6 +222,15 @@ const translations = {
     'Loading...': 'Loading...',
     'Select a file to view its contents': 'Select a file to view its contents',
     'Open Another': 'Open Another',
+    'Search archive entries...': 'Search archive entries...',
+    'No matching archive entries': 'No matching archive entries',
+    '{count} matches': '{count} matches',
+    'Find in file': 'Find in file',
+    'Find in current file...': 'Find in current file...',
+    'No matches': 'No matches',
+    'Previous match': 'Previous match',
+    'Next match': 'Next match',
+    'Close search': 'Close search',
     
     // EncoderDecoder
     'Encoder / Decoder': 'Encoder / Decoder',
@@ -564,6 +573,15 @@ const translations = {
     'Loading...': '加载中...',
     'Select a file to view its contents': '选择一个文件以查看其内容',
     'Open Another': '打开其他文件',
+    'Search archive entries...': '搜索归档条目...',
+    'No matching archive entries': '未找到匹配的归档条目',
+    '{count} matches': '{count} 个匹配',
+    'Find in file': '在文件中查找',
+    'Find in current file...': '在当前文件中查找...',
+    'No matches': '无匹配',
+    'Previous match': '上一个匹配',
+    'Next match': '下一个匹配',
+    'Close search': '关闭查找',
     
     // EncoderDecoder
     'Encoder / Decoder': '编码 / 解码',
