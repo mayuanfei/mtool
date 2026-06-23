@@ -1,5 +1,5 @@
 import { useState, useCallback, useEffect, useRef, useMemo } from 'react';
-import { Trash2, FolderOpen, Save, Copy, Check, Eye, Edit3, FileText, Download, Upload, XCircle, X } from 'lucide-react';
+import { Trash2, FolderOpen, Save, Copy, Check, Eye, Edit3, FileText, Download, Upload, XCircle, X, ChevronRight, ChevronDown, List } from 'lucide-react';
 import { invoke } from '@tauri-apps/api/core';
 import { openUrl } from '@tauri-apps/plugin-opener';
 import { getCurrentWebview } from '@tauri-apps/api/webview';
@@ -37,6 +37,17 @@ export function MarkdownEditor({ setMdDirty }: { setMdDirty?: (dirty: boolean) =
   const scrollSourceRef = useRef<'editor' | 'preview' | null>(null);
   const scrollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  const [headings, setHeadings] = useState<Array<{ text: string; depth: number }>>([]);
+  const [activeIndex, setActiveIndex] = useState<number>(-1);
+  const [showOutline, setShowOutline] = useState(() => {
+    return localStorage.getItem('mtool_md_showoutline') !== 'false';
+  });
+  const [collapsedIndices, setCollapsedIndices] = useState<Set<number>>(new Set());
+
+  useEffect(() => {
+    localStorage.setItem('mtool_md_showoutline', String(showOutline));
+  }, [showOutline]);
+
   useEffect(() => {
     return () => {
       if (scrollTimerRef.current) clearTimeout(scrollTimerRef.current);
@@ -71,6 +82,26 @@ export function MarkdownEditor({ setMdDirty }: { setMdDirty?: (dirty: boolean) =
       return `<p class="text-red-400">${t('Render error')}</p>`;
     }
   }, [content, marked, t]);
+
+  // Extract headings from the DOM after rendering
+  useEffect(() => {
+    if (!previewRef.current || (viewMode !== 'split' && viewMode !== 'preview')) {
+      setHeadings([]);
+      return;
+    }
+    
+    const headingElements = previewRef.current.querySelectorAll(
+      '.markdown-body h1, .markdown-body h2, .markdown-body h3, .markdown-body h4, .markdown-body h5, .markdown-body h6'
+    );
+    
+    const list: Array<{ text: string; depth: number }> = [];
+    headingElements.forEach((el) => {
+      const text = el.textContent || '';
+      const depth = parseInt(el.tagName.substring(1), 10);
+      list.push({ text, depth });
+    });
+    setHeadings(list);
+  }, [renderedHtml, viewMode]);
 
   // Track dirty state
   const handleContentChange = useCallback((value: string) => {
@@ -231,17 +262,44 @@ export function MarkdownEditor({ setMdDirty }: { setMdDirty?: (dirty: boolean) =
     scrollTimerRef.current = setTimeout(() => { scrollSourceRef.current = null; }, 50);
   }, [viewMode]);
 
-  // Bidirectional scroll sync — preview drives editor
+  // Bidirectional scroll sync — preview drives editor + scroll spy
   const handlePreviewScroll = useCallback(() => {
-    if (viewMode !== 'split' || !editorRef.current || !previewRef.current) return;
-    if (scrollSourceRef.current === 'editor') return; // ignore echo
-    scrollSourceRef.current = 'preview';
-    const preview = previewRef.current;
-    const ratio = preview.scrollTop / (preview.scrollHeight - preview.clientHeight || 1);
-    editorRef.current.scrollTop = ratio * (editorRef.current.scrollHeight - editorRef.current.clientHeight || 1);
-    // Reset source after scroll settles
-    if (scrollTimerRef.current) clearTimeout(scrollTimerRef.current);
-    scrollTimerRef.current = setTimeout(() => { scrollSourceRef.current = null; }, 50);
+    if (previewRef.current) {
+      // 1. Bidirectional scroll sync
+      if (viewMode === 'split' && editorRef.current) {
+        if (scrollSourceRef.current !== 'editor') {
+          scrollSourceRef.current = 'preview';
+          const preview = previewRef.current;
+          const ratio = preview.scrollTop / (preview.scrollHeight - preview.clientHeight || 1);
+          editorRef.current.scrollTop = ratio * (editorRef.current.scrollHeight - editorRef.current.clientHeight || 1);
+          if (scrollTimerRef.current) clearTimeout(scrollTimerRef.current);
+          scrollTimerRef.current = setTimeout(() => { scrollSourceRef.current = null; }, 50);
+        }
+      }
+
+      // 2. Scroll spy logic
+      const headingElements = previewRef.current.querySelectorAll(
+        '.markdown-body h1, .markdown-body h2, .markdown-body h3, .markdown-body h4, .markdown-body h5, .markdown-body h6'
+      );
+      let currentActiveIndex = -1;
+      const containerTop = previewRef.current.getBoundingClientRect().top;
+      
+      for (let i = 0; i < headingElements.length; i++) {
+        const el = headingElements[i];
+        const rect = el.getBoundingClientRect();
+        if (rect.top - containerTop <= 60) {
+          currentActiveIndex = i;
+        } else {
+          break;
+        }
+      }
+      
+      if (currentActiveIndex === -1 && headingElements.length > 0) {
+        currentActiveIndex = 0;
+      }
+      
+      setActiveIndex(currentActiveIndex);
+    }
   }, [viewMode]);
 
   // Handle tab key in editor for indentation
@@ -272,6 +330,59 @@ export function MarkdownEditor({ setMdDirty }: { setMdDirty?: (dirty: boolean) =
     e.preventDefault();
     openUrl(href).catch(console.error);
   }, []);
+
+  // Scroll preview to target heading
+  const scrollToHeading = useCallback((index: number) => {
+    if (!previewRef.current) return;
+    const headingElements = previewRef.current.querySelectorAll(
+      '.markdown-body h1, .markdown-body h2, .markdown-body h3, .markdown-body h4, .markdown-body h5, .markdown-body h6'
+    );
+    const el = headingElements[index];
+    if (el) {
+      const containerRect = previewRef.current.getBoundingClientRect();
+      const elRect = el.getBoundingClientRect();
+      const relativeTop = elRect.top - containerRect.top + previewRef.current.scrollTop;
+      
+      previewRef.current.scrollTo({
+        top: relativeTop - 10,
+        behavior: 'smooth'
+      });
+      
+      setActiveIndex(index);
+    }
+  }, []);
+
+  // Collapsible tree helpers
+  const toggleCollapse = useCallback((index: number) => {
+    setCollapsedIndices((prev) => {
+      const next = new Set(prev);
+      if (next.has(index)) {
+        next.delete(index);
+      } else {
+        next.add(index);
+      }
+      return next;
+    });
+  }, []);
+
+  const hasChildren = useCallback((index: number) => {
+    if (index + 1 >= headings.length) return false;
+    return headings[index + 1].depth > headings[index].depth;
+  }, [headings]);
+
+  const isHeadingVisible = useCallback((heading: { text: string; depth: number }, index: number) => {
+    let currentDepth = heading.depth;
+    for (let i = index - 1; i >= 0; i--) {
+      const prev = headings[i];
+      if (prev.depth < currentDepth) {
+        if (collapsedIndices.has(i)) {
+          return false;
+        }
+        currentDepth = prev.depth;
+      }
+    }
+    return true;
+  }, [headings, collapsedIndices]);
 
   const { lineCount, wordCount } = useMemo(() => ({
     lineCount: content ? content.split('\n').length : 0,
@@ -412,34 +523,110 @@ export function MarkdownEditor({ setMdDirty }: { setMdDirty?: (dirty: boolean) =
               <span className="text-[11px] font-bold th-text-3 uppercase tracking-tighter flex items-center gap-2">
                 <Eye className="w-3 h-3" /> {t('Preview')}
               </span>
-              <button
-                onClick={handleCopy}
-                className={`text-[10px] font-bold transition-colors uppercase flex items-center gap-1 ${
-                  copyError ? 'text-red-400' :
-                  isCopied ? 'text-emerald-400' :
-                  'text-indigo-400 hover:text-indigo-300'
-                }`}
-              >
-                {copyError ? <XCircle className="w-3 h-3" /> : isCopied ? <Check className="w-3 h-3" /> : <Copy className="w-3 h-3" />} {copyError ? t('Failed') : isCopied ? t('Copied!') : t('Copy')}
-              </button>
+              <div className="flex items-center gap-3">
+                {headings.length > 0 && (
+                  <>
+                    <button
+                      onClick={() => setShowOutline(!showOutline)}
+                      className={`text-[10px] font-bold transition-colors uppercase flex items-center gap-1.5 focus:outline-none ${
+                        showOutline ? 'text-indigo-400' : 'th-text-3 hover:th-text-2'
+                      }`}
+                      title={t('Toggle Outline')}
+                    >
+                      <List className="w-3 h-3" /> {t('Outline')}
+                    </button>
+                    <span className="w-[1px] h-3 bg-slate-700/50"></span>
+                  </>
+                )}
+                <button
+                  onClick={handleCopy}
+                  className={`text-[10px] font-bold transition-colors uppercase flex items-center gap-1 ${
+                    copyError ? 'text-red-400' :
+                    isCopied ? 'text-emerald-400' :
+                    'text-indigo-400 hover:text-indigo-300'
+                  }`}
+                >
+                  {copyError ? <XCircle className="w-3 h-3" /> : isCopied ? <Check className="w-3 h-3" /> : <Copy className="w-3 h-3" />} {copyError ? t('Failed') : isCopied ? t('Copied!') : t('Copy')}
+                </button>
+              </div>
             </div>
 
-            <div
-              ref={previewRef}
-              onScroll={handlePreviewScroll}
-              onClick={handlePreviewClick}
-              className="flex-1 p-6 overflow-y-auto"
-            >
-              {renderedHtml ? (
-                <div
-                  className="markdown-body"
-                  dangerouslySetInnerHTML={{ __html: renderedHtml }}
-                />
-              ) : (
-                <div className="text-sm th-text-faint italic">
-                  {t('Preview will appear here...')}
+            <div className="flex-1 flex min-h-0 relative">
+              {/* Outline View */}
+              {showOutline && headings.length > 0 && (
+                <div className="w-64 border-r th-border th-bg-surface-h/10 flex flex-col shrink-0 select-none overflow-y-auto p-4">
+                  <div className="text-[10px] font-bold th-text-muted uppercase tracking-wider mb-3">
+                    {t('Outline')}
+                  </div>
+                  <div className="flex flex-col gap-1 text-xs">
+                    {headings.map((heading, index) => {
+                      if (!isHeadingVisible(heading, index)) return null;
+                      const hasChild = hasChildren(index);
+                      const isCollapsed = collapsedIndices.has(index);
+                      const isActive = activeIndex === index;
+                      
+                      return (
+                        <div
+                          key={index}
+                          style={{ paddingLeft: `${(heading.depth - 1) * 12}px` }}
+                          className={`flex items-center group py-0.5 rounded transition-colors ${
+                            isActive ? 'bg-indigo-500/10 th-text font-medium' : 'th-text-2 hover:th-bg-surface'
+                          }`}
+                        >
+                          {/* Chevron / Spacer */}
+                          {hasChild ? (
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                toggleCollapse(index);
+                              }}
+                              className="w-4 h-4 flex items-center justify-center th-text-muted hover:th-text rounded shrink-0 focus:outline-none"
+                            >
+                              {isCollapsed ? (
+                                <ChevronRight className="w-3 h-3" />
+                              ) : (
+                                <ChevronDown className="w-3 h-3" />
+                              )}
+                            </button>
+                          ) : (
+                            <div className="w-4 h-4 flex items-center justify-center shrink-0">
+                              <span className="w-1 h-1 rounded-full bg-slate-500/30 group-hover:bg-indigo-400/50"></span>
+                            </div>
+                          )}
+                          
+                          {/* Text */}
+                          <button
+                            onClick={() => scrollToHeading(index)}
+                            className="flex-1 text-left truncate px-1 py-0.5 focus:outline-none"
+                            title={heading.text}
+                          >
+                            {heading.text}
+                          </button>
+                        </div>
+                      );
+                    })}
+                  </div>
                 </div>
               )}
+
+              {/* Preview Content */}
+              <div
+                ref={previewRef}
+                onScroll={handlePreviewScroll}
+                onClick={handlePreviewClick}
+                className="flex-1 p-6 overflow-y-auto scroll-smooth"
+              >
+                {renderedHtml ? (
+                  <div
+                    className="markdown-body"
+                    dangerouslySetInnerHTML={{ __html: renderedHtml }}
+                  />
+                ) : (
+                  <div className="text-sm th-text-faint italic">
+                    {t('Preview will appear here...')}
+                  </div>
+                )}
+              </div>
             </div>
           </div>
         )}

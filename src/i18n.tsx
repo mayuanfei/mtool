@@ -151,6 +151,8 @@ const translations = {
     'Release to open file': 'Release to open file',
     'Render error': 'Render error',
     'You have unsaved changes in Markdown Editor. Are you sure you want to leave?': 'You have unsaved changes in Markdown Editor. Are you sure you want to leave?',
+    'Outline': 'Outline',
+    'Toggle Outline': 'Toggle Outline',
 
     // FileSearch
     'File Search': 'File Search',
@@ -502,6 +504,8 @@ const translations = {
     'Release to open file': '释放以打开文件',
     'Render error': '渲染出错',
     'You have unsaved changes in Markdown Editor. Are you sure you want to leave?': 'Markdown 编辑器中有未保存的修改，确定要离开吗？',
+    'Outline': '大纲',
+    'Toggle Outline': '切换大纲',
 
     // FileSearch
     'File Search': '文件搜索',
