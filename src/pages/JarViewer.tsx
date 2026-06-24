@@ -327,6 +327,87 @@ export function JarViewer() {
     });
   }, []);
 
+  const handleMouseDown = useCallback((e: React.MouseEvent<HTMLPreElement>) => {
+    // Only intercept on double click (mousedown count is 2)
+    if (e.detail === 2) {
+      let node: Node | null = null;
+      let offset = 0;
+
+      // Prioritize caretRangeFromPoint to get the exact text node and offset at double click position
+      if (document.caretRangeFromPoint) {
+        const range = document.caretRangeFromPoint(e.clientX, e.clientY);
+        if (range) {
+          node = range.startContainer;
+          offset = range.startOffset;
+        }
+      } else if ((document as any).caretPositionFromPoint) {
+        const position = (document as any).caretPositionFromPoint(e.clientX, e.clientY);
+        if (position) {
+          node = position.offsetNode;
+          offset = position.offset;
+        }
+      }
+
+      // Fallback to selection range if API is not supported
+      if (!node) {
+        const selection = window.getSelection();
+        if (!selection || selection.rangeCount === 0) return;
+        const range = selection.getRangeAt(0);
+        node = range.startContainer;
+        offset = range.startOffset;
+      }
+
+      // Ensure it is a text node
+      if (node.nodeType !== Node.TEXT_NODE) return;
+
+      const text = node.nodeValue || '';
+      if (!text) return;
+
+      const isWordChar = (char: string) => /[a-zA-Z0-9_$]/.test(char);
+      
+      let checkOffset = offset;
+      if (checkOffset >= text.length) {
+        checkOffset = text.length - 1;
+      }
+      if (checkOffset < 0) return;
+
+      // If clicked at the right boundary of a word, adjust the offset
+      if (!isWordChar(text[checkOffset]) && checkOffset > 0 && isWordChar(text[checkOffset - 1])) {
+        checkOffset--;
+      }
+
+      if (!isWordChar(text[checkOffset])) {
+        return;
+      }
+
+      // Prevent default double click selection to eliminate visual flickering
+      e.preventDefault();
+
+      // Find left word boundary
+      let start = checkOffset;
+      while (start > 0 && isWordChar(text[start - 1])) {
+        start--;
+      }
+
+      // Find right word boundary
+      let end = checkOffset;
+      while (end < text.length && isWordChar(text[end])) {
+        end++;
+      }
+
+      if (start < end) {
+        const selection = window.getSelection();
+        if (selection) {
+          selection.removeAllRanges();
+          const newRange = document.createRange();
+          newRange.setStart(node, start);
+          newRange.setEnd(node, end);
+          selection.addRange(newRange);
+        }
+      }
+    }
+  }, []);
+
   const { highlightedContent, lineCount } = useMemo(() => {
     if (!content) return { highlightedContent: '', lineCount: 0 };
 
@@ -665,7 +746,11 @@ export function JarViewer() {
                 >
                   {Array.from({ length: lineCount }, (_, i) => i + 1).join('\n')}
                 </div>
-                <pre className="m-0 flex-1 p-4 text-slate-900 dark:text-slate-200 overflow-visible">
+                <pre 
+                  className="m-0 flex-1 p-4 text-slate-900 dark:text-slate-200 overflow-visible select-text"
+                  onMouseDown={handleMouseDown}
+                  onDoubleClick={(e) => e.preventDefault()}
+                >
                   <code dangerouslySetInnerHTML={{ __html: searchableContent }} className="hljs" style={{ background: 'transparent', padding: 0 }} />
                 </pre>
               </div>

@@ -1,4 +1,7 @@
+import { useMemo } from 'react';
 import { X } from 'lucide-react';
+import { Marked } from 'marked';
+import DOMPurify from 'dompurify';
 import { useI18n } from '../i18n';
 import type { UpdateInfo } from '../updater';
 
@@ -17,6 +20,25 @@ interface UpdateModalProps {
 
 export function UpdateModal({ open, updateInfo, downloading, progress, error, installed, onClose, onSkip, onInstall, onRelaunch }: UpdateModalProps) {
   const { t } = useI18n();
+
+  const marked = useMemo(() => {
+    const m = new Marked();
+    m.setOptions({
+      gfm: true,
+      breaks: true,
+    });
+    return m;
+  }, []);
+
+  const renderedNotes = useMemo(() => {
+    if (!updateInfo.notes) return '';
+    try {
+      return DOMPurify.sanitize(marked.parse(updateInfo.notes) as string);
+    } catch {
+      return updateInfo.notes;
+    }
+  }, [updateInfo.notes, marked]);
+
   if (!open) return null;
 
   return (
@@ -40,9 +62,10 @@ export function UpdateModal({ open, updateInfo, downloading, progress, error, in
         {/* Changelog */}
         <div className="px-6 py-4 max-h-64 overflow-y-auto">
           {updateInfo.notes ? (
-            <pre className="text-sm th-text-3 whitespace-pre-wrap font-sans leading-relaxed">
-              {updateInfo.notes}
-            </pre>
+            <div 
+              className="markdown-body text-sm th-text-3 font-sans leading-relaxed"
+              dangerouslySetInnerHTML={{ __html: renderedNotes }}
+            />
           ) : (
             <p className="text-sm th-text-muted italic">{t('No changelog provided.')}</p>
           )}
