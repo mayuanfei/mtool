@@ -84,6 +84,7 @@ export function CryptoTool() {
   // For HQ DLL
   const [jarPath, setJarPath] = useState(() => localStorage.getItem('mtool_hq_jar') || '');
   const [bizType, setBizType] = useState(() => localStorage.getItem('mtool_hq_param') || 'A001');
+  const [jdkPath, setJdkPath] = useState(() => localStorage.getItem('mtool_hq_jdk') || '');
 
   useEffect(() => {
     localStorage.setItem('mtool_hq_jar', jarPath);
@@ -92,6 +93,10 @@ export function CryptoTool() {
   useEffect(() => {
     localStorage.setItem('mtool_hq_param', bizType);
   }, [bizType]);
+
+  useEffect(() => {
+    localStorage.setItem('mtool_hq_jdk', jdkPath);
+  }, [jdkPath]);
 
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
@@ -579,7 +584,8 @@ export function CryptoTool() {
             action: doEncrypt ? 'enc' : 'dec',
             payload: input,
             jarPath,
-            bizType
+            bizType,
+            jdkPath: jdkPath || null
           });
         } catch (err: unknown) {
           throw new Error(`HQ DLL Error: ${err instanceof Error ? err.message : String(err)}`);
@@ -841,6 +847,38 @@ export function CryptoTool() {
                 >
                   {t('Browse')}
                 </button>
+              </div>
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="font-semibold whitespace-nowrap">{t('JDK Path')}</span>
+              <div className="flex items-center gap-2 flex-1">
+                <input 
+                  type="text"
+                  value={jdkPath}
+                  readOnly
+                  placeholder={t('Optional: select JDK/JRE directory (default: system PATH)')}
+                  className="flex-1 bg-transparent border-b border-indigo-500/30 px-2 py-1 outline-none text-xs text-indigo-300 min-w-0 truncate"
+                />
+                <button 
+                  onClick={async () => {
+                    try {
+                      const path = await invoke('select_jdk_dir');
+                      setJdkPath(path as string);
+                    } catch (e) {}
+                  }}
+                  className="px-3 py-1 bg-indigo-500/20 rounded hover:bg-indigo-500/30 transition-colors text-xs cursor-pointer whitespace-nowrap"
+                >
+                  {t('Browse')}
+                </button>
+                {jdkPath && (
+                  <button 
+                    onClick={() => setJdkPath('')}
+                    className="px-2 py-1 bg-rose-500/20 rounded hover:bg-rose-500/30 transition-colors text-xs cursor-pointer text-rose-400 whitespace-nowrap"
+                    title={t('Clear')}
+                  >
+                    ✕
+                  </button>
+                )}
               </div>
             </div>
             <div className="flex items-center gap-2">

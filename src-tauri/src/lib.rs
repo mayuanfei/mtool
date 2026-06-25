@@ -687,7 +687,8 @@ async fn hq_crypto(
     action: String, 
     payload: String,
     jar_path: String,
-    biz_type: String
+    biz_type: String,
+    jdk_path: Option<String>
 ) -> Result<String, String> {
     if action != "enc" && action != "dec" {
         return Err("Invalid action. Must be 'enc' or 'dec'.".to_string());
@@ -710,7 +711,22 @@ async fn hq_crypto(
     }
 
     tauri::async_runtime::spawn_blocking(move || {
-        let mut command = std::process::Command::new("java");
+        // Resolve java executable: prefer user-specified JDK directory, fall back to system PATH
+        let java_bin = if let Some(ref jdk) = jdk_path {
+            let jdk_dir = std::path::Path::new(jdk);
+            let bin = jdk_dir.join("bin").join(if cfg!(windows) { "java.exe" } else { "java" });
+            if bin.exists() {
+                bin.to_string_lossy().to_string()
+            } else {
+                return Err(format!(
+                    "Java executable not found at '{}'. Please verify the JDK directory.",
+                    bin.display()
+                ));
+            }
+        } else {
+            "java".to_string()
+        };
+        let mut command = std::process::Command::new(&java_bin);
         command
             .arg("-Dfile.encoding=UTF-8")
             .arg("-jar")
@@ -789,6 +805,30 @@ async fn select_hq_jar() -> Result<String, String> {
     .map_err(|e| e.to_string())?
 }
 
+#[tauri::command]
+async fn select_jdk_dir() -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(|| {
+        if let Some(path) = rfd::FileDialog::new()
+            .set_title("Select JDK / JRE Directory")
+            .pick_folder()
+        {
+            // Verify the directory contains bin/java or bin/java.exe
+            let java_bin = path.join("bin").join(if cfg!(windows) { "java.exe" } else { "java" });
+            if java_bin.exists() {
+                Ok(path.to_string_lossy().to_string())
+            } else {
+                Err(format!(
+                    "Selected directory does not contain bin/java. Please select a valid JDK/JRE root directory."
+                ))
+            }
+        } else {
+            Err("No directory selected".to_string())
+        }
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
 // ---------------------------------------------------------------------------
 // 应用入口
 // ---------------------------------------------------------------------------
@@ -854,6 +894,7 @@ pub fn run() {
             jar_viewer::read_local_class,
             hq_crypto,
             select_hq_jar,
+            select_jdk_dir,
             file_transfer::get_local_transfer_info,
             file_transfer::get_transfer_config,
             file_transfer::update_save_dir,
