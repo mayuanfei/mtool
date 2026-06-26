@@ -965,7 +965,7 @@ export function CryptoTool() {
                   <span className="font-bold text-sm">
                     {category === 'asymmetric' ? t('Public Key Encrypt') : t('Encrypt')}
                   </span>
-                  {isLoading ? (
+                  {isLoading && isEncrypt ? (
                     <Loader2 className="w-4 h-4 animate-spin" />
                   ) : (
                     <ArrowDown className="w-4 h-4 -rotate-90" />
@@ -985,7 +985,7 @@ export function CryptoTool() {
                   <span className="font-bold text-sm">
                     {category === 'asymmetric' ? t('Private Key Decrypt') : t('Decrypt')}
                   </span>
-                  {isLoading ? (
+                  {isLoading && !isEncrypt ? (
                     <Loader2 className="w-4 h-4 animate-spin" />
                   ) : (
                     <ArrowDown className="w-4 h-4 -rotate-90" />
