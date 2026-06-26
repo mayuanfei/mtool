@@ -141,42 +141,13 @@ export function FileTransfer() {
     }
   };
 
-  const loadHistory = () => {
+  const loadHistory = async () => {
     try {
-      const saved = localStorage.getItem('mtool_transfer_history');
-      if (saved) {
-        const parsed = JSON.parse(saved) as HistoryRecord[];
-        parsed.sort((a, b) => b.timestamp - a.timestamp);
-        setHistory(parsed);
-      } else {
-        setHistory([]);
-      }
+      const records = await invoke<HistoryRecord[]>('get_history_records');
+      setHistory(records);
     } catch (e) {
       console.error('Failed to load transfer history:', e);
     }
-  };
-
-  const saveHistoryRecord = (record: HistoryRecord) => {
-    let currentHistory: HistoryRecord[] = [];
-    try {
-      const saved = localStorage.getItem('mtool_transfer_history');
-      if (saved) {
-        currentHistory = JSON.parse(saved) as HistoryRecord[];
-      }
-    } catch (e) {
-      console.error('Failed to parse history during save:', e);
-    }
-
-    // Avoid duplicate records by checking both id and direction
-    if (currentHistory.some(r => r.id === record.id && r.direction === record.direction)) {
-      return;
-    }
-
-    const next = [record, ...currentHistory];
-    next.sort((a, b) => b.timestamp - a.timestamp);
-    const sliced = next.slice(0, 100); // Limit to 100 entries
-    localStorage.setItem('mtool_transfer_history', JSON.stringify(sliced));
-    setHistory(sliced);
   };
 
   // Setup Tauri Event Listeners (handled safely to avoid React StrictMode duplicate registrations)
@@ -200,6 +171,11 @@ export function FileTransfer() {
           // 2. Trusted peers updated listener
           listen('trusted-peers-updated', () => {
             loadPeersAndConfig();
+          }),
+
+          // 2b. History updated listener
+          listen('history-updated', () => {
+            loadHistory();
           }),
 
           // 3. Receive file started listener
@@ -258,22 +234,8 @@ export function FileTransfer() {
             transfer_id: string;
             save_path: string;
           }>('recv-success', (event) => {
-            const { transfer_id, save_path } = event.payload;
+            const { transfer_id } = event.payload;
             setTransmissions(prev => {
-              const tx = prev[transfer_id];
-              if (tx) {
-                saveHistoryRecord({
-                  id: transfer_id,
-                  direction: 'recv',
-                  filename: tx.filename,
-                  filesize: tx.filesize,
-                  peerName: tx.peerName,
-                  peerIp: tx.peerIp || '',
-                  status: 'success',
-                  timestamp: Date.now(),
-                  savePath: save_path,
-                });
-              }
               const next = { ...prev };
               delete next[transfer_id];
               return next;
@@ -331,19 +293,6 @@ export function FileTransfer() {
           listen<{ transfer_id: string }>('send-success', (event) => {
             const { transfer_id } = event.payload;
             setTransmissions(prev => {
-              const tx = prev[transfer_id];
-              if (tx) {
-                saveHistoryRecord({
-                  id: transfer_id,
-                  direction: 'send',
-                  filename: tx.filename,
-                  filesize: tx.filesize,
-                  peerName: tx.peerName || 'Receiver',
-                  peerIp: tx.peerIp || '',
-                  status: 'success',
-                  timestamp: Date.now(),
-                });
-              }
               const next = { ...prev };
               delete next[transfer_id];
               return next;
@@ -354,19 +303,6 @@ export function FileTransfer() {
           listen<{ transfer_id: string; error_message: string }>('send-error', (event) => {
             const { transfer_id, error_message } = event.payload;
             setTransmissions(prev => {
-              const tx = prev[transfer_id];
-              if (tx) {
-                saveHistoryRecord({
-                  id: transfer_id,
-                  direction: 'send',
-                  filename: tx.filename,
-                  filesize: tx.filesize,
-                  peerName: tx.peerName || 'Receiver',
-                  peerIp: tx.peerIp || '',
-                  status: 'failed',
-                  timestamp: Date.now(),
-                });
-              }
               const next = { ...prev };
               delete next[transfer_id];
               return next;
@@ -378,19 +314,6 @@ export function FileTransfer() {
           listen<{ transfer_id: string; reason: string }>('send-rejected', (event) => {
             const { transfer_id, reason } = event.payload;
             setTransmissions(prev => {
-              const tx = prev[transfer_id];
-              if (tx) {
-                saveHistoryRecord({
-                  id: transfer_id,
-                  direction: 'send',
-                  filename: tx.filename,
-                  filesize: tx.filesize,
-                  peerName: tx.peerName || 'Receiver',
-                  peerIp: tx.peerIp || '',
-                  status: 'rejected',
-                  timestamp: Date.now(),
-                });
-              }
               const next = { ...prev };
               delete next[transfer_id];
               return next;
@@ -402,19 +325,6 @@ export function FileTransfer() {
           listen<{ transfer_id: string; error_message: string }>('recv-error', (event) => {
             const { transfer_id, error_message } = event.payload;
             setTransmissions(prev => {
-              const tx = prev[transfer_id];
-              if (tx) {
-                saveHistoryRecord({
-                  id: transfer_id,
-                  direction: 'recv',
-                  filename: tx.filename,
-                  filesize: tx.filesize,
-                  peerName: tx.peerName || 'Sender',
-                  peerIp: tx.peerIp || '',
-                  status: 'failed',
-                  timestamp: Date.now(),
-                });
-              }
               const next = { ...prev };
               delete next[transfer_id];
               return next;
@@ -470,18 +380,7 @@ export function FileTransfer() {
     return () => { cleanup.then(fn => fn()); };
   }, []);
 
-  // Synchronize history across different instances/tabs sharing localStorage
-  useEffect(() => {
-    const handleStorageChange = (e: StorageEvent) => {
-      if (e.key === 'mtool_transfer_history') {
-        loadHistory();
-      }
-    };
-    window.addEventListener('storage', handleStorageChange);
-    return () => {
-      window.removeEventListener('storage', handleStorageChange);
-    };
-  }, []);
+
 
   // Helper formatting functions
   const formatBytes = (bytes: number, decimals = 1) => {
@@ -695,20 +594,8 @@ export function FileTransfer() {
       message: t('Are you sure you want to delete this history record?'),
       onConfirm: async () => {
         try {
-          // Read latest from localStorage first to prevent overwriting concurrent changes
-          let currentHistory: HistoryRecord[] = [];
-          try {
-            const saved = localStorage.getItem('mtool_transfer_history');
-            if (saved) {
-              currentHistory = JSON.parse(saved) as HistoryRecord[];
-            }
-          } catch (e) {
-            console.error(e);
-          }
-
-          const next = currentHistory.filter(r => r.id !== historyId);
-          localStorage.setItem('mtool_transfer_history', JSON.stringify(next));
-          setHistory(next);
+          await invoke('delete_history_record', { id: historyId });
+          loadHistory();
 
           if (path) {
             await invoke('delete_local_file', { path });
@@ -1097,9 +984,13 @@ export function FileTransfer() {
                     setConfirmConfig({
                       title: t('Clear History'),
                       message: t('Are you sure you want to clear all history records?'),
-                      onConfirm: () => {
-                        setHistory([]);
-                        localStorage.removeItem('mtool_transfer_history');
+                      onConfirm: async () => {
+                        try {
+                          await invoke('clear_history_records');
+                          loadHistory();
+                        } catch (e) {
+                          console.error(e);
+                        }
                       }
                     });
                   }}

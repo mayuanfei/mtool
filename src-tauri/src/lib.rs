@@ -908,6 +908,9 @@ pub fn run() {
             file_transfer::get_file_info,
             file_transfer::cancel_transfer,
             file_transfer::delete_local_file,
+            file_transfer::get_history_records,
+            file_transfer::delete_history_record,
+            file_transfer::clear_history_records,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")

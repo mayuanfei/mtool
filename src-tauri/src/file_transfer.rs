@@ -7,6 +7,45 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter};
 use std::time::{SystemTime, UNIX_EPOCH};
+use rusqlite::{params, Connection};
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HistoryRecord {
+    pub id: String,
+    pub direction: String,
+    pub filename: String,
+    pub filesize: u64,
+    pub peer_name: String,
+    pub peer_ip: String,
+    pub status: String,
+    pub timestamp: u64,
+    pub save_path: Option<String>,
+}
+
+pub fn insert_history_record(
+    id: &str,
+    direction: &str,
+    filename: &str,
+    filesize: u64,
+    peer_name: &str,
+    peer_ip: &str,
+    status: &str,
+    save_path: Option<&str>,
+) -> Result<(), String> {
+    let db_path = crate::file_search::get_db_path();
+    let conn = Connection::open(&db_path).map_err(|e| e.to_string())?;
+    let timestamp = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0);
+    conn.execute(
+        "INSERT OR REPLACE INTO transfer_history (id, direction, filename, filesize, peer_name, peer_ip, status, timestamp, save_path)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+        params![id, direction, filename, filesize, peer_name, peer_ip, status, timestamp, save_path],
+    ).map_err(|e| e.to_string())?;
+    Ok(())
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PeerInfo {
@@ -361,7 +400,7 @@ impl Drop for FileCleanupGuard {
     }
 }
 
-async fn recv_file_task(
+async fn recv_file_task_inner(
     app: AppHandle,
     state: TransferState,
     transfer_id: String,
@@ -370,7 +409,7 @@ async fn recv_file_task(
     filesize: u64,
     sender_name: String,
     sender_ip: String,
-) -> Result<(), String> {
+) -> Result<String, String> {
     let save_dir = {
         let conf = state.config.read().await;
         conf.save_dir.clone()
@@ -464,10 +503,67 @@ async fn recv_file_task(
         active.remove(&transfer_id);
     }
 
-    Ok(())
+    Ok(target_path.to_string_lossy().to_string())
 }
 
-async fn send_file_task(
+pub async fn recv_file_task(
+    app: AppHandle,
+    state: TransferState,
+    transfer_id: String,
+    stream: TcpStream,
+    filename: String,
+    filesize: u64,
+    sender_name: String,
+    sender_ip: String,
+) -> Result<(), String> {
+    let res = recv_file_task_inner(
+        app.clone(),
+        state,
+        transfer_id.clone(),
+        stream,
+        filename.clone(),
+        filesize,
+        sender_name.clone(),
+        sender_ip.clone(),
+    ).await;
+
+    match &res {
+        Ok(save_path) => {
+            let resolved_filename = std::path::Path::new(save_path)
+                .file_name()
+                .map(|n| n.to_string_lossy().to_string())
+                .unwrap_or(filename);
+            let _ = insert_history_record(
+                &transfer_id,
+                "recv",
+                &resolved_filename,
+                filesize,
+                &sender_name,
+                &sender_ip,
+                "success",
+                Some(save_path),
+            );
+            app.emit("history-updated", ()).ok();
+        }
+        Err(_) => {
+            let _ = insert_history_record(
+                &transfer_id,
+                "recv",
+                &filename,
+                filesize,
+                &sender_name,
+                &sender_ip,
+                "failed",
+                None,
+            );
+            app.emit("history-updated", ()).ok();
+        }
+    }
+
+    res.map(|_| ())
+}
+
+async fn send_file_task_inner(
     app: AppHandle,
     state: TransferState,
     transfer_id: String,
@@ -557,6 +653,73 @@ async fn send_file_task(
 
     Ok(())
 }
+
+pub async fn send_file_task(
+    app: AppHandle,
+    state: TransferState,
+    transfer_id: String,
+    receiver_addr: String,
+    file_path: String,
+    filename: String,
+    filesize: u64,
+) -> Result<(), String> {
+    let receiver_ip = receiver_addr.split(':').next().unwrap_or(&receiver_addr).to_string();
+
+    let res = send_file_task_inner(
+        app.clone(),
+        state.clone(),
+        transfer_id.clone(),
+        receiver_addr,
+        file_path,
+        filename.clone(),
+        filesize,
+    ).await;
+
+    let peer_name = {
+        let conf = state.config.read().await;
+        conf.trusted_peers.iter()
+            .find(|p| p.ip == receiver_ip)
+            .map(|p| if p.alias.is_empty() { p.hostname.clone() } else { p.alias.clone() })
+            .unwrap_or_else(|| receiver_ip.clone())
+    };
+
+    match &res {
+        Ok(_) => {
+            let _ = insert_history_record(
+                &transfer_id,
+                "send",
+                &filename,
+                filesize,
+                &peer_name,
+                &receiver_ip,
+                "success",
+                None,
+            );
+            app.emit("history-updated", ()).ok();
+        }
+        Err(e) => {
+            let status = if e.starts_with("Rejected:") {
+                "rejected"
+            } else {
+                "failed"
+            };
+            let _ = insert_history_record(
+                &transfer_id,
+                "send",
+                &filename,
+                filesize,
+                &peer_name,
+                &receiver_ip,
+                status,
+                None,
+            );
+            app.emit("history-updated", ()).ok();
+        }
+    }
+
+    res
+}
+
 
 // ── Tauri Commands ────────────────────────────────────────────────────────
 
@@ -828,4 +991,55 @@ pub async fn delete_local_file(
     }
 
     std::fs::remove_file(canonical_target).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn get_history_records() -> Result<Vec<HistoryRecord>, String> {
+    let db_path = crate::file_search::get_db_path();
+    let conn = Connection::open(&db_path).map_err(|e| e.to_string())?;
+    let mut stmt = conn.prepare(
+        "SELECT id, direction, filename, filesize, peer_name, peer_ip, status, timestamp, save_path 
+         FROM transfer_history 
+         ORDER BY timestamp DESC"
+    ).map_err(|e| e.to_string())?;
+    
+    let rows = stmt.query_map([], |row| {
+        Ok(HistoryRecord {
+            id: row.get(0)?,
+            direction: row.get(1)?,
+            filename: row.get(2)?,
+            filesize: row.get(3)?,
+            peer_name: row.get(4)?,
+            peer_ip: row.get(5)?,
+            status: row.get(6)?,
+            timestamp: row.get(7)?,
+            save_path: row.get(8)?,
+        })
+    }).map_err(|e| e.to_string())?;
+    
+    let mut records = Vec::new();
+    for r in rows {
+        if let Ok(record) = r {
+            records.push(record);
+        }
+    }
+    Ok(records)
+}
+
+#[tauri::command]
+pub async fn delete_history_record(id: String) -> Result<(), String> {
+    let db_path = crate::file_search::get_db_path();
+    let conn = Connection::open(&db_path).map_err(|e| e.to_string())?;
+    conn.execute("DELETE FROM transfer_history WHERE id = ?1", params![id])
+        .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn clear_history_records() -> Result<(), String> {
+    let db_path = crate::file_search::get_db_path();
+    let conn = Connection::open(&db_path).map_err(|e| e.to_string())?;
+    conn.execute("DELETE FROM transfer_history", [])
+        .map_err(|e| e.to_string())?;
+    Ok(())
 }

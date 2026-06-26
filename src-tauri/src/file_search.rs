@@ -136,6 +136,17 @@ CREATE VIRTUAL TABLE IF NOT EXISTS file_fts USING fts5(
     name_lower,
     tokenize='trigram'
 );
+CREATE TABLE IF NOT EXISTS transfer_history (
+    id          TEXT PRIMARY KEY,
+    direction   TEXT NOT NULL,
+    filename    TEXT NOT NULL,
+    filesize    INTEGER NOT NULL,
+    peer_name   TEXT NOT NULL,
+    peer_ip     TEXT NOT NULL,
+    status      TEXT NOT NULL,
+    timestamp   INTEGER NOT NULL,
+    save_path   TEXT
+);
 ";
 
 /// DROP + 重建 file_index / file_fts 表。

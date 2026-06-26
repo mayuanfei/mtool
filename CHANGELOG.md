@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.2.0]
+
+- **局域网文件传输 (FileTransfer)**:
+  - **SQLite 历史记录迁移**：将局域网传输的历史记录存储介质从前端浏览器 `localStorage` 迁移到本地 SQLite 数据库中，彻底解决因同事最小化软件或切换页面导致 React 组件卸载、Tauri 监听器失效，从而导致文件接收成功却在历史记录中看不到的问题。
+  - **后端自动持久化**：文件传输完成（成功/失败/被拒）的日志记录逻辑移至 Rust 后端，由 Rust 在传输任务结束时直接写入本地 SQLite 数据库并向前端广播更新事件。即使前端页面未激活或被最小化，也能在后台精准记录。
+  - **同步刷新与指令支持**：新增 `get_history_records`、`delete_history_record` 与 `clear_history_records` 后端 Tauri 指令，用于安全查询和删除记录，并通过 Tauri 事件监听实现前端页面数据的实时自动刷新。
+
 ## [1.1.9]
 
 - 加解密工具 (CryptoTool):
