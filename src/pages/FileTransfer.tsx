@@ -113,7 +113,16 @@ export function FileTransfer() {
     loadLocalInfo();
     loadPeersAndConfig();
     loadHistory();
+
+    const handleFocus = () => {
+      loadHistory();
+    };
+    window.addEventListener('focus', handleFocus);
+    document.addEventListener('visibilitychange', handleFocus);
+
     return () => {
+      window.removeEventListener('focus', handleFocus);
+      document.removeEventListener('visibilitychange', handleFocus);
       if (toastTimerRef.current) {
         clearTimeout(toastTimerRef.current);
       }
