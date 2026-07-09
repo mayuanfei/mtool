@@ -557,6 +557,309 @@ fn open_file(path: String) -> Result<(), String> {
     Ok(())
 }
 
+// Helper to retrieve the local path to Pandoc in mtool's local application directory.
+fn get_internal_pandoc_path(app_handle: &tauri::AppHandle) -> Result<std::path::PathBuf, String> {
+    let app_dir = app_handle.path().app_data_dir()
+        .map_err(|e| format!("Failed to get app data dir: {}", e))?;
+    let bin_dir = app_dir.join("bin");
+    let exe_name = if cfg!(windows) { "pandoc.exe" } else { "pandoc" };
+    Ok(bin_dir.join(exe_name))
+}
+
+#[tauri::command]
+async fn check_pandoc(app_handle: tauri::AppHandle) -> Result<String, String> {
+    // 1. Check internal storage path
+    if let Ok(internal_path) = get_internal_pandoc_path(&app_handle) {
+        if internal_path.exists() {
+            let output = std::process::Command::new(&internal_path)
+                .arg("--version")
+                .output();
+            if let Ok(out) = output {
+                if out.status.success() {
+                    let stdout = String::from_utf8_lossy(&out.stdout);
+                    if let Some(first_line) = stdout.lines().next() {
+                        return Ok(format!("internal:{}", first_line));
+                    }
+                }
+            }
+        }
+    }
+
+    // 2. Check system PATH
+    let output = std::process::Command::new("pandoc")
+        .arg("--version")
+        .output();
+    
+    if let Ok(out) = output {
+        if out.status.success() {
+            let stdout = String::from_utf8_lossy(&out.stdout);
+            if let Some(first_line) = stdout.lines().next() {
+                return Ok(format!("system:{}", first_line));
+            }
+        }
+    }
+
+    Ok("not_installed".to_string())
+}
+
+#[derive(serde::Serialize, Clone)]
+struct InstallProgress {
+    stage: String,   // "downloading" | "extracting" | "success" | "failed"
+    progress: u32,   // 0 - 100
+    message: String,
+}
+
+#[tauri::command]
+async fn install_pandoc(app_handle: tauri::AppHandle) -> Result<(), String> {
+    let app_handle_clone = app_handle.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        use std::io::{Read, Write};
+        let emit_progress = |stage: &str, progress: u32, message: &str| {
+            let _ = app_handle_clone.emit("pandoc_install_progress", InstallProgress {
+                stage: stage.to_string(),
+                progress,
+                message: message.to_string(),
+            });
+        };
+
+        emit_progress("downloading", 0, "Initializing download...");
+
+        // Determine the appropriate URL based on the OS and CPU Architecture
+        let (url, filename, is_zip) = if cfg!(target_os = "macos") {
+            if cfg!(target_arch = "aarch64") {
+                ("https://github.com/jgm/pandoc/releases/download/3.2.1/pandoc-3.2.1-arm64-macOS.zip", "pandoc-macOS.zip", true)
+            } else {
+                ("https://github.com/jgm/pandoc/releases/download/3.2.1/pandoc-3.2.1-x86_64-macOS.zip", "pandoc-macOS.zip", true)
+            }
+        } else if cfg!(target_os = "windows") {
+            ("https://github.com/jgm/pandoc/releases/download/3.2.1/pandoc-3.2.1-windows-x86_64.zip", "pandoc-windows.zip", true)
+        } else {
+            ("https://github.com/jgm/pandoc/releases/download/3.2.1/pandoc-3.2.1-linux-amd64.tar.gz", "pandoc-linux.tar.gz", false)
+        };
+
+        let backup_url = format!("https://ghfast.top/{}", url);
+
+        let app_dir = app_handle_clone.path().app_data_dir()
+            .map_err(|e| format!("Failed to get app data dir: {}", e))?;
+        let bin_dir = app_dir.join("bin");
+        if !bin_dir.exists() {
+            std::fs::create_dir_all(&bin_dir).map_err(|e| format!("Failed to create bin dir: {}", e))?;
+        }
+
+        let temp_file_path = app_dir.join(filename);
+
+        // HTTP Download Client
+        let client = reqwest::blocking::Client::builder()
+            .timeout(std::time::Duration::from_secs(300))
+            .build()
+            .map_err(|e| format!("Failed to create HTTP client: {}", e))?;
+
+        let response = match client.get(url).send() {
+            Ok(resp) if resp.status().is_success() => Ok(resp),
+            _ => {
+                emit_progress("downloading", 10, "Main source slow, switching to mirror source...");
+                client.get(&backup_url).send().map_err(|e| format!("Failed to download from mirror: {}", e))
+            }
+        }?;
+
+        let total_size = response.content_length().unwrap_or(0);
+        let mut file = std::fs::File::create(&temp_file_path).map_err(|e| format!("Failed to create temp file: {}", e))?;
+        let mut downloaded: u64 = 0;
+        let mut buffer = [0; 8192];
+        
+        let mut reader = response;
+
+        loop {
+            let bytes_read = reader.read(&mut buffer).map_err(|e| format!("Failed to read stream: {}", e))?;
+            if bytes_read == 0 {
+                break;
+            }
+            file.write_all(&buffer[..bytes_read]).map_err(|e| format!("Failed to write to file: {}", e))?;
+            downloaded += bytes_read as u64;
+            
+            if total_size > 0 {
+                let percent = (downloaded as f64 / total_size as f64 * 80.0) as u32; // Reserve 80-100% for extraction
+                emit_progress("downloading", percent, &format!("Downloading: {}%", percent));
+            }
+        }
+        drop(file);
+
+        emit_progress("extracting", 80, "Extracting binary...");
+        let exe_name = if cfg!(windows) { "pandoc.exe" } else { "pandoc" };
+        let final_exe_path = bin_dir.join(exe_name);
+
+        if is_zip {
+            // Extract zip
+            let file = std::fs::File::open(&temp_file_path).map_err(|e| format!("Failed to open ZIP: {}", e))?;
+            let mut archive = zip::ZipArchive::new(file).map_err(|e| format!("Invalid zip archive: {}", e))?;
+            let mut found = false;
+            for i in 0..archive.len() {
+                let mut file = archive.by_index(i).map_err(|e| format!("Failed to read zip index: {}", e))?;
+                let name = file.name().to_string();
+                if name.ends_with("pandoc.exe") || name.ends_with("bin/pandoc") || name.ends_with("/pandoc") {
+                    let mut out = std::fs::File::create(&final_exe_path).map_err(|e| format!("Failed to create final exe: {}", e))?;
+                    std::io::copy(&mut file, &mut out).map_err(|e| format!("Failed to extract pandoc binary: {}", e))?;
+                    found = true;
+
+                    // Apply execution permissions on macOS
+                    #[cfg(unix)]
+                    {
+                        use std::os::unix::fs::PermissionsExt;
+                        let mut perms = std::fs::metadata(&final_exe_path).map_err(|e| e.to_string())?.permissions();
+                        perms.set_mode(0o755);
+                        std::fs::set_permissions(&final_exe_path, perms).map_err(|e| e.to_string())?;
+                    }
+                    break;
+                }
+            }
+            if !found {
+                return Err("pandoc executable not found in zip archive".to_string());
+            }
+        } else {
+            // Extract tar.gz (Linux)
+            let file = std::fs::File::open(&temp_file_path).map_err(|e| format!("Failed to open downloaded tar.gz: {}", e))?;
+            let tar_gz = flate2::read::GzDecoder::new(file);
+            let mut archive = tar::Archive::new(tar_gz);
+            let entries = archive.entries().map_err(|e| format!("Failed to read tar entries: {}", e))?;
+
+            let mut found = false;
+            for entry in entries {
+                let mut entry = entry.map_err(|e| format!("Failed to read entry: {}", e))?;
+                let path = entry.path().map_err(|e| format!("Failed to read entry path: {}", e))?;
+                let path_str = path.to_string_lossy();
+                if path_str.ends_with("bin/pandoc") || path_str.ends_with("/pandoc") {
+                    let mut out = std::fs::File::create(&final_exe_path).map_err(|e| format!("Failed to create final bin: {}", e))?;
+                    std::io::copy(&mut entry, &mut out).map_err(|e| format!("Failed to extract pandoc: {}", e))?;
+                    found = true;
+                    
+                    // Apply execution permissions on Linux
+                    #[cfg(unix)]
+                    {
+                        use std::os::unix::fs::PermissionsExt;
+                        let mut perms = std::fs::metadata(&final_exe_path).map_err(|e| e.to_string())?.permissions();
+                        perms.set_mode(0o755);
+                        std::fs::set_permissions(&final_exe_path, perms).map_err(|e| e.to_string())?;
+                    }
+                    break;
+                }
+            }
+            if !found {
+                return Err("pandoc executable not found in tar.gz archive".to_string());
+            }
+        }
+
+        // Clean up the temp zip/tar file
+        let _ = std::fs::remove_file(&temp_file_path);
+
+        emit_progress("success", 100, "Pandoc installed successfully!");
+        Ok(())
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+async fn run_pandoc_convert(
+    app_handle: tauri::AppHandle,
+    input_path: String,
+    output_path: String,
+    from_format: Option<String>,
+    to_format: Option<String>,
+    extra_args: Option<Vec<String>>
+) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        // Decide path: check app bin folder first, fallback to system PATH "pandoc"
+        let pandoc_bin = if let Ok(internal_path) = get_internal_pandoc_path(&app_handle) {
+            if internal_path.exists() {
+                internal_path.to_string_lossy().to_string()
+            } else {
+                "pandoc".to_string()
+            }
+        } else {
+            "pandoc".to_string()
+        };
+
+        let mut cmd = std::process::Command::new(pandoc_bin);
+        cmd.arg(&input_path);
+        cmd.arg("-o").arg(&output_path);
+        
+        if let Some(from) = from_format {
+            if !from.is_empty() && from != "auto" {
+                let clean_from = match from.as_str() {
+                    "md" | "markdown" => "markdown",
+                    "tex" => "latex",
+                    other => other,
+                };
+                cmd.arg("-f").arg(clean_from);
+            }
+        }
+        if let Some(to) = to_format {
+            if !to.is_empty() {
+                let clean_to = match to.as_str() {
+                    "md" | "markdown" => Some("markdown"),
+                    "tex" => Some("latex"),
+                    "pdf" => None, // Pandoc routes PDF automatically via output file extension; no -t flag should be used.
+                    other => Some(other),
+                };
+                if let Some(t) = clean_to {
+                    cmd.arg("-t").arg(t);
+                }
+            }
+        }
+        if let Some(args) = extra_args {
+            for arg in args {
+                if !arg.trim().is_empty() {
+                    cmd.arg(arg);
+                }
+            }
+        }
+
+        let output = cmd.output().map_err(|e| format!("Failed to run pandoc: {}", e))?;
+        if output.status.success() {
+            Ok(())
+        } else {
+            let err_msg = String::from_utf8_lossy(&output.stderr);
+            Err(err_msg.trim().to_string())
+        }
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+async fn select_source_file() -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(|| {
+        if let Some(path) = rfd::FileDialog::new()
+            .set_title("Select Document to Convert")
+            .add_filter("All Documents", &["md", "markdown", "docx", "pdf", "html", "epub", "tex", "pptx", "txt"])
+            .pick_file()
+        {
+            Ok(path.to_string_lossy().to_string())
+        } else {
+            Err("No file selected".to_string())
+        }
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+async fn select_target_file(default_name: String) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        if let Some(path) = rfd::FileDialog::new()
+            .set_title("Save Converted File As")
+            .set_file_name(&default_name)
+            .save_file()
+        {
+            Ok(path.to_string_lossy().to_string())
+        } else {
+            Err("Save cancelled".to_string())
+        }
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
 // ---------------------------------------------------------------------------
 // 文件系统监听器（增量更新索引）
 // ---------------------------------------------------------------------------
@@ -911,6 +1214,11 @@ pub fn run() {
             file_transfer::get_history_records,
             file_transfer::delete_history_record,
             file_transfer::clear_history_records,
+            check_pandoc,
+            install_pandoc,
+            run_pandoc_convert,
+            select_source_file,
+            select_target_file,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")

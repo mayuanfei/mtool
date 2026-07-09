@@ -17,11 +17,12 @@ const JarViewer = lazy(() => import('./pages/JarViewer').then(m => ({ default: m
 const EncoderDecoder = lazy(() => import('./pages/EncoderDecoder').then(m => ({ default: m.EncoderDecoder })));
 const CryptoTool = lazy(() => import('./pages/CryptoTool').then(m => ({ default: m.CryptoTool })));
 const FileTransfer = lazy(() => import('./pages/FileTransfer').then(m => ({ default: m.FileTransfer })));
+const DocConverter = lazy(() => import('./pages/DocConverter').then(m => ({ default: m.DocConverter })));
 
-export type ToolKey = 'json' | 'qr' | 'pwd' | 'sqlIn' | 'md' | 'fileSearch' | 'fileDiff' | 'jarViewer' | 'encoder' | 'crypto' | 'fileTransfer';
+export type ToolKey = 'json' | 'qr' | 'pwd' | 'sqlIn' | 'md' | 'fileSearch' | 'fileDiff' | 'jarViewer' | 'encoder' | 'crypto' | 'fileTransfer' | 'docConvert';
 export type ToolsEnabled = Record<ToolKey, boolean>;
 
-const DEFAULT_TOOLS: ToolsEnabled = { json: true, qr: true, pwd: true, sqlIn: true, md: true, fileSearch: true, fileDiff: true, jarViewer: true, encoder: true, crypto: true, fileTransfer: true };
+const DEFAULT_TOOLS: ToolsEnabled = { json: true, qr: true, pwd: true, sqlIn: true, md: true, fileSearch: true, fileDiff: true, jarViewer: true, encoder: true, crypto: true, fileTransfer: true, docConvert: true };
 
 export default function App() {
   const [activePage, setActivePage] = useState(() => {
@@ -81,6 +82,7 @@ export default function App() {
       encoder: getOld('mtool_encoder_enabled'),
       crypto: getOld('mtool_crypto_enabled'),
       fileTransfer: getOld('mtool_filetransfer_enabled'),
+      docConvert: getOld('mtool_docconvert_enabled'),
     };
   });
 
@@ -125,6 +127,7 @@ export default function App() {
         encoderEnabled={toolsEnabled.encoder}
         cryptoEnabled={toolsEnabled.crypto}
         fileTransferEnabled={toolsEnabled.fileTransfer}
+        docConvertEnabled={toolsEnabled.docConvert}
         hasUpdate={hasUpdate}
       />
       
@@ -148,6 +151,7 @@ export default function App() {
               {activePage === 'encoder' && toolsEnabled.encoder && <EncoderDecoder />}
               {activePage === 'crypto' && toolsEnabled.crypto && <CryptoTool />}
               {activePage === 'fileTransfer' && toolsEnabled.fileTransfer && <FileTransfer />}
+              {activePage === 'docConvert' && toolsEnabled.docConvert && <DocConverter />}
               {activePage === 'settings' && (
                 <SettingsPage 
                   toolsEnabled={toolsEnabled}

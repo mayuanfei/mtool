@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Code2, QrCode, Settings, Key, Database, FileText, PanelLeftClose, PanelLeftOpen, SearchCode, FileDiff, Package, ArrowRightLeft, Shield, Network } from 'lucide-react';
+import { Code2, QrCode, Settings, Key, Database, FileText, PanelLeftClose, PanelLeftOpen, SearchCode, FileDiff, Package, ArrowRightLeft, Shield, Network, FileType } from 'lucide-react';
 import { useI18n } from '../i18n';
 
 interface SidebarProps {
@@ -16,6 +16,7 @@ interface SidebarProps {
   encoderEnabled: boolean;
   cryptoEnabled: boolean;
   fileTransferEnabled: boolean;
+  docConvertEnabled: boolean;
   hasUpdate: boolean;
 }
 
@@ -48,7 +49,7 @@ function NavItem({ item, activePage, collapsed, onNavigate }: NavItemProps) {
   );
 }
 
-export function Sidebar({ activePage, onNavigate, jsonEnabled, qrEnabled, pwdEnabled, sqlInEnabled, mdEnabled, fileSearchEnabled, fileDiffEnabled, jarViewerEnabled, encoderEnabled, cryptoEnabled, fileTransferEnabled, hasUpdate }: SidebarProps) {
+export function Sidebar({ activePage, onNavigate, jsonEnabled, qrEnabled, pwdEnabled, sqlInEnabled, mdEnabled, fileSearchEnabled, fileDiffEnabled, jarViewerEnabled, encoderEnabled, cryptoEnabled, fileTransferEnabled, docConvertEnabled, hasUpdate }: SidebarProps) {
   const { t } = useI18n();
 
   const [collapsed, setCollapsed] = useState(() => {
@@ -65,6 +66,7 @@ export function Sidebar({ activePage, onNavigate, jsonEnabled, qrEnabled, pwdEna
     ...(fileSearchEnabled ? [{ id: 'fileSearch', label: t('File Search'), icon: SearchCode }] : []),
     ...(fileDiffEnabled ? [{ id: 'fileDiff', label: t('File Compare'), icon: FileDiff }] : []),
     ...(jarViewerEnabled ? [{ id: 'jarViewer', label: t('Jar Viewer'), icon: Package }] : []),
+    ...(docConvertEnabled ? [{ id: 'docConvert', label: t('Doc Converter'), icon: FileType }] : []),
     ...(encoderEnabled ? [{ id: 'encoder', label: t('Encoder / Decoder'), icon: ArrowRightLeft }] : []),
     ...(cryptoEnabled ? [{ id: 'crypto', label: t('Crypto Tool'), icon: Shield }] : []),
     ...(mdEnabled ? [{ id: 'md', label: t('Markdown Editor'), icon: FileText }] : []),

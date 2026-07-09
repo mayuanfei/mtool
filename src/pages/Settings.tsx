@@ -188,6 +188,18 @@ export function SettingsPage({ toolsEnabled, toggleTool, activePage, setActivePa
 
             <div className="px-6 py-5 flex items-center justify-between th-hover-surface transition-colors">
               <div>
+                <p className="text-base font-medium th-text-2 mb-1">{t('Doc Converter')}</p>
+                <p className="text-sm th-text-muted">{t('Convert document formats using Pandoc.')}</p>
+              </div>
+              <Toggle checked={toolsEnabled.docConvert} onChange={() => {
+                const next = !toolsEnabled.docConvert;
+                toggleTool('docConvert', next);
+                if (!next && activePage === 'docConvert') setActivePage('settings');
+              }} />
+            </div>
+
+            <div className="px-6 py-5 flex items-center justify-between th-hover-surface transition-colors">
+              <div>
                 <p className="text-base font-medium th-text-2 mb-1">{t('JSON Formatter')}</p>
                 <p className="text-sm th-text-muted">{t('Parse, validate, and beautify raw JSON payloads.')}</p>
               </div>
