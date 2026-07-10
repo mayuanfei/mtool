@@ -542,7 +542,7 @@ export function DocConverter() {
                 <div className="md:col-span-2 p-4 bg-amber-500/10 border border-amber-500/20 rounded-lg text-xs th-text-muted flex items-start gap-2.5 animate-fade-in shadow-inner">
                   <AlertCircle className="w-4 h-4 text-amber-500 shrink-0 mt-0.5" />
                   <span className="leading-relaxed th-text-2">
-                    {t('Converting to PDF requires a PDF engine on your system (defaults to pdflatex). If you encounter a pdflatex missing error, you can specify an alternative engine in "Custom Arguments" below (e.g. --pdf-engine=wkhtmltopdf or --pdf-engine=typst), or install MacTeX/typst on your system.')}
+                    {t('Converting to PDF requires a PDF engine on your system (defaults to pdflatex). If you encounter a pdflatex missing error, you can specify an alternative engine in "Custom Arguments" below (e.g. --pdf-engine=wkhtmltopdf or --pdf-engine=typst). Note: For Typst 0.14+, you may also need to append a main font argument, e.g., -V mainfont="Microsoft YaHei" or -V mainfont="Arial".')}
                   </span>
                 </div>
               )}
