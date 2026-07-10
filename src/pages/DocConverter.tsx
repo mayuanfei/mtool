@@ -18,7 +18,7 @@ import {
 import { useI18n } from '../i18n';
 
 interface InstallProgress {
-  stage: 'downloading' | 'extracting' | 'success' | 'failed';
+  stage: 'not_started' | 'downloading' | 'extracting' | 'success' | 'failed';
   progress: number;
   message: string;
 }
@@ -96,6 +96,13 @@ export function DocConverter() {
       const res = await invoke<string>('check_pandoc');
       if (res === 'not_installed') {
         setPandocStatus('not_installed');
+        // Check if there is an active background download to inherit
+        const installStatus = await invoke<InstallProgress>('get_pandoc_install_status');
+        if (installStatus && (installStatus.stage === 'downloading' || installStatus.stage === 'extracting')) {
+          setInstalling(true);
+          setInstallProgress(installStatus.progress);
+          setInstallMessage(t(installStatus.message as any) || installStatus.message);
+        }
       } else {
         setPandocStatus('detected');
         setPandocVersion(res);
@@ -104,22 +111,17 @@ export function DocConverter() {
       setPandocStatus('not_installed');
       console.error(e);
     }
-  }, []);
+  }, [t]);
 
   useEffect(() => {
     checkStatus();
   }, [checkStatus]);
 
-  // Install process and progress listener
-  const handleInstall = async () => {
-    if (installing) return;
-    setInstalling(true);
-    setInstallProgress(0);
-    setInstallMessage(t('Initializing download...'));
-    setInstallError(null);
-
+  // Global listener for background progress
+  useEffect(() => {
     let unlisten: (() => void) | null = null;
-    try {
+    
+    const setupListener = async () => {
       unlisten = await listen<InstallProgress>('pandoc_install_progress', (event) => {
         const { stage, progress, message } = event.payload;
         setInstallProgress(progress);
@@ -127,19 +129,40 @@ export function DocConverter() {
         if (stage === 'success') {
           setPandocStatus('detected');
           setInstalling(false);
+          // Refetch version to update local UI
+          invoke<string>('check_pandoc').then(ver => {
+            if (ver !== 'not_installed') setPandocVersion(ver);
+          }).catch(console.error);
         } else if (stage === 'failed') {
           setInstalling(false);
           setInstallError(message);
+        } else if (stage === 'downloading' || stage === 'extracting') {
+          setInstalling(true);
         }
       });
+    };
 
+    setupListener();
+
+    return () => {
+      if (unlisten) {
+        unlisten();
+      }
+    };
+  }, [t]);
+
+  const handleInstall = async () => {
+    if (installing) return;
+    setInstalling(true);
+    setInstallProgress(0);
+    setInstallMessage(t('Initializing download...'));
+    setInstallError(null);
+
+    try {
       await invoke('install_pandoc');
-      checkStatus();
     } catch (e) {
       setInstalling(false);
       setInstallError(String(e));
-    } finally {
-      if (unlisten) unlisten();
     }
   };
 

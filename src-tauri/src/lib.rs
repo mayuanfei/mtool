@@ -604,155 +604,227 @@ async fn check_pandoc(app_handle: tauri::AppHandle) -> Result<String, String> {
 
 #[derive(serde::Serialize, Clone)]
 struct InstallProgress {
-    stage: String,   // "downloading" | "extracting" | "success" | "failed"
+    stage: String,   // "not_started" | "downloading" | "extracting" | "success" | "failed"
     progress: u32,   // 0 - 100
     message: String,
 }
 
+use std::sync::Arc;
+use std::sync::Mutex;
+
+#[derive(Clone)]
+struct PandocInstallState(Arc<PandocInstallStateInner>);
+
+struct PandocInstallStateInner {
+    is_installing: Mutex<bool>,
+    current_progress: Mutex<InstallProgress>,
+}
+
+impl PandocInstallState {
+    fn new() -> Self {
+        Self(Arc::new(PandocInstallStateInner {
+            is_installing: Mutex::new(false),
+            current_progress: Mutex::new(InstallProgress {
+                stage: "not_started".to_string(),
+                progress: 0,
+                message: "".to_string(),
+            }),
+        }))
+    }
+}
+
 #[tauri::command]
-async fn install_pandoc(app_handle: tauri::AppHandle) -> Result<(), String> {
+fn get_pandoc_install_status(state: tauri::State<'_, PandocInstallState>) -> InstallProgress {
+    state.0.current_progress.lock().unwrap().clone()
+}
+
+#[tauri::command]
+async fn install_pandoc(
+    app_handle: tauri::AppHandle,
+    state: tauri::State<'_, PandocInstallState>
+) -> Result<(), String> {
+    {
+        let mut is_installing = state.0.is_installing.lock().unwrap();
+        if *is_installing {
+            return Err("Installation is already in progress".to_string());
+        }
+        *is_installing = true;
+    }
+
     let app_handle_clone = app_handle.clone();
+    let state_clone = state.inner().clone();
+
     tauri::async_runtime::spawn_blocking(move || {
         use std::io::{Read, Write};
         let emit_progress = |stage: &str, progress: u32, message: &str| {
-            let _ = app_handle_clone.emit("pandoc_install_progress", InstallProgress {
+            let prog = InstallProgress {
                 stage: stage.to_string(),
                 progress,
                 message: message.to_string(),
-            });
+            };
+            {
+                let mut current = state_clone.0.current_progress.lock().unwrap();
+                *current = prog.clone();
+            }
+            let _ = app_handle_clone.emit("pandoc_install_progress", prog);
         };
 
-        emit_progress("downloading", 0, "Initializing download...");
+        let result = (move || -> Result<(), String> {
+            emit_progress("downloading", 0, "Initializing download...");
 
-        // Determine the appropriate URL based on the OS and CPU Architecture
-        let (url, filename, is_zip) = if cfg!(target_os = "macos") {
-            if cfg!(target_arch = "aarch64") {
-                ("https://github.com/jgm/pandoc/releases/download/3.2.1/pandoc-3.2.1-arm64-macOS.zip", "pandoc-macOS.zip", true)
+            // Determine the appropriate URL based on the OS and CPU Architecture
+            let (url, filename, is_zip) = if cfg!(target_os = "macos") {
+                if cfg!(target_arch = "aarch64") {
+                    ("https://github.com/jgm/pandoc/releases/download/3.2.1/pandoc-3.2.1-arm64-macOS.zip", "pandoc-macOS.zip", true)
+                } else {
+                    ("https://github.com/jgm/pandoc/releases/download/3.2.1/pandoc-3.2.1-x86_64-macOS.zip", "pandoc-macOS.zip", true)
+                }
+            } else if cfg!(target_os = "windows") {
+                ("https://github.com/jgm/pandoc/releases/download/3.2.1/pandoc-3.2.1-windows-x86_64.zip", "pandoc-windows.zip", true)
             } else {
-                ("https://github.com/jgm/pandoc/releases/download/3.2.1/pandoc-3.2.1-x86_64-macOS.zip", "pandoc-macOS.zip", true)
+                ("https://github.com/jgm/pandoc/releases/download/3.2.1/pandoc-3.2.1-linux-amd64.tar.gz", "pandoc-linux.tar.gz", false)
+            };
+
+            let backup_url = format!("https://ghfast.top/{}", url);
+
+            let app_dir = app_handle_clone.path().app_data_dir()
+                .map_err(|e| format!("Failed to get app data dir: {}", e))?;
+            let bin_dir = app_dir.join("bin");
+            if !bin_dir.exists() {
+                std::fs::create_dir_all(&bin_dir).map_err(|e| format!("Failed to create bin dir: {}", e))?;
             }
-        } else if cfg!(target_os = "windows") {
-            ("https://github.com/jgm/pandoc/releases/download/3.2.1/pandoc-3.2.1-windows-x86_64.zip", "pandoc-windows.zip", true)
-        } else {
-            ("https://github.com/jgm/pandoc/releases/download/3.2.1/pandoc-3.2.1-linux-amd64.tar.gz", "pandoc-linux.tar.gz", false)
-        };
 
-        let backup_url = format!("https://ghfast.top/{}", url);
+            let temp_file_path = app_dir.join(filename);
 
-        let app_dir = app_handle_clone.path().app_data_dir()
-            .map_err(|e| format!("Failed to get app data dir: {}", e))?;
-        let bin_dir = app_dir.join("bin");
-        if !bin_dir.exists() {
-            std::fs::create_dir_all(&bin_dir).map_err(|e| format!("Failed to create bin dir: {}", e))?;
-        }
+            // HTTP Download Client
+            let client = reqwest::blocking::Client::builder()
+                .timeout(std::time::Duration::from_secs(300))
+                .build()
+                .map_err(|e| format!("Failed to create HTTP client: {}", e))?;
 
-        let temp_file_path = app_dir.join(filename);
+            let response = match client.get(url).send() {
+                Ok(resp) if resp.status().is_success() => Ok(resp),
+                _ => {
+                    emit_progress("downloading", 10, "Main source slow, switching to mirror source...");
+                    client.get(&backup_url).send().map_err(|e| format!("Failed to download from mirror: {}", e))
+                }
+            }?;
 
-        // HTTP Download Client
-        let client = reqwest::blocking::Client::builder()
-            .timeout(std::time::Duration::from_secs(300))
-            .build()
-            .map_err(|e| format!("Failed to create HTTP client: {}", e))?;
-
-        let response = match client.get(url).send() {
-            Ok(resp) if resp.status().is_success() => Ok(resp),
-            _ => {
-                emit_progress("downloading", 10, "Main source slow, switching to mirror source...");
-                client.get(&backup_url).send().map_err(|e| format!("Failed to download from mirror: {}", e))
-            }
-        }?;
-
-        let total_size = response.content_length().unwrap_or(0);
-        let mut file = std::fs::File::create(&temp_file_path).map_err(|e| format!("Failed to create temp file: {}", e))?;
-        let mut downloaded: u64 = 0;
-        let mut buffer = [0; 8192];
-        
-        let mut reader = response;
-
-        loop {
-            let bytes_read = reader.read(&mut buffer).map_err(|e| format!("Failed to read stream: {}", e))?;
-            if bytes_read == 0 {
-                break;
-            }
-            file.write_all(&buffer[..bytes_read]).map_err(|e| format!("Failed to write to file: {}", e))?;
-            downloaded += bytes_read as u64;
+            let total_size = response.content_length().unwrap_or(0);
+            let mut file = std::fs::File::create(&temp_file_path).map_err(|e| format!("Failed to create temp file: {}", e))?;
+            let mut downloaded: u64 = 0;
+            let mut buffer = [0; 8192];
             
-            if total_size > 0 {
-                let percent = (downloaded as f64 / total_size as f64 * 80.0) as u32; // Reserve 80-100% for extraction
-                emit_progress("downloading", percent, &format!("Downloading: {}%", percent));
-            }
-        }
-        drop(file);
+            let mut reader = response;
 
-        emit_progress("extracting", 80, "Extracting binary...");
-        let exe_name = if cfg!(windows) { "pandoc.exe" } else { "pandoc" };
-        let final_exe_path = bin_dir.join(exe_name);
-
-        if is_zip {
-            // Extract zip
-            let file = std::fs::File::open(&temp_file_path).map_err(|e| format!("Failed to open ZIP: {}", e))?;
-            let mut archive = zip::ZipArchive::new(file).map_err(|e| format!("Invalid zip archive: {}", e))?;
-            let mut found = false;
-            for i in 0..archive.len() {
-                let mut file = archive.by_index(i).map_err(|e| format!("Failed to read zip index: {}", e))?;
-                let name = file.name().to_string();
-                if name.ends_with("pandoc.exe") || name.ends_with("bin/pandoc") || name.ends_with("/pandoc") {
-                    let mut out = std::fs::File::create(&final_exe_path).map_err(|e| format!("Failed to create final exe: {}", e))?;
-                    std::io::copy(&mut file, &mut out).map_err(|e| format!("Failed to extract pandoc binary: {}", e))?;
-                    found = true;
-
-                    // Apply execution permissions on macOS
-                    #[cfg(unix)]
-                    {
-                        use std::os::unix::fs::PermissionsExt;
-                        let mut perms = std::fs::metadata(&final_exe_path).map_err(|e| e.to_string())?.permissions();
-                        perms.set_mode(0o755);
-                        std::fs::set_permissions(&final_exe_path, perms).map_err(|e| e.to_string())?;
-                    }
+            loop {
+                let bytes_read = reader.read(&mut buffer).map_err(|e| format!("Failed to read stream: {}", e))?;
+                if bytes_read == 0 {
                     break;
                 }
-            }
-            if !found {
-                return Err("pandoc executable not found in zip archive".to_string());
-            }
-        } else {
-            // Extract tar.gz (Linux)
-            let file = std::fs::File::open(&temp_file_path).map_err(|e| format!("Failed to open downloaded tar.gz: {}", e))?;
-            let tar_gz = flate2::read::GzDecoder::new(file);
-            let mut archive = tar::Archive::new(tar_gz);
-            let entries = archive.entries().map_err(|e| format!("Failed to read tar entries: {}", e))?;
-
-            let mut found = false;
-            for entry in entries {
-                let mut entry = entry.map_err(|e| format!("Failed to read entry: {}", e))?;
-                let path = entry.path().map_err(|e| format!("Failed to read entry path: {}", e))?;
-                let path_str = path.to_string_lossy();
-                if path_str.ends_with("bin/pandoc") || path_str.ends_with("/pandoc") {
-                    let mut out = std::fs::File::create(&final_exe_path).map_err(|e| format!("Failed to create final bin: {}", e))?;
-                    std::io::copy(&mut entry, &mut out).map_err(|e| format!("Failed to extract pandoc: {}", e))?;
-                    found = true;
-                    
-                    // Apply execution permissions on Linux
-                    #[cfg(unix)]
-                    {
-                        use std::os::unix::fs::PermissionsExt;
-                        let mut perms = std::fs::metadata(&final_exe_path).map_err(|e| e.to_string())?.permissions();
-                        perms.set_mode(0o755);
-                        std::fs::set_permissions(&final_exe_path, perms).map_err(|e| e.to_string())?;
-                    }
-                    break;
+                file.write_all(&buffer[..bytes_read]).map_err(|e| format!("Failed to write to file: {}", e))?;
+                downloaded += bytes_read as u64;
+                
+                if total_size > 0 {
+                    let percent = (downloaded as f64 / total_size as f64 * 80.0) as u32; // Reserve 80-100% for extraction
+                    emit_progress("downloading", percent, &format!("Downloading: {}%", percent));
                 }
             }
-            if !found {
-                return Err("pandoc executable not found in tar.gz archive".to_string());
+            drop(file);
+
+            emit_progress("extracting", 80, "Extracting binary...");
+            let exe_name = if cfg!(windows) { "pandoc.exe" } else { "pandoc" };
+            let final_exe_path = bin_dir.join(exe_name);
+
+            if is_zip {
+                // Extract zip
+                let file = std::fs::File::open(&temp_file_path).map_err(|e| format!("Failed to open ZIP: {}", e))?;
+                let mut archive = zip::ZipArchive::new(file).map_err(|e| format!("Invalid zip archive: {}", e))?;
+                let mut found = false;
+                for i in 0..archive.len() {
+                    let mut file = archive.by_index(i).map_err(|e| format!("Failed to read zip index: {}", e))?;
+                    let name = file.name().to_string();
+                    if name.ends_with("pandoc.exe") || name.ends_with("bin/pandoc") || name.ends_with("/pandoc") {
+                        let mut out = std::fs::File::create(&final_exe_path).map_err(|e| format!("Failed to create final exe: {}", e))?;
+                        std::io::copy(&mut file, &mut out).map_err(|e| format!("Failed to extract pandoc binary: {}", e))?;
+                        found = true;
+
+                        // Apply execution permissions on macOS
+                        #[cfg(unix)]
+                        {
+                            use std::os::unix::fs::PermissionsExt;
+                            let mut perms = std::fs::metadata(&final_exe_path).map_err(|e| e.to_string())?.permissions();
+                            perms.set_mode(0o755);
+                            std::fs::set_permissions(&final_exe_path, perms).map_err(|e| e.to_string())?;
+                        }
+                        break;
+                    }
+                }
+                if !found {
+                    return Err("pandoc executable not found in zip archive".to_string());
+                }
+            } else {
+                // Extract tar.gz (Linux)
+                let file = std::fs::File::open(&temp_file_path).map_err(|e| format!("Failed to open downloaded tar.gz: {}", e))?;
+                let tar_gz = flate2::read::GzDecoder::new(file);
+                let mut archive = tar::Archive::new(tar_gz);
+                let entries = archive.entries().map_err(|e| format!("Failed to read tar entries: {}", e))?;
+
+                let mut found = false;
+                for entry in entries {
+                    let mut entry = entry.map_err(|e| format!("Failed to read entry: {}", e))?;
+                    let path = entry.path().map_err(|e| format!("Failed to read entry path: {}", e))?;
+                    let path_str = path.to_string_lossy();
+                    if path_str.ends_with("bin/pandoc") || path_str.ends_with("/pandoc") {
+                        let mut out = std::fs::File::create(&final_exe_path).map_err(|e| format!("Failed to create final bin: {}", e))?;
+                        std::io::copy(&mut entry, &mut out).map_err(|e| format!("Failed to extract pandoc: {}", e))?;
+                        found = true;
+                        
+                        // Apply execution permissions on Linux
+                        #[cfg(unix)]
+                        {
+                            use std::os::unix::fs::PermissionsExt;
+                            let mut perms = std::fs::metadata(&final_exe_path).map_err(|e| e.to_string())?.permissions();
+                            perms.set_mode(0o755);
+                            std::fs::set_permissions(&final_exe_path, perms).map_err(|e| e.to_string())?;
+                        }
+                        break;
+                    }
+                }
+                if !found {
+                    return Err("pandoc executable not found in tar.gz archive".to_string());
+                }
             }
+
+            // Clean up the temp zip/tar file
+            let _ = std::fs::remove_file(&temp_file_path);
+            Ok(())
+		})();
+
+        {
+            let mut is_installing = state_clone.0.is_installing.lock().unwrap();
+            *is_installing = false;
         }
 
-        // Clean up the temp zip/tar file
-        let _ = std::fs::remove_file(&temp_file_path);
-
-        emit_progress("success", 100, "Pandoc installed successfully!");
-        Ok(())
+        match result {
+            Ok(_) => {
+                emit_progress("success", 100, "Pandoc installed successfully!");
+                Ok(())
+            }
+            Err(e) => {
+                let prog = InstallProgress {
+                    stage: "failed".to_string(),
+                    progress: 0,
+                    message: e.clone(),
+                };
+                {
+                    let mut current = state_clone.0.current_progress.lock().unwrap();
+                    *current = prog.clone();
+                }
+                let _ = app_handle_clone.emit("pandoc_install_progress", prog);
+                Err(e)
+            }
+        }
     })
     .await
     .map_err(|e| e.to_string())?
@@ -1164,6 +1236,7 @@ pub fn run() {
 
             let transfer_state = file_transfer::TransferState::new();
             app.manage(transfer_state.clone());
+            app.manage(PandocInstallState::new());
             let app_handle = app.handle().clone();
             let transfer_state_clone = transfer_state.clone();
             tauri::async_runtime::spawn(async move {
@@ -1216,6 +1289,7 @@ pub fn run() {
             file_transfer::clear_history_records,
             check_pandoc,
             install_pandoc,
+            get_pandoc_install_status,
             run_pandoc_convert,
             select_source_file,
             select_target_file,
