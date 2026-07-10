@@ -398,6 +398,7 @@ const translations = {
     'Recent History': 'Recent History',
     'Please select source file': 'Please select source file',
     'Please select target path': 'Please select target path',
+    'Converting to PDF requires a PDF engine on your system (defaults to pdflatex). If you encounter a pdflatex missing error, you can specify an alternative engine in "Custom Arguments" below (e.g. --pdf-engine=wkhtmltopdf or --pdf-engine=typst), or install MacTeX/typst on your system.': 'Converting to PDF requires a PDF engine on your system (defaults to pdflatex). If you encounter a pdflatex missing error, you can specify an alternative engine in "Custom Arguments" below (e.g. --pdf-engine=wkhtmltopdf or --pdf-engine=typst), or install MacTeX/typst on your system.',
     'Plugin Installation Failed': 'Plugin Installation Failed',
     'Specify command line arguments for Pandoc. Use spaces to split multiple flags.': 'Specify command line arguments for Pandoc. Use spaces to split multiple flags.',
   },
@@ -798,6 +799,7 @@ const translations = {
     'Please select target path': '请选择目标保存路径',
     'Plugin Installation Failed': '插件安装失败',
     'Specify command line arguments for Pandoc. Use spaces to split multiple flags.': '指定 Pandoc 命令行参数，使用空格分隔多个参数。',
+    'Converting to PDF requires a PDF engine on your system (defaults to pdflatex). If you encounter a pdflatex missing error, you can specify an alternative engine in "Custom Arguments" below (e.g. --pdf-engine=wkhtmltopdf or --pdf-engine=typst), or install MacTeX/typst on your system.': '转换为 PDF 格式需要系统安装有 PDF 引擎（默认为 pdflatex）。若遇到 pdflatex 缺失错误，可在下方【自定义参数】中添加 --pdf-engine=wkhtmltopdf 或 --pdf-engine=typst 尝试，或者在系统上安装对应排版工具（如 macOS 用户可运行 brew install typst 或 brew install wkhtmltopdf）。',
   }
 };
 

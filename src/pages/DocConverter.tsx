@@ -513,6 +513,15 @@ export function DocConverter() {
                 </div>
               </div>
 
+              {toFormat === 'pdf' && (
+                <div className="md:col-span-2 p-4 bg-amber-500/10 border border-amber-500/20 rounded-lg text-xs th-text-muted flex items-start gap-2.5 animate-fade-in shadow-inner">
+                  <AlertCircle className="w-4 h-4 text-amber-500 shrink-0 mt-0.5" />
+                  <span className="leading-relaxed th-text-2">
+                    {t('Converting to PDF requires a PDF engine on your system (defaults to pdflatex). If you encounter a pdflatex missing error, you can specify an alternative engine in "Custom Arguments" below (e.g. --pdf-engine=wkhtmltopdf or --pdf-engine=typst), or install MacTeX/typst on your system.')}
+                  </span>
+                </div>
+              )}
+
               {/* Target path */}
               <div className="space-y-2 md:col-span-2">
                 <label className="block text-sm font-semibold th-text-2">{t('Target File')}</label>
