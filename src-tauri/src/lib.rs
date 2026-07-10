@@ -609,22 +609,19 @@ struct InstallProgress {
     message: String,
 }
 
-use std::sync::Arc;
-use std::sync::Mutex;
-
 #[derive(Clone)]
-struct PandocInstallState(Arc<PandocInstallStateInner>);
+struct PandocInstallState(std::sync::Arc<PandocInstallStateInner>);
 
 struct PandocInstallStateInner {
-    is_installing: Mutex<bool>,
-    current_progress: Mutex<InstallProgress>,
+    is_installing: std::sync::Mutex<bool>,
+    current_progress: std::sync::Mutex<InstallProgress>,
 }
 
 impl PandocInstallState {
     fn new() -> Self {
-        Self(Arc::new(PandocInstallStateInner {
-            is_installing: Mutex::new(false),
-            current_progress: Mutex::new(InstallProgress {
+        Self(std::sync::Arc::new(PandocInstallStateInner {
+            is_installing: std::sync::Mutex::new(false),
+            current_progress: std::sync::Mutex::new(InstallProgress {
                 stage: "not_started".to_string(),
                 progress: 0,
                 message: "".to_string(),
@@ -668,6 +665,7 @@ async fn install_pandoc(
             }
             let _ = app_handle_clone.emit("pandoc_install_progress", prog);
         };
+        let app_handle_inner = app_handle_clone.clone();
 
         let result = (move || -> Result<(), String> {
             emit_progress("downloading", 0, "Initializing download...");
@@ -687,7 +685,7 @@ async fn install_pandoc(
 
             let backup_url = format!("https://ghfast.top/{}", url);
 
-            let app_dir = app_handle_clone.path().app_data_dir()
+            let app_dir = app_handle_inner.path().app_data_dir()
                 .map_err(|e| format!("Failed to get app data dir: {}", e))?;
             let bin_dir = app_dir.join("bin");
             if !bin_dir.exists() {
