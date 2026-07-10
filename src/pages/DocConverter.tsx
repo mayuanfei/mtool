@@ -68,13 +68,38 @@ export function DocConverter() {
   const [installMessage, setInstallMessage] = useState('');
   const [installError, setInstallError] = useState<string | null>(null);
 
+  // Load last configuration from cache
+  const [savedConfig] = useState(() => {
+    try {
+      const saved = localStorage.getItem('mtool_pandoc_last_config');
+      return saved ? JSON.parse(saved) : null;
+    } catch {
+      return null;
+    }
+  });
+
   // Form states
-  const [sourcePath, setSourcePath] = useState('');
-  const [targetPath, setTargetPath] = useState('');
-  const [fromFormat, setFromFormat] = useState('auto');
-  const [toFormat, setToFormat] = useState('docx');
-  const [extraArgs, setExtraArgs] = useState('');
-  const [showAdvanced, setShowAdvanced] = useState(false);
+  const [sourcePath, setSourcePath] = useState(savedConfig?.sourcePath || '');
+  const [targetPath, setTargetPath] = useState(savedConfig?.targetPath || '');
+  const [fromFormat, setFromFormat] = useState(savedConfig?.fromFormat || 'auto');
+  const [toFormat, setToFormat] = useState(savedConfig?.toFormat || 'docx');
+  const [extraArgs, setExtraArgs] = useState(savedConfig?.extraArgs || '');
+  const [showAdvanced, setShowAdvanced] = useState(!!savedConfig?.extraArgs);
+
+  // Auto-save form configuration changes
+  useEffect(() => {
+    try {
+      localStorage.setItem('mtool_pandoc_last_config', JSON.stringify({
+        sourcePath,
+        targetPath,
+        fromFormat,
+        toFormat,
+        extraArgs
+      }));
+    } catch (e) {
+      console.error('Failed to save pandoc config:', e);
+    }
+  }, [sourcePath, targetPath, fromFormat, toFormat, extraArgs]);
 
   // Convert states
   const [converting, setConverting] = useState(false);
@@ -243,9 +268,9 @@ export function DocConverter() {
 
     setConverting(true);
     setConvertResult(null);
-    setExtraArgs(prev => prev.trim());
+    setExtraArgs(extraArgs.trim());
 
-    const argsList = extraArgs.split(' ').filter(a => a.trim() !== '');
+    const argsList = extraArgs.split(' ').filter((a: string) => a.trim() !== '');
 
     try {
       await invoke('run_pandoc_convert', {
