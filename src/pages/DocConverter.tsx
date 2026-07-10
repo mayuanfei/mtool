@@ -270,7 +270,27 @@ export function DocConverter() {
     setConvertResult(null);
     setExtraArgs(extraArgs.trim());
 
-    const argsList = extraArgs.split(' ').filter((a: string) => a.trim() !== '');
+    // Use regex to parse CLI arguments, keeping space-containing strings inside quotes together.
+    const matches = extraArgs.trim().match(/(?:[^\s"']+|"[^"\\]*(?:\\.[^"\\]*)*"|'[^'\\]*(?:\\.[^'\\]*)*')+/g);
+    const argsList = matches ? matches.map((arg: string) => {
+      let cleaned = arg;
+      // 1. Strip outer double or single quotes if the entire token is wrapped
+      if ((cleaned.startsWith('"') && cleaned.endsWith('"')) || (cleaned.startsWith("'") && cleaned.endsWith("'"))) {
+        cleaned = cleaned.slice(1, -1);
+      }
+      // 2. Defensive check: Strip inner quotes inside key=value format (e.g., mainfont="Arial" -> mainfont=Arial)
+      // This prevents nested quotes in Pandoc templates (like ""Arial"") which breaks Typst compiler.
+      const eqIndex = cleaned.indexOf('=');
+      if (eqIndex !== -1) {
+        const key = cleaned.slice(0, eqIndex);
+        let val = cleaned.slice(eqIndex + 1);
+        if ((val.startsWith('"') && val.endsWith('"')) || (val.startsWith("'") && val.endsWith("'"))) {
+          val = val.slice(1, -1);
+        }
+        cleaned = `${key}=${val}`;
+      }
+      return cleaned;
+    }) : [];
 
     try {
       await invoke('run_pandoc_convert', {
