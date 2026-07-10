@@ -1,5 +1,10 @@
 # Changelog
 
+## [1.2.4]
+
+- **文档转换器 (DocConverter) 报错修复**:
+  - **修复只读文件系统写入权限问题 (permission denied)**：显式指定 Pandoc 转换子进程的工作目录为源文件所在的父文件夹（若获取失败则回退至系统 Temp 目录）。这不仅完美解决了 macOS 在沙盒/应用 Bundle 环境中运行 Pandoc 时报 `openTempFile: permission denied (Read-only file system)` 的系统级权限异常，而且确保了 Markdown 文档中引用的同级相对路径资源（如本地图片）能够被 Pandoc 正确加载与排版。
+
 ## [1.2.3]
 
 - **文档转换器 (DocConverter) 体验优化与 Bug 修复**:

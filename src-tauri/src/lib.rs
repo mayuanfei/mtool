@@ -852,6 +852,20 @@ async fn run_pandoc_convert(
         };
 
         let mut cmd = std::process::Command::new(pandoc_bin);
+        
+        // Explicitly set working directory to input file's parent directory to avoid
+        // "permission denied (Read-only file system)" when inheriting Tauri's App bundle path on macOS,
+        // and to allow resolving relative image references.
+        if let Some(parent_dir) = std::path::Path::new(&input_path).parent() {
+            if parent_dir.exists() && parent_dir.is_dir() {
+                cmd.current_dir(parent_dir);
+            } else {
+                cmd.current_dir(std::env::temp_dir());
+            }
+        } else {
+            cmd.current_dir(std::env::temp_dir());
+        }
+
         cmd.arg(&input_path);
         cmd.arg("-o").arg(&output_path);
         
