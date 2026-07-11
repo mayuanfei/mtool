@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Code2, QrCode, Settings, Key, Database, FileText, PanelLeftClose, PanelLeftOpen, SearchCode, FileDiff, Package, ArrowRightLeft, Shield, Network, FileType } from 'lucide-react';
+import { Code2, QrCode, Settings, Key, Database, FileText, PanelLeftClose, PanelLeftOpen, SearchCode, FileDiff, Package, ArrowRightLeft, Shield, Network, FileType, Video } from 'lucide-react';
 import { useI18n } from '../i18n';
 
 interface SidebarProps {
@@ -17,6 +17,7 @@ interface SidebarProps {
   cryptoEnabled: boolean;
   fileTransferEnabled: boolean;
   docConvertEnabled: boolean;
+  videoTasksEnabled: boolean;
   hasUpdate: boolean;
 }
 
@@ -49,7 +50,7 @@ function NavItem({ item, activePage, collapsed, onNavigate }: NavItemProps) {
   );
 }
 
-export function Sidebar({ activePage, onNavigate, jsonEnabled, qrEnabled, pwdEnabled, sqlInEnabled, mdEnabled, fileSearchEnabled, fileDiffEnabled, jarViewerEnabled, encoderEnabled, cryptoEnabled, fileTransferEnabled, docConvertEnabled, hasUpdate }: SidebarProps) {
+export function Sidebar({ activePage, onNavigate, jsonEnabled, qrEnabled, pwdEnabled, sqlInEnabled, mdEnabled, fileSearchEnabled, fileDiffEnabled, jarViewerEnabled, encoderEnabled, cryptoEnabled, fileTransferEnabled, docConvertEnabled, videoTasksEnabled, hasUpdate }: SidebarProps) {
   const { t } = useI18n();
 
   const [collapsed, setCollapsed] = useState(() => {
@@ -62,6 +63,7 @@ export function Sidebar({ activePage, onNavigate, jsonEnabled, qrEnabled, pwdEna
   }, [collapsed]);
 
   const navItems = [
+    ...(videoTasksEnabled ? [{ id: 'videoTasks', label: t('Video Tasks'), icon: Video }] : []),
     ...(fileTransferEnabled ? [{ id: 'fileTransfer', label: t('File Transfer'), icon: Network }] : []),
     ...(fileSearchEnabled ? [{ id: 'fileSearch', label: t('File Search'), icon: SearchCode }] : []),
     ...(fileDiffEnabled ? [{ id: 'fileDiff', label: t('File Compare'), icon: FileDiff }] : []),

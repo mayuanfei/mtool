@@ -84,6 +84,18 @@ export function SettingsPage({ toolsEnabled, toggleTool, activePage, setActivePa
           <div className="divide-y th-divide">
             <div className="px-6 py-5 flex items-center justify-between th-hover-surface transition-colors">
               <div>
+                <p className="text-base font-medium th-text-2 mb-1">{t('Video Tasks')}</p>
+                <p className="text-sm th-text-muted">{t('Open teaching sites with saved links, global speed, and background playback compatibility.')}</p>
+              </div>
+              <Toggle checked={toolsEnabled.videoTasks} onChange={() => {
+                const next = !toolsEnabled.videoTasks;
+                toggleTool('videoTasks', next);
+                if (!next && activePage === 'videoTasks') setActivePage('settings');
+              }} />
+            </div>
+
+            <div className="px-6 py-5 flex items-center justify-between th-hover-surface transition-colors">
+              <div>
                 <p className="text-base font-medium th-text-2 mb-1">{t('File Search')}</p>
                 <p className="text-sm th-text-muted">{t('Search and find files by name, size, or content.')}</p>
               </div>

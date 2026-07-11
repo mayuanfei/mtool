@@ -18,11 +18,12 @@ const EncoderDecoder = lazy(() => import('./pages/EncoderDecoder').then(m => ({ 
 const CryptoTool = lazy(() => import('./pages/CryptoTool').then(m => ({ default: m.CryptoTool })));
 const FileTransfer = lazy(() => import('./pages/FileTransfer').then(m => ({ default: m.FileTransfer })));
 const DocConverter = lazy(() => import('./pages/DocConverter').then(m => ({ default: m.DocConverter })));
+const VideoTasks = lazy(() => import('./pages/VideoTasks').then(m => ({ default: m.VideoTasks })));
 
-export type ToolKey = 'json' | 'qr' | 'pwd' | 'sqlIn' | 'md' | 'fileSearch' | 'fileDiff' | 'jarViewer' | 'encoder' | 'crypto' | 'fileTransfer' | 'docConvert';
+export type ToolKey = 'json' | 'qr' | 'pwd' | 'sqlIn' | 'md' | 'fileSearch' | 'fileDiff' | 'jarViewer' | 'encoder' | 'crypto' | 'fileTransfer' | 'docConvert' | 'videoTasks';
 export type ToolsEnabled = Record<ToolKey, boolean>;
 
-const DEFAULT_TOOLS: ToolsEnabled = { json: true, qr: true, pwd: true, sqlIn: true, md: true, fileSearch: true, fileDiff: true, jarViewer: true, encoder: true, crypto: true, fileTransfer: true, docConvert: true };
+const DEFAULT_TOOLS: ToolsEnabled = { json: true, qr: true, pwd: true, sqlIn: true, md: true, fileSearch: true, fileDiff: true, jarViewer: true, encoder: true, crypto: true, fileTransfer: true, docConvert: true, videoTasks: true };
 
 export default function App() {
   const [activePage, setActivePage] = useState(() => {
@@ -83,6 +84,7 @@ export default function App() {
       crypto: getOld('mtool_crypto_enabled'),
       fileTransfer: getOld('mtool_filetransfer_enabled'),
       docConvert: getOld('mtool_docconvert_enabled'),
+      videoTasks: getOld('mtool_video_tasks_enabled'),
     };
   });
 
@@ -128,6 +130,7 @@ export default function App() {
         cryptoEnabled={toolsEnabled.crypto}
         fileTransferEnabled={toolsEnabled.fileTransfer}
         docConvertEnabled={toolsEnabled.docConvert}
+        videoTasksEnabled={toolsEnabled.videoTasks}
         hasUpdate={hasUpdate}
       />
       
@@ -152,6 +155,7 @@ export default function App() {
               {activePage === 'crypto' && toolsEnabled.crypto && <CryptoTool />}
               {activePage === 'fileTransfer' && toolsEnabled.fileTransfer && <FileTransfer />}
               {activePage === 'docConvert' && toolsEnabled.docConvert && <DocConverter />}
+              {activePage === 'videoTasks' && toolsEnabled.videoTasks && <VideoTasks />}
               {activePage === 'settings' && (
                 <SettingsPage 
                   toolsEnabled={toolsEnabled}

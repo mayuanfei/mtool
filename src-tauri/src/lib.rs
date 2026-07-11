@@ -1,6 +1,7 @@
 mod file_search;
 mod jar_viewer;
 mod file_transfer;
+mod video_tasks;
 use base64::prelude::*;
 use std::fs;
 use std::io::Cursor;
@@ -1245,6 +1246,7 @@ pub fn run() {
             maybe_start_watcher(&engine, has_data, index_disabled);
 
             app.manage(engine);
+            app.manage(video_tasks::VideoTaskState::default());
 
             let transfer_state = file_transfer::TransferState::new();
             app.manage(transfer_state.clone());
@@ -1305,6 +1307,13 @@ pub fn run() {
             run_pandoc_convert,
             select_source_file,
             select_target_file,
+            video_tasks::open_video_task_window,
+            video_tasks::set_video_task_speed,
+            video_tasks::set_video_task_muted,
+            video_tasks::set_video_task_compact,
+            video_tasks::get_video_task_window_status,
+            video_tasks::restore_video_task_window,
+            video_tasks::close_video_task_window,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
