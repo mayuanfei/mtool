@@ -11,6 +11,14 @@ type Category = 'hash' | 'symmetric' | 'asymmetric' | 'hq';
 type Algorithm = 'MD5' | 'SHA1' | 'SHA256' | 'SM3' | 'AES' | 'DES' | '3DES' | 'SM4' | 'RSA' | 'SM2' | 'HQ_DLL';
 type DataFormat = 'UTF8' | 'HEX' | 'BASE64';
 
+type HqCryptoBatchResult = {
+  index: number;
+  output: string | null;
+  error: string | null;
+};
+
+const HQ_MAX_BATCH_LINES = 1000;
+
 function arrayBufferToBase64(buffer: ArrayBuffer): string {
   let binary = '';
   const bytes = new Uint8Array(buffer);
@@ -580,13 +588,51 @@ export function CryptoTool() {
         // Call Rust Backend Command
         try {
           if (!jarPath) throw new Error(t('Please select the HQ Jar file.'));
-          res = await invoke('hq_crypto', { 
-            action: doEncrypt ? 'enc' : 'dec',
-            payload: input,
-            jarPath,
-            bizType,
-            jdkPath: jdkPath || null
-          });
+          if (doEncrypt) {
+            res = await invoke('hq_crypto', {
+              action: 'enc',
+              payload: input,
+              jarPath,
+              bizType,
+              jdkPath: jdkPath || null
+            });
+          } else {
+            const payloads = input.replace(/\r\n?/g, '\n').split('\n');
+            while (payloads.length > 1 && payloads[payloads.length - 1].trim() === '') {
+              payloads.pop();
+            }
+
+            if (payloads.length > HQ_MAX_BATCH_LINES) {
+              throw new Error(t('HQ DLL batch supports at most {max} lines.', { max: HQ_MAX_BATCH_LINES }));
+            }
+
+            const emptyLineIndex = payloads.findIndex((payload) => payload.trim() === '');
+            if (emptyLineIndex >= 0) {
+              throw new Error(t('HQ DLL batch input line {line} is empty.', { line: emptyLineIndex + 1 }));
+            }
+
+            const batchResults = await invoke<HqCryptoBatchResult[]>('hq_crypto_batch_decrypt', {
+              payloads: payloads.map((payload) => payload.trim()),
+              jarPath,
+              bizType,
+              jdkPath: jdkPath || null
+            });
+            batchResults.sort((a, b) => a.index - b.index);
+
+            const failedCount = batchResults.filter((item) => item.error !== null).length;
+            res = batchResults.map((item) => {
+              if (item.error === null) return item.output ?? '';
+              const singleLineError = item.error.replace(/\s*[\r\n]+\s*/g, ' ');
+              return t('[Line {line} failed] {error}', {
+                line: item.index + 1,
+                error: singleLineError
+              });
+            }).join('\n');
+
+            if (failedCount > 0) {
+              setError(t('Batch decryption finished with {count} failed line(s).', { count: failedCount }));
+            }
+          }
         } catch (err: unknown) {
           throw new Error(`HQ DLL Error: ${err instanceof Error ? err.message : String(err)}`);
         }
@@ -891,6 +937,9 @@ export function CryptoTool() {
                 className="w-48 bg-indigo-500/10 border-b border-indigo-500/30 px-3 py-1 outline-none text-xs text-indigo-300 transition-colors focus:bg-indigo-500/20"
               />
             </div>
+            <p className="text-xs text-indigo-400/80">
+              {t('Batch decrypt: one ciphertext per line, up to 1000 lines; up to 5 Java processes run concurrently.')}
+            </p>
           </div>
         )}
 

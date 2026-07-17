@@ -1070,111 +1070,235 @@ fn handle_fs_event(event: &notify::Event, db_path: &str, conn: &mut Option<rusql
 // ---------------------------------------------------------------------------
 // 总公司专有加解密 DLL 调用
 // ---------------------------------------------------------------------------
-#[tauri::command]
-async fn hq_crypto(
-    action: String, 
-    payload: String,
-    jar_path: String,
-    biz_type: String,
-    jdk_path: Option<String>
-) -> Result<String, String> {
+const HQ_MAX_PAYLOAD_BYTES: usize = 1024 * 1024;
+const HQ_MAX_BATCH_SIZE: usize = 1000;
+const HQ_BATCH_CONCURRENCY: usize = 5;
+
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct HqCryptoBatchResult {
+    index: usize,
+    output: Option<String>,
+    error: Option<String>,
+}
+
+fn validate_hq_common(action: &str, jar_path: &str, biz_type: &str) -> Result<(), String> {
     if action != "enc" && action != "dec" {
         return Err("Invalid action. Must be 'enc' or 'dec'.".to_string());
     }
 
-    if biz_type.is_empty() 
-        || biz_type.len() > 64 
-        || !biz_type.chars().all(|c| c.is_alphanumeric() || c == '_' || c == '-') 
+    if biz_type.is_empty()
+        || biz_type.len() > 64
+        || !biz_type
+            .chars()
+            .all(|c| c.is_alphanumeric() || c == '_' || c == '-')
     {
         return Err("Invalid bizType format. Only alphanumeric characters, underscores, and hyphens are allowed (max 64 chars).".to_string());
     }
 
-    if payload.len() > 1 * 1024 * 1024 {
-        return Err("Payload too large (max 1 MB)".to_string());
-    }
-
-    let path = std::path::Path::new(&jar_path);
+    let path = std::path::Path::new(jar_path);
     if !path.exists() || path.extension().map_or(true, |ext| ext != "jar") {
         return Err("Invalid JAR path: file must exist and have a .jar extension.".to_string());
     }
 
-    tauri::async_runtime::spawn_blocking(move || {
-        // Resolve java executable: prefer user-specified JDK directory, fall back to system PATH
-        let java_bin = if let Some(ref jdk) = jdk_path {
-            let jdk_dir = std::path::Path::new(jdk);
-            let bin = jdk_dir.join("bin").join(if cfg!(windows) { "java.exe" } else { "java" });
-            if bin.exists() {
-                bin.to_string_lossy().to_string()
-            } else {
-                return Err(format!(
-                    "Java executable not found at '{}'. Please verify the JDK directory.",
-                    bin.display()
-                ));
-            }
+    Ok(())
+}
+
+fn resolve_hq_java(jdk_path: Option<&str>) -> Result<String, String> {
+    if let Some(jdk) = jdk_path {
+        let bin = std::path::Path::new(jdk)
+            .join("bin")
+            .join(if cfg!(windows) { "java.exe" } else { "java" });
+        if bin.exists() {
+            Ok(bin.to_string_lossy().to_string())
         } else {
-            "java".to_string()
-        };
-        let mut command = std::process::Command::new(&java_bin);
-        command
-            .arg("-Dfile.encoding=UTF-8")
-            .arg("-jar")
-            .arg(&jar_path)
-            .arg(&biz_type)
-            .arg(&action)
-            .arg(&payload)
-            .stdout(std::process::Stdio::piped())
-            .stderr(std::process::Stdio::piped());
-
-        #[cfg(windows)]
-        {
-            use std::os::windows::process::CommandExt;
-            const CREATE_NO_WINDOW: u32 = 0x08000000;
-            command.creation_flags(CREATE_NO_WINDOW);
+            Err(format!(
+                "Java executable not found at '{}'. Please verify the JDK directory.",
+                bin.display()
+            ))
         }
+    } else {
+        Ok("java".to_string())
+    }
+}
 
-        let child = command
-            .spawn()
-            .map_err(|e| format!("Failed to execute 'java': {}", e))?;
+fn run_hq_crypto_process(
+    java_bin: &str,
+    action: &str,
+    payload: &str,
+    jar_path: &str,
+    biz_type: &str,
+) -> Result<String, String> {
+    let mut command = std::process::Command::new(java_bin);
+    command
+        .arg("-Dfile.encoding=UTF-8")
+        .arg("-jar")
+        .arg(jar_path)
+        .arg(biz_type)
+        .arg(action)
+        .arg(payload)
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped());
 
-        let pid = child.id();
-        let (tx, rx) = std::sync::mpsc::channel();
-        std::thread::spawn(move || {
-            let _ = tx.send(child.wait_with_output());
-        });
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x08000000;
+        command.creation_flags(CREATE_NO_WINDOW);
+    }
 
-        match rx.recv_timeout(std::time::Duration::from_secs(30)) {
-            Ok(Ok(output)) => {
-                if output.status.success() {
-                    let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
-                    Ok(stdout)
-                } else {
-                    let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
-                    let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
-                    Err(format!("HQ library execution error: {}\n{}", stderr, stdout))
-                }
+    let child = command
+        .spawn()
+        .map_err(|e| format!("Failed to execute 'java': {}", e))?;
+
+    let pid = child.id();
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let _ = tx.send(child.wait_with_output());
+    });
+
+    match rx.recv_timeout(std::time::Duration::from_secs(30)) {
+        Ok(Ok(output)) => {
+            if output.status.success() {
+                Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
+            } else {
+                let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+                let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
+                Err(format!(
+                    "HQ library execution error: {}\n{}",
+                    stderr, stdout
+                ))
             }
-            Ok(Err(e)) => Err(e.to_string()),
-            Err(_) => {
-                #[cfg(unix)]
-                if let Ok(pid_i32) = pid.try_into() {
-                    unsafe { libc::kill(pid_i32, libc::SIGKILL); }
-                }
-                #[cfg(windows)]
+        }
+        Ok(Err(e)) => Err(e.to_string()),
+        Err(_) => {
+            #[cfg(unix)]
+            if let Ok(pid_i32) = pid.try_into() {
                 unsafe {
-                    use windows_sys::Win32::System::Threading::{OpenProcess, TerminateProcess, PROCESS_TERMINATE};
-                    use windows_sys::Win32::Foundation::CloseHandle;
-                    let handle = OpenProcess(PROCESS_TERMINATE, 0, pid);
-                    if handle != 0 as _ {
-                        TerminateProcess(handle, 1);
-                        CloseHandle(handle);
-                    }
+                    libc::kill(pid_i32, libc::SIGKILL);
                 }
-                Err("Execution timeout (30s), background process has been force terminated.".to_string())
             }
+            #[cfg(windows)]
+            unsafe {
+                use windows_sys::Win32::Foundation::CloseHandle;
+                use windows_sys::Win32::System::Threading::{
+                    OpenProcess, TerminateProcess, PROCESS_TERMINATE,
+                };
+                let handle = OpenProcess(PROCESS_TERMINATE, 0, pid);
+                if handle != 0 as _ {
+                    TerminateProcess(handle, 1);
+                    CloseHandle(handle);
+                }
+            }
+            Err(
+                "Execution timeout (30s), background process has been force terminated."
+                    .to_string(),
+            )
         }
+    }
+}
+
+fn prepare_hq_batch_payloads(payloads: Vec<String>) -> Result<Vec<String>, String> {
+    if payloads.is_empty() {
+        return Err("Batch payload is empty.".to_string());
+    }
+    if payloads.len() > HQ_MAX_BATCH_SIZE {
+        return Err(format!(
+            "Batch supports at most {} entries.",
+            HQ_MAX_BATCH_SIZE
+        ));
+    }
+
+    let mut total_bytes = 0usize;
+    let mut normalized = Vec::with_capacity(payloads.len());
+    for (index, payload) in payloads.into_iter().enumerate() {
+        let payload = payload.trim().to_string();
+        if payload.is_empty() {
+            return Err(format!("Batch payload line {} is empty.", index + 1));
+        }
+        total_bytes = total_bytes.saturating_add(payload.len());
+        normalized.push(payload);
+    }
+
+    if total_bytes > HQ_MAX_PAYLOAD_BYTES {
+        return Err("Batch payload too large (max 1 MB in total).".to_string());
+    }
+
+    Ok(normalized)
+}
+
+#[tauri::command]
+async fn hq_crypto(
+    action: String,
+    payload: String,
+    jar_path: String,
+    biz_type: String,
+    jdk_path: Option<String>,
+) -> Result<String, String> {
+    validate_hq_common(&action, &jar_path, &biz_type)?;
+    if payload.len() > HQ_MAX_PAYLOAD_BYTES {
+        return Err("Payload too large (max 1 MB)".to_string());
+    }
+    if payload.is_empty() {
+        return Err("Payload is empty".to_string());
+    }
+    let java_bin = resolve_hq_java(jdk_path.as_deref())?;
+
+    tauri::async_runtime::spawn_blocking(move || {
+        run_hq_crypto_process(&java_bin, &action, &payload, &jar_path, &biz_type)
     })
     .await
     .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+async fn hq_crypto_batch_decrypt(
+    payloads: Vec<String>,
+    jar_path: String,
+    biz_type: String,
+    jdk_path: Option<String>,
+) -> Result<Vec<HqCryptoBatchResult>, String> {
+    validate_hq_common("dec", &jar_path, &biz_type)?;
+    let payloads = prepare_hq_batch_payloads(payloads)?;
+    let java_bin = resolve_hq_java(jdk_path.as_deref())?;
+    let semaphore = Arc::new(tokio::sync::Semaphore::new(HQ_BATCH_CONCURRENCY));
+    let mut tasks = Vec::with_capacity(payloads.len());
+
+    for (index, payload) in payloads.into_iter().enumerate() {
+        let permit = semaphore
+            .clone()
+            .acquire_owned()
+            .await
+            .map_err(|e| format!("Failed to schedule batch decryption: {}", e))?;
+        let java_bin = java_bin.clone();
+        let jar_path = jar_path.clone();
+        let biz_type = biz_type.clone();
+
+        tasks.push(tauri::async_runtime::spawn_blocking(move || {
+            let _permit = permit;
+            let result = run_hq_crypto_process(&java_bin, "dec", &payload, &jar_path, &biz_type);
+            (index, result)
+        }));
+    }
+
+    let mut results = Vec::with_capacity(tasks.len());
+    for task in tasks {
+        let (index, result) = task.await.map_err(|e| e.to_string())?;
+        results.push(match result {
+            Ok(output) => HqCryptoBatchResult {
+                index,
+                output: Some(output),
+                error: None,
+            },
+            Err(error) => HqCryptoBatchResult {
+                index,
+                output: None,
+                error: Some(error),
+            },
+        });
+    }
+
+    Ok(results)
 }
 
 #[tauri::command]
@@ -1283,6 +1407,7 @@ pub fn run() {
             jar_viewer::read_jar_entry,
             jar_viewer::read_local_class,
             hq_crypto,
+            hq_crypto_batch_decrypt,
             select_hq_jar,
             select_jdk_dir,
             file_transfer::get_local_transfer_info,
@@ -1356,5 +1481,40 @@ mod tests {
             std::thread::sleep(std::time::Duration::from_millis(10));
             attempts += 1;
         }
+    }
+
+    #[test]
+    fn test_prepare_hq_batch_payloads_trims_and_preserves_order() {
+        let payloads = vec!["  first  ".to_string(), "second".to_string()];
+
+        assert_eq!(
+            prepare_hq_batch_payloads(payloads).unwrap(),
+            vec!["first".to_string(), "second".to_string()]
+        );
+    }
+
+    #[test]
+    fn test_prepare_hq_batch_payloads_rejects_empty_line() {
+        let error =
+            prepare_hq_batch_payloads(vec!["first".to_string(), "  ".to_string()]).unwrap_err();
+
+        assert!(error.contains("line 2"));
+    }
+
+    #[test]
+    fn test_prepare_hq_batch_payloads_rejects_more_than_limit() {
+        let payloads = vec!["ciphertext".to_string(); HQ_MAX_BATCH_SIZE + 1];
+
+        assert!(prepare_hq_batch_payloads(payloads).is_err());
+    }
+
+    #[test]
+    fn test_prepare_hq_batch_payloads_accepts_exact_limit() {
+        let payloads = vec!["ciphertext".to_string(); HQ_MAX_BATCH_SIZE];
+
+        assert_eq!(
+            prepare_hq_batch_payloads(payloads).unwrap().len(),
+            HQ_MAX_BATCH_SIZE
+        );
     }
 }
