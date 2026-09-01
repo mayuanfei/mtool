@@ -22,3 +22,5 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+# CodeGraph 本地索引
+/.codegraph/
