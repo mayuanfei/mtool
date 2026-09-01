@@ -1,430 +1,582 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import {
-  BookmarkPlus,
-  Check,
-  ExternalLink,
-  Gauge,
-  Link,
-  Pencil,
-  PictureInPicture2,
-  Play,
-  ShieldCheck,
-  Square,
-  Trash2,
-  Video,
-  Volume2,
-  VolumeX,
-  X,
+  AlertTriangle, BookOpen, CheckCircle2, ChevronDown, ChevronRight,
+  ClipboardCheck, Clock3, ExternalLink, FileText, Gauge, GraduationCap,
+  Loader2, Pause, Play, Presentation, RefreshCw, ShieldCheck, Trash2,
+  Video, Volume2, VolumeX,
 } from 'lucide-react';
-import { useI18n } from '../i18n';
 
-interface Bookmark {
-  id: string;
+type Provider = 'ulearn' | 'merchant';
+type CourseKind = 'video' | 'exam' | 'slides' | 'material';
+type CourseStatus = 'completed' | 'pending' | 'playing' | 'verifying' | 'manual' | 'attention';
+
+interface VideoTaskSettings {
+  speed: number;
+  muted: boolean;
+  crossSiteParallel: boolean;
+  running: boolean;
+}
+
+interface SourceStatus {
+  provider: Provider;
   name: string;
+  homeUrl: string;
+  windowOpen: boolean;
+  currentUrl: string | null;
+}
+
+interface CourseItem {
+  id: string;
+  title: string;
   url: string;
-  createdAt: number;
+  sectionTitle: string;
+  kind: CourseKind;
+  durationSeconds: number;
+  progress: number;
+  status: CourseStatus;
+  lastError: string | null;
 }
 
-interface WindowStatus {
-  open: boolean;
-  url: string | null;
+interface TopicItem {
+  id: string;
+  provider: Provider;
+  title: string;
+  url: string;
+  progress: number;
+  totalCount: number;
+  completedCount: number;
+  lastSyncedAt: number;
+  courses: CourseItem[];
 }
 
-const BOOKMARKS_KEY = 'mtool_video_task_bookmarks';
-const SPEED_KEY = 'mtool_video_task_speed';
-const MUTED_KEY = 'mtool_video_task_muted';
-const COMPACT_KEY = 'mtool_video_task_compact';
+interface QueueStats {
+  total: number;
+  completed: number;
+  pending: number;
+  running: number;
+  manual: number;
+  attention: number;
+}
 
-function loadBookmarks(): Bookmark[] {
+interface VideoTaskDashboard {
+  settings: VideoTaskSettings;
+  sources: SourceStatus[];
+  topics: TopicItem[];
+  stats: QueueStats;
+}
+
+interface ImportSummary {
+  topicId: string;
+  topicTitle: string;
+  imported: number;
+  completed: number;
+  manual: number;
+}
+
+const EMPTY_DASHBOARD: VideoTaskDashboard = {
+  settings: { speed: 2, muted: true, crossSiteParallel: false, running: false },
+  sources: [],
+  topics: [],
+  stats: { total: 0, completed: 0, pending: 0, running: 0, manual: 0, attention: 0 },
+};
+
+const STATUS_META: Record<CourseStatus, { label: string; classes: string }> = {
+  completed: { label: '已完成', classes: 'text-emerald-400 bg-emerald-500/10 border-emerald-500/25' },
+  pending: { label: '待播放', classes: 'text-sky-400 bg-sky-500/10 border-sky-500/25' },
+  playing: { label: '正在播放', classes: 'text-indigo-400 bg-indigo-500/10 border-indigo-500/25' },
+  verifying: { label: '完成核验中', classes: 'text-amber-400 bg-amber-500/10 border-amber-500/25' },
+  manual: { label: '需本人处理', classes: 'text-orange-400 bg-orange-500/10 border-orange-500/25' },
+  attention: { label: '需要处理', classes: 'text-rose-400 bg-rose-500/10 border-rose-500/25' },
+};
+
+const KIND_META: Record<CourseKind, { label: string; icon: typeof Video; classes: string }> = {
+  video: { label: '课程视频', icon: Video, classes: 'text-indigo-400 bg-indigo-500/10' },
+  exam: { label: '考试', icon: ClipboardCheck, classes: 'text-orange-400 bg-orange-500/10' },
+  slides: { label: '翻页课件', icon: Presentation, classes: 'text-cyan-400 bg-cyan-500/10' },
+  material: { label: '知识材料', icon: FileText, classes: 'text-slate-400 bg-slate-500/10' },
+};
+
+function cx(...values: Array<string | false | null | undefined>): string {
+  return values.filter(Boolean).join(' ');
+}
+
+function formatDuration(seconds: number): string {
+  if (seconds <= 0) return '时长未知';
+  const minutes = Math.ceil(seconds / 60);
+  if (minutes < 60) return String(minutes) + ' 分钟';
+  return String(Math.floor(minutes / 60)) + ' 小时 ' + String(minutes % 60) + ' 分';
+}
+
+function formatSyncTime(timestamp: number): string {
+  return timestamp ? new Date(timestamp * 1000).toLocaleString() : '尚未同步';
+}
+
+function currentHost(url: string | null): string {
+  if (!url) return '';
   try {
-    const saved = localStorage.getItem(BOOKMARKS_KEY);
-    if (!saved) return [];
-    const value = JSON.parse(saved) as unknown;
-    return Array.isArray(value) ? value.filter((item): item is Bookmark => (
-      typeof item === 'object' && item !== null &&
-      typeof (item as Bookmark).id === 'string' &&
-      typeof (item as Bookmark).name === 'string' &&
-      typeof (item as Bookmark).url === 'string'
-    )) : [];
+    return new URL(url).host;
   } catch {
-    return [];
+    return url;
   }
 }
 
-function normalizeUrl(value: string): string {
-  const withProtocol = /^https?:\/\//i.test(value.trim()) ? value.trim() : `https://${value.trim()}`;
-  const parsed = new URL(withProtocol);
-  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') throw new Error('invalid protocol');
-  return parsed.toString();
-}
-
 export function VideoTasks() {
-  const { t } = useI18n();
-  const [url, setUrl] = useState('');
-  const [bookmarkName, setBookmarkName] = useState('');
-  const [bookmarks, setBookmarks] = useState<Bookmark[]>(loadBookmarks);
-  const [speed, setSpeed] = useState(() => {
-    const saved = Number(localStorage.getItem(SPEED_KEY));
-    return Number.isFinite(saved) && saved >= 0.25 && saved <= 10 ? saved : 1;
-  });
-  const [muted, setMuted] = useState(() => localStorage.getItem(MUTED_KEY) === 'true');
-  const [compact, setCompact] = useState(() => localStorage.getItem(COMPACT_KEY) === 'true');
-  const [windowStatus, setWindowStatus] = useState<WindowStatus>({ open: false, url: null });
-  const [busy, setBusy] = useState(false);
+  const [dashboard, setDashboard] = useState<VideoTaskDashboard>(EMPTY_DASHBOARD);
+  const [loading, setLoading] = useState(true);
+  const [busyKey, setBusyKey] = useState<string | null>(null);
+  const [expandedTopics, setExpandedTopics] = useState<Set<string>>(new Set());
   const [message, setMessage] = useState<{ text: string; error: boolean } | null>(null);
-  const [editingId, setEditingId] = useState<string | null>(null);
-  const [editingName, setEditingName] = useState('');
+  const tickRunning = useRef(false);
 
   const showMessage = useCallback((text: string, error = false) => {
     setMessage({ text, error });
-    window.setTimeout(() => setMessage(null), 3500);
+    window.setTimeout(() => setMessage(null), 4500);
   }, []);
 
-  const refreshStatus = useCallback(async () => {
+  const refreshDashboard = useCallback(async () => {
     try {
-      setWindowStatus(await invoke<WindowStatus>('get_video_task_window_status'));
-    } catch {
-      setWindowStatus({ open: false, url: null });
-    }
-  }, []);
-
-  useEffect(() => {
-    refreshStatus();
-    window.addEventListener('focus', refreshStatus);
-    return () => window.removeEventListener('focus', refreshStatus);
-  }, [refreshStatus]);
-
-  useEffect(() => {
-    localStorage.setItem(BOOKMARKS_KEY, JSON.stringify(bookmarks));
-  }, [bookmarks]);
-
-  useEffect(() => {
-    localStorage.setItem(SPEED_KEY, String(speed));
-    invoke('set_video_task_speed', { speed }).catch(() => {});
-  }, [speed]);
-
-  useEffect(() => {
-    localStorage.setItem(MUTED_KEY, String(muted));
-    invoke('set_video_task_muted', { muted }).catch(() => {});
-  }, [muted]);
-
-  const currentHost = useMemo(() => {
-    if (!windowStatus.url) return null;
-    try {
-      return new URL(windowStatus.url).host;
-    } catch {
-      return windowStatus.url;
-    }
-  }, [windowStatus.url]);
-
-  const openVideo = async (target = url) => {
-    let normalized: string;
-    try {
-      normalized = normalizeUrl(target);
-    } catch {
-      showMessage(t('Please enter a valid teaching URL.'), true);
-      return;
-    }
-
-    setBusy(true);
-    try {
-      const status = await invoke<WindowStatus>('open_video_task_window', {
-        url: normalized,
-        speed,
-        muted,
-        compact,
+      const next = await invoke<VideoTaskDashboard>('get_video_task_dashboard');
+      setDashboard(next);
+      setExpandedTopics((current) => {
+        if (current.size > 0 || next.topics.length === 0) return current;
+        return new Set([next.topics[0].id]);
       });
-      setUrl(normalized);
-      setWindowStatus(status);
-      showMessage(t('Teaching site opened in the built-in browser.'));
     } catch (error) {
       showMessage(String(error), true);
     } finally {
-      setBusy(false);
+      setLoading(false);
+    }
+  }, [showMessage]);
+
+  const tickAndRefresh = useCallback(async () => {
+    if (tickRunning.current) return;
+    tickRunning.current = true;
+    try {
+      await invoke('tick_video_queue');
+      await refreshDashboard();
+    } catch (error) {
+      showMessage(String(error), true);
+    } finally {
+      tickRunning.current = false;
+    }
+  }, [refreshDashboard, showMessage]);
+
+  useEffect(() => {
+    refreshDashboard();
+    const timer = window.setInterval(tickAndRefresh, 2500);
+    window.addEventListener('focus', refreshDashboard);
+    return () => {
+      window.clearInterval(timer);
+      window.removeEventListener('focus', refreshDashboard);
+    };
+  }, [refreshDashboard, tickAndRefresh]);
+
+  const overallProgress = useMemo(() => (
+    dashboard.stats.total > 0
+      ? Math.round((dashboard.stats.completed / dashboard.stats.total) * 100)
+      : 0
+  ), [dashboard.stats.completed, dashboard.stats.total]);
+
+  const runAction = async (key: string, action: () => Promise<void>, success?: string) => {
+    setBusyKey(key);
+    try {
+      await action();
+      if (success) showMessage(success);
+      await refreshDashboard();
+    } catch (error) {
+      showMessage(String(error), true);
+    } finally {
+      setBusyKey(null);
     }
   };
 
-  const saveBookmark = () => {
-    let normalized: string;
-    try {
-      normalized = normalizeUrl(url);
-    } catch {
-      showMessage(t('Please enter a valid teaching URL.'), true);
-      return;
-    }
-    if (!bookmarkName.trim()) {
-      showMessage(t('Please name this bookmark.'), true);
-      return;
-    }
+  const openSite = (provider: Provider) => runAction(
+    'open-' + provider,
+    () => invoke('open_video_learning_site', { provider }),
+  );
 
-    setBookmarks((items) => {
-      const existing = items.find((item) => item.url === normalized);
-      if (existing) {
-        return items.map((item) => item.id === existing.id ? { ...item, name: bookmarkName.trim() } : item);
-      }
-      return [{ id: crypto.randomUUID(), name: bookmarkName.trim(), url: normalized, createdAt: Date.now() }, ...items];
+  const importTopic = (provider: Provider) => runAction(
+    'import-' + provider,
+    async () => {
+      const result = await invoke<ImportSummary>('import_current_video_topic', { provider });
+      showMessage(
+        '已导入“' + result.topicTitle + '”：' + String(result.imported) +
+        ' 项，已完成 ' + String(result.completed) + ' 项，需本人处理 ' + String(result.manual) + ' 项。',
+      );
+    },
+  );
+
+  const syncTopic = (topic: TopicItem) => runAction(
+    'sync-' + topic.id,
+    async () => {
+      const result = await invoke<ImportSummary>('sync_video_topic', { topicId: topic.id });
+      showMessage('已同步“' + result.topicTitle + '”的最新平台状态。');
+    },
+  );
+
+  const updateSettings = (patch: Partial<VideoTaskSettings>) => {
+    const next = { ...dashboard.settings, ...patch };
+    setDashboard((current) => ({ ...current, settings: next }));
+    void runAction('settings', () => invoke('update_video_task_settings', { settings: next }));
+  };
+
+  const toggleTopic = (topicId: string) => {
+    setExpandedTopics((current) => {
+      const next = new Set(current);
+      if (next.has(topicId)) next.delete(topicId);
+      else next.add(topicId);
+      return next;
     });
-    setUrl(normalized);
-    setBookmarkName('');
-    showMessage(t('Bookmark saved.'));
   };
 
-  const changeCompactMode = async () => {
-    if (!windowStatus.open) {
-      showMessage(t('Open a teaching site first.'), true);
-      return;
-    }
-    const next = !compact;
-    try {
-      await invoke('set_video_task_compact', { compact: next });
-      setCompact(next);
-      localStorage.setItem(COMPACT_KEY, String(next));
-      showMessage(next ? t('Focus mini window enabled.') : t('Full-size player restored.'));
-    } catch (error) {
-      showMessage(String(error), true);
-    }
-  };
-
-  const closePlayer = async () => {
-    try {
-      await invoke('close_video_task_window');
-      setWindowStatus({ open: false, url: null });
-      showMessage(t('Player window closed.'));
-    } catch (error) {
-      showMessage(String(error), true);
-    }
-  };
-
-  const restorePlayer = async () => {
-    try {
-      await invoke('restore_video_task_window');
-      showMessage(t('Player window restored.'));
-    } catch (error) {
-      showMessage(String(error), true);
-    }
-  };
-
-  const saveRename = (id: string) => {
-    if (!editingName.trim()) return;
-    setBookmarks((items) => items.map((item) => item.id === id ? { ...item, name: editingName.trim() } : item));
-    setEditingId(null);
-    setEditingName('');
-  };
-
-  const speedOptions = [1, 1.5, 2, 3, 5, 10];
+  if (loading) {
+    return (
+      <div className="h-full flex items-center justify-center th-text-muted">
+        <Loader2 className="w-5 h-5 animate-spin mr-2" />
+        正在加载学习任务…
+      </div>
+    );
+  }
 
   return (
-    <div className="max-w-6xl mx-auto w-full">
-      <div className="mb-8 flex flex-col lg:flex-row lg:items-start lg:justify-between gap-6">
-        <div>
-          <div className="flex items-center gap-3 mb-2">
-            <div className="w-11 h-11 rounded-xl bg-indigo-500/15 border border-indigo-500/25 flex items-center justify-center">
-              <Video className="w-6 h-6 text-indigo-400" />
-            </div>
-            <h1 className="text-4xl font-bold tracking-tight th-text">{t('Video Tasks')}</h1>
+    <div className="max-w-7xl mx-auto w-full pb-10">
+      <header className="mb-6 flex flex-col xl:flex-row xl:items-end xl:justify-between gap-5">
+        <div className="flex items-center gap-3">
+          <div className="w-11 h-11 rounded-xl bg-indigo-500/15 border border-indigo-500/25 flex items-center justify-center">
+            <GraduationCap className="w-6 h-6 text-indigo-400" />
           </div>
-          <p className="th-text-3">{t('Open authenticated teaching sites, save learning links, and control playback globally.')}</p>
-        </div>
-        <div className="flex flex-wrap items-center gap-2">
-          <div className={`px-3 py-2 rounded-lg border text-xs font-semibold flex items-center gap-2 ${windowStatus.open ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400' : 'th-bg-card th-border th-text-muted'}`}>
-            <span className={`w-2 h-2 rounded-full ${windowStatus.open ? 'bg-emerald-400 animate-pulse' : 'bg-slate-500'}`} />
-            {windowStatus.open ? `${t('Player running')}${currentHost ? ` · ${currentHost}` : ''}` : t('Player closed')}
+          <div>
+            <h1 className="text-3xl font-bold tracking-tight th-text">学习任务管理台</h1>
+            <p className="text-sm th-text-3 mt-1">导入专题、顺序播放课程视频，并以平台状态作为最终完成依据。</p>
           </div>
-          {windowStatus.open && (
-            <button onClick={restorePlayer} className="px-3 py-2 rounded-lg border border-indigo-500/30 bg-indigo-500/10 text-indigo-300 hover:bg-indigo-500/20 text-xs font-semibold flex items-center gap-2 transition-colors">
-              <ExternalLink className="w-3.5 h-3.5" />
-              {t('Bring Player Back')}
-            </button>
-          )}
         </div>
-      </div>
+        <div className="flex flex-wrap gap-2">
+          <div className={cx(
+            'px-3 py-2 rounded-lg border text-xs font-semibold flex items-center gap-2',
+            dashboard.settings.running
+              ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400'
+              : 'th-bg-card th-border th-text-muted',
+          )}>
+            <span className={cx(
+              'w-2 h-2 rounded-full',
+              dashboard.settings.running ? 'bg-emerald-400 animate-pulse' : 'bg-slate-500',
+            )} />
+            {dashboard.settings.running ? '队列运行中' : '队列已暂停'}
+          </div>
+          <button
+            onClick={() => void runAction('refresh', refreshDashboard)}
+            className="px-3 py-2 rounded-lg border th-border th-bg-card th-text-3 th-hover-surface text-xs font-semibold flex items-center gap-2"
+          >
+            <RefreshCw className={cx('w-3.5 h-3.5', busyKey === 'refresh' && 'animate-spin')} />
+            刷新
+          </button>
+        </div>
+      </header>
 
       {message && (
-        <div className={`mb-5 px-4 py-3 rounded-xl border text-sm ${message.error ? 'bg-rose-500/10 border-rose-500/30 text-rose-300' : 'bg-emerald-500/10 border-emerald-500/30 text-emerald-300'}`}>
+        <div className={cx(
+          'mb-5 px-4 py-3 rounded-xl border text-sm',
+          message.error
+            ? 'bg-rose-500/10 border-rose-500/30 text-rose-300'
+            : 'bg-emerald-500/10 border-emerald-500/30 text-emerald-300',
+        )}>
           {message.text}
         </div>
       )}
 
-      <div className="grid grid-cols-1 xl:grid-cols-[1.4fr_0.9fr] gap-6 mb-6">
-        <section className="th-bg-card border th-border rounded-xl overflow-hidden shadow-2xl">
-          <div className="px-6 py-4 border-b th-border flex items-center gap-3 th-bg-surface-h">
-            <Link className="w-5 h-5 text-indigo-400" />
-            <h2 className="text-sm font-bold tracking-tighter th-text-2 uppercase">{t('Teaching Website')}</h2>
-          </div>
-          <div className="p-6 space-y-5">
-            <label className="block">
-              <span className="block text-xs font-semibold th-text-3 mb-2">{t('Teaching URL')}</span>
-              <div className="flex gap-3">
-                <input
-                  value={url}
-                  onChange={(event) => setUrl(event.target.value)}
-                  onKeyDown={(event) => { if (event.key === 'Enter') openVideo(); }}
-                  placeholder="https://ysstudy.example.com/..."
-                  className="flex-1 min-w-0 th-bg-input border th-border-subtle th-text-2 rounded-lg px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/50 focus:border-indigo-500 shadow-inner select-text"
-                />
-                <button
-                  onClick={() => openVideo()}
-                  disabled={busy}
-                  className="px-5 py-3 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white rounded-lg text-sm font-semibold flex items-center gap-2 transition-colors shadow-lg shadow-indigo-600/20"
-                >
-                  <ExternalLink className="w-4 h-4" />
-                  {busy ? t('Opening...') : t('Open Browser')}
-                </button>
+      <section className="grid grid-cols-1 xl:grid-cols-2 gap-4 mb-5">
+        {dashboard.sources.map((source) => (
+          <div key={source.provider} className="th-bg-card border th-border rounded-xl p-5 shadow-xl">
+            <div className="flex items-start justify-between gap-4">
+              <div className="flex items-start gap-3 min-w-0">
+                <div className={cx(
+                  'w-10 h-10 rounded-lg flex items-center justify-center border',
+                  source.windowOpen
+                    ? 'bg-emerald-500/10 border-emerald-500/25 text-emerald-400'
+                    : 'th-bg-surface th-border-subtle th-text-muted',
+                )}>
+                  <BookOpen className="w-5 h-5" />
+                </div>
+                <div className="min-w-0">
+                  <h2 className="font-semibold th-text-2">{source.name}</h2>
+                  <div className="text-xs th-text-muted mt-1 truncate">
+                    {source.windowOpen ? '会话已打开 · ' + currentHost(source.currentUrl) : '尚未打开登录会话'}
+                  </div>
+                  <div className="text-[11px] th-text-faint mt-1 truncate select-text">{source.homeUrl}</div>
+                </div>
               </div>
-            </label>
-
-            <div className="grid grid-cols-1 md:grid-cols-[1fr_auto] gap-3 items-end">
-              <label className="block">
-                <span className="block text-xs font-semibold th-text-3 mb-2">{t('Bookmark Name')}</span>
-                <input
-                  value={bookmarkName}
-                  onChange={(event) => setBookmarkName(event.target.value)}
-                  placeholder={t('e.g. 2026 Security Awareness Training')}
-                  className="w-full th-bg-input border th-border-subtle th-text-2 rounded-lg px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/50 focus:border-indigo-500 shadow-inner select-text"
-                />
-              </label>
-              <button onClick={saveBookmark} className="px-5 py-3 th-bg-input-alt border th-border-subtle th-text-2 rounded-lg text-sm font-semibold flex items-center justify-center gap-2 th-hover-surface transition-colors">
-                <BookmarkPlus className="w-4 h-4 text-indigo-400" />
-                {t('Save Bookmark')}
+              <span className={cx(
+                'text-[11px] px-2 py-1 rounded-md border',
+                source.windowOpen
+                  ? 'text-emerald-400 border-emerald-500/25 bg-emerald-500/10'
+                  : 'th-text-muted th-border',
+              )}>
+                {source.windowOpen ? '会话打开' : '未连接'}
+              </span>
+            </div>
+            <div className="mt-4 flex flex-wrap gap-2">
+              <button
+                onClick={() => void openSite(source.provider)}
+                disabled={busyKey === 'open-' + source.provider}
+                className="px-3 py-2 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white rounded-lg text-xs font-semibold flex items-center gap-2"
+              >
+                {busyKey === 'open-' + source.provider
+                  ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                  : <ExternalLink className="w-3.5 h-3.5" />}
+                {source.windowOpen ? '打开/选择专题' : '登录并选择专题'}
+              </button>
+              <button
+                onClick={() => void importTopic(source.provider)}
+                disabled={!source.windowOpen || busyKey === 'import-' + source.provider}
+                className="px-3 py-2 th-bg-input-alt border th-border-subtle th-text-2 rounded-lg text-xs font-semibold flex items-center gap-2 disabled:opacity-40 th-hover-surface"
+              >
+                {busyKey === 'import-' + source.provider
+                  ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                  : <RefreshCw className="w-3.5 h-3.5" />}
+                导入当前专题
               </button>
             </div>
           </div>
-        </section>
+        ))}
+      </section>
 
-        <section className="th-bg-card border th-border rounded-xl overflow-hidden shadow-2xl">
-          <div className="px-6 py-4 border-b th-border flex items-center gap-3 th-bg-surface-h">
-            <Gauge className="w-5 h-5 text-indigo-400" />
-            <h2 className="text-sm font-bold tracking-tighter th-text-2 uppercase">{t('Global Playback Speed')}</h2>
+      <section className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-3 mb-5">
+        {[
+          { label: '整体进度', value: String(overallProgress) + '%', color: 'text-indigo-400' },
+          { label: '课程总数', value: dashboard.stats.total, color: 'th-text' },
+          { label: '已完成', value: dashboard.stats.completed, color: 'text-emerald-400' },
+          { label: '待播放', value: dashboard.stats.pending, color: 'text-sky-400' },
+          { label: '需本人处理', value: dashboard.stats.manual, color: 'text-orange-400' },
+          { label: '异常', value: dashboard.stats.attention, color: 'text-rose-400' },
+        ].map((item) => (
+          <div key={item.label} className="th-bg-card border th-border rounded-xl px-4 py-3">
+            <div className="text-[11px] th-text-muted">{item.label}</div>
+            <div className={cx('text-2xl font-bold tabular-nums mt-1', item.color)}>{item.value}</div>
           </div>
-          <div className="p-6">
-            <div className="flex items-end justify-between mb-4">
-              <div>
-                <div className="text-3xl font-bold th-text tabular-nums">{speed.toFixed(speed % 1 === 0 ? 0 : 2)}×</div>
-                <p className="text-xs th-text-muted mt-1">{t('Applied to videos in the task browser')}</p>
-              </div>
-              <span className="text-[11px] text-amber-400 bg-amber-500/10 border border-amber-500/20 rounded-md px-2 py-1">{t('Maximum 10x')}</span>
+        ))}
+      </section>
+
+      <section className="th-bg-card border th-border rounded-xl p-5 mb-5 shadow-xl">
+        <div className="flex flex-col xl:flex-row xl:items-center xl:justify-between gap-5">
+          <div>
+            <div className="flex items-center gap-2 mb-2">
+              <Gauge className="w-4 h-4 text-indigo-400" />
+              <h2 className="text-sm font-semibold th-text-2">队列运行策略</h2>
             </div>
-            <input
-              type="range"
-              min="0.25"
-              max="10"
-              step="0.25"
-              value={speed}
-              onChange={(event) => setSpeed(Number(event.target.value))}
-              className="w-full accent-indigo-500 cursor-pointer"
-            />
-            <div className="grid grid-cols-6 gap-2 mt-4">
-              {speedOptions.map((option) => (
+            <p className="text-xs th-text-muted">同一平台始终只运行一门课程；跨站并行开启后，两个平台可各运行一门。</p>
+          </div>
+          <div className="flex flex-wrap items-center gap-4">
+            <div className="flex items-center gap-1 p-1 rounded-lg th-bg-input border th-border-subtle">
+              {[1, 1.5, 2].map((speed) => (
                 <button
-                  key={option}
-                  onClick={() => setSpeed(option)}
-                  className={`py-2 rounded-lg text-xs font-semibold border transition-colors ${speed === option ? 'bg-indigo-600 border-indigo-500 text-white' : 'th-bg-input-alt th-border-subtle th-text-3 th-hover-surface'}`}
+                  key={speed}
+                  onClick={() => updateSettings({ speed })}
+                  className={cx(
+                    'px-3 py-1.5 rounded-md text-xs font-semibold transition-colors',
+                    dashboard.settings.speed === speed ? 'bg-indigo-600 text-white' : 'th-text-3 th-hover-surface',
+                  )}
                 >
-                  {option}×
+                  {speed}×
                 </button>
               ))}
             </div>
-            <div className="mt-5 pt-5 border-t th-border flex items-center justify-between gap-4">
-              <div>
-                <div className="text-sm font-semibold th-text-2">{t('Global Mute')}</div>
-                <p className="text-xs th-text-muted mt-1">{t('Applied to all videos in the task browser')}</p>
-              </div>
-              <button
-                onClick={() => setMuted((value) => !value)}
-                className={`px-4 py-2.5 rounded-lg border text-sm font-semibold flex items-center gap-2 transition-colors ${muted ? 'bg-rose-500/15 border-rose-500/30 text-rose-300' : 'th-bg-input-alt th-border-subtle th-text-2 th-hover-surface'}`}
-              >
-                {muted ? <VolumeX className="w-4 h-4" /> : <Volume2 className="w-4 h-4" />}
-                {muted ? t('Muted') : t('Sound On')}
-              </button>
-            </div>
-          </div>
-        </section>
-      </div>
-
-      <section className="mb-6 th-bg-card border th-border rounded-xl overflow-hidden shadow-2xl">
-        <div className="px-6 py-4 border-b th-border flex items-center gap-3 th-bg-surface-h">
-          <ShieldCheck className="w-5 h-5 text-indigo-400" />
-          <h2 className="text-sm font-bold tracking-tighter th-text-2 uppercase">{t('Background Playback Compatibility')}</h2>
-        </div>
-        <div className="px-6 py-5 flex flex-col lg:flex-row lg:items-center justify-between gap-5">
-          <div className="flex items-start gap-4 max-w-3xl">
-            <div className={`mt-0.5 w-10 h-10 rounded-lg flex items-center justify-center border ${compact ? 'bg-indigo-500/15 border-indigo-500/30' : 'th-bg-surface th-border-subtle'}`}>
-              <PictureInPicture2 className={`w-5 h-5 ${compact ? 'text-indigo-400' : 'th-text-3'}`} />
-            </div>
-            <div>
-              <h3 className="text-sm font-semibold th-text-2 mb-1">{t('Focus mini window')}</h3>
-              <p className="text-sm th-text-muted leading-relaxed">{t('Keeps a small always-on-top WebView visible and filters common blur/visibility pause handlers. This is more reliable than true OS minimization, which may throttle the webpage.')}</p>
-            </div>
-          </div>
-          <div className="flex items-center gap-3 shrink-0">
-            <button onClick={changeCompactMode} className={`px-4 py-2.5 rounded-lg text-sm font-semibold flex items-center gap-2 border transition-colors ${compact ? 'bg-indigo-600 border-indigo-500 text-white' : 'th-bg-input-alt th-border-subtle th-text-2 th-hover-surface'}`}>
-              <PictureInPicture2 className="w-4 h-4" />
-              {compact ? t('Restore Full Window') : t('Enable Mini Window')}
+            <button
+              onClick={() => updateSettings({ muted: !dashboard.settings.muted })}
+              className={cx(
+                'px-3 py-2 rounded-lg border text-xs font-semibold flex items-center gap-2',
+                dashboard.settings.muted
+                  ? 'bg-rose-500/10 border-rose-500/25 text-rose-400'
+                  : 'th-bg-input-alt th-border-subtle th-text-2',
+              )}
+            >
+              {dashboard.settings.muted ? <VolumeX className="w-3.5 h-3.5" /> : <Volume2 className="w-3.5 h-3.5" />}
+              {dashboard.settings.muted ? '静音' : '声音开启'}
             </button>
-            {windowStatus.open && (
-              <button onClick={closePlayer} className="px-4 py-2.5 rounded-lg text-sm font-semibold flex items-center gap-2 border border-rose-500/30 text-rose-300 hover:bg-rose-500/10 transition-colors">
-                <Square className="w-4 h-4" />
-                {t('Close Player')}
+            <label className="flex items-center gap-2 text-xs th-text-3 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={dashboard.settings.crossSiteParallel}
+                onChange={(event) => updateSettings({ crossSiteParallel: event.target.checked })}
+                className="accent-indigo-500"
+              />
+              跨站并行（最多 2 路）
+            </label>
+            {dashboard.settings.running ? (
+              <button
+                onClick={() => void runAction('pause', () => invoke('pause_video_queue'), '队列已暂停。')}
+                className="px-4 py-2.5 rounded-lg border border-amber-500/30 bg-amber-500/10 text-amber-300 text-sm font-semibold flex items-center gap-2"
+              >
+                <Pause className="w-4 h-4" />
+                暂停队列
+              </button>
+            ) : (
+              <button
+                onClick={() => void runAction('start', async () => {
+                  await invoke('start_video_queue');
+                  await invoke('tick_video_queue');
+                }, '队列已开始运行。')}
+                disabled={dashboard.stats.pending === 0}
+                className="px-4 py-2.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 text-white text-sm font-semibold flex items-center gap-2"
+              >
+                <Play className="w-4 h-4 fill-current" />
+                开始队列
               </button>
             )}
           </div>
         </div>
       </section>
 
-      <section className="th-bg-card border th-border rounded-xl overflow-hidden shadow-2xl">
-        <div className="px-6 py-4 border-b th-border flex items-center justify-between th-bg-surface-h">
-          <div className="flex items-center gap-3">
-            <BookmarkPlus className="w-5 h-5 text-indigo-400" />
-            <h2 className="text-sm font-bold tracking-tighter th-text-2 uppercase">{t('Saved Learning Links')}</h2>
+      <section className="mb-5 rounded-xl border border-orange-500/25 bg-orange-500/10 px-5 py-4">
+        <div className="flex items-start gap-3">
+          <ShieldCheck className="w-5 h-5 text-orange-400 shrink-0 mt-0.5" />
+          <div>
+            <h3 className="text-sm font-semibold text-orange-300">本人处理边界</h3>
+            <p className="text-xs text-orange-200/70 mt-1 leading-relaxed">
+              考试不会自动答题；翻页课件与知识材料本期不会自动点击。它们会保留在专题进度中，完成后使用“同步专题”读取平台的“已考试 / 已完成 / 100%”状态。
+            </p>
           </div>
-          <span className="text-xs th-text-muted">{bookmarks.length} {t('items')}</span>
+        </div>
+      </section>
+
+      <section className="th-bg-card border th-border rounded-xl overflow-hidden shadow-xl">
+        <div className="px-5 py-4 border-b th-border flex items-center justify-between th-bg-surface-h">
+          <div className="flex items-center gap-2">
+            <BookOpen className="w-4 h-4 text-indigo-400" />
+            <h2 className="text-sm font-semibold th-text-2">已导入专题</h2>
+          </div>
+          <span className="text-xs th-text-muted">{dashboard.topics.length} 个专题</span>
         </div>
 
-        {bookmarks.length === 0 ? (
-          <div className="py-14 text-center">
-            <BookmarkPlus className="w-10 h-10 th-text-ghost mx-auto mb-3" />
-            <p className="text-sm th-text-muted">{t('No teaching links saved yet.')}</p>
+        {dashboard.topics.length === 0 ? (
+          <div className="py-16 text-center px-6">
+            <BookOpen className="w-10 h-10 th-text-ghost mx-auto mb-3" />
+            <p className="text-sm th-text-3">还没有导入专题</p>
+            <p className="text-xs th-text-muted mt-2">先登录平台，进入专题课程列表页，然后点击“导入当前专题”。</p>
           </div>
         ) : (
           <div className="divide-y th-divide">
-            {bookmarks.map((bookmark) => (
-              <div key={bookmark.id} className="px-6 py-4 flex items-center gap-4 th-hover-surface transition-colors">
-                <button onClick={() => openVideo(bookmark.url)} className="w-10 h-10 rounded-lg bg-indigo-500/10 border border-indigo-500/20 flex items-center justify-center text-indigo-400 hover:bg-indigo-500/20 transition-colors shrink-0" title={t('Open Browser')}>
-                  <Play className="w-4 h-4 fill-current" />
-                </button>
-                <div className="min-w-0 flex-1">
-                  {editingId === bookmark.id ? (
-                    <div className="flex items-center gap-2">
-                      <input
-                        autoFocus
-                        value={editingName}
-                        onChange={(event) => setEditingName(event.target.value)}
-                        onKeyDown={(event) => { if (event.key === 'Enter') saveRename(bookmark.id); }}
-                        className="w-full max-w-md th-bg-input border th-border-subtle th-text-2 rounded-md px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/50 select-text"
-                      />
-                      <button onClick={() => saveRename(bookmark.id)} className="p-2 text-emerald-400 hover:bg-emerald-500/10 rounded-md"><Check className="w-4 h-4" /></button>
-                      <button onClick={() => setEditingId(null)} className="p-2 th-text-muted th-hover-surface rounded-md"><X className="w-4 h-4" /></button>
+            {dashboard.topics.map((topic) => {
+              const expanded = expandedTopics.has(topic.id);
+              const providerName = topic.provider === 'ulearn' ? '银联乐学' : '银商学堂';
+              const denominator = topic.totalCount || topic.courses.length;
+              const numerator = topic.completedCount || topic.courses.filter((course) => course.status === 'completed').length;
+              return (
+                <div key={topic.id}>
+                  <div className="px-5 py-4 flex items-center gap-4 th-hover-surface">
+                    <button
+                      onClick={() => toggleTopic(topic.id)}
+                      className="p-1 rounded-md th-text-muted th-hover-surface"
+                      aria-label={expanded ? '收起专题' : '展开专题'}
+                    >
+                      {expanded ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
+                    </button>
+                    <div className="min-w-0 flex-1">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="text-[11px] px-2 py-0.5 rounded bg-indigo-500/10 text-indigo-400 border border-indigo-500/20">
+                          {providerName}
+                        </span>
+                        <h3 className="text-sm font-semibold th-text-2 truncate">{topic.title}</h3>
+                      </div>
+                      <div className="mt-2 flex items-center gap-3">
+                        <div className="h-1.5 rounded-full th-bg-surface flex-1 max-w-sm overflow-hidden">
+                          <div className="h-full bg-emerald-500 rounded-full" style={{ width: String(Math.min(100, topic.progress)) + '%' }} />
+                        </div>
+                        <span className="text-xs th-text-muted tabular-nums">
+                          {numerator}/{denominator} · {Math.round(topic.progress)}%
+                        </span>
+                        <span className="text-[11px] th-text-faint hidden lg:inline">同步于 {formatSyncTime(topic.lastSyncedAt)}</span>
+                      </div>
                     </div>
-                  ) : (
-                    <>
-                      <div className="text-sm font-semibold th-text-2 truncate">{bookmark.name}</div>
-                      <div className="text-xs th-text-muted truncate mt-1 select-text">{bookmark.url}</div>
-                    </>
+                    <div className="flex items-center gap-1 shrink-0">
+                      <button
+                        onClick={() => void syncTopic(topic)}
+                        className="p-2 rounded-lg th-text-muted hover:text-indigo-400 th-hover-surface"
+                        title="同步专题"
+                      >
+                        <RefreshCw className={cx('w-4 h-4', busyKey === 'sync-' + topic.id && 'animate-spin')} />
+                      </button>
+                      <button
+                        onClick={() => {
+                          if (!window.confirm('确定从管理台移除“' + topic.title + '”吗？平台学习记录不会被删除。')) return;
+                          void runAction(
+                            'remove-topic',
+                            () => invoke('remove_video_topic', { topicId: topic.id }),
+                            '专题已从管理台移除。',
+                          );
+                        }}
+                        className="p-2 rounded-lg th-text-muted hover:text-rose-400 hover:bg-rose-500/10"
+                        title="从管理台移除"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    </div>
+                  </div>
+
+                  {expanded && (
+                    <div className="border-t th-border bg-black/5">
+                      {topic.courses.map((course) => {
+                        const kind = KIND_META[course.kind] || KIND_META.video;
+                        const status = STATUS_META[course.status] || STATUS_META.pending;
+                        const KindIcon = kind.icon;
+                        return (
+                          <div key={course.id} className="px-6 py-3.5 ml-7 border-b last:border-b-0 th-border flex items-center gap-4">
+                            <div className={cx('w-9 h-9 rounded-lg flex items-center justify-center shrink-0', kind.classes)}>
+                              <KindIcon className="w-4 h-4" />
+                            </div>
+                            <div className="min-w-0 flex-1">
+                              <div className="flex flex-wrap items-center gap-2">
+                                <span className="text-sm font-medium th-text-2 truncate">{course.title}</span>
+                                <span className={cx('text-[10px] px-1.5 py-0.5 rounded border', status.classes)}>{status.label}</span>
+                                <span className="text-[10px] th-text-muted">{kind.label}</span>
+                              </div>
+                              <div className="flex flex-wrap items-center gap-3 mt-1 text-[11px] th-text-muted">
+                                {course.sectionTitle && <span>{course.sectionTitle}</span>}
+                                <span className="flex items-center gap-1"><Clock3 className="w-3 h-3" />{formatDuration(course.durationSeconds)}</span>
+                                <span>平台进度 {Math.round(course.progress)}%</span>
+                                {course.lastError && (
+                                  <span className="text-rose-400 flex items-center gap-1">
+                                    <AlertTriangle className="w-3 h-3" />{course.lastError}
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+                            <div className="flex items-center gap-2 shrink-0">
+                              {(course.kind !== 'video' || course.status === 'attention') && course.status !== 'completed' && (
+                                <button
+                                  onClick={() => void runAction(
+                                    'open-course-' + course.id,
+                                    () => invoke('open_video_course', { courseId: course.id }),
+                                  )}
+                                  className="px-3 py-1.5 rounded-md border th-border-subtle th-bg-input-alt th-text-2 text-xs font-semibold flex items-center gap-1.5 th-hover-surface"
+                                >
+                                  <ExternalLink className="w-3.5 h-3.5" />
+                                  {course.kind === 'exam' ? '打开考试' : course.kind === 'slides' ? '打开课件' : '打开内容'}
+                                </button>
+                              )}
+                              {course.status === 'attention' && course.kind === 'video' && (
+                                <button
+                                  onClick={() => void runAction(
+                                    'retry-' + course.id,
+                                    () => invoke('retry_video_course', { courseId: course.id }),
+                                    '课程已重新加入队列。',
+                                  )}
+                                  className="px-3 py-1.5 rounded-md border border-indigo-500/25 bg-indigo-500/10 text-indigo-400 text-xs font-semibold"
+                                >
+                                  重试
+                                </button>
+                              )}
+                              {course.status === 'playing' && <Loader2 className="w-4 h-4 animate-spin text-indigo-400" />}
+                              {course.status === 'completed' && <CheckCircle2 className="w-5 h-5 text-emerald-400" />}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
                   )}
                 </div>
-                {editingId !== bookmark.id && (
-                  <div className="flex items-center gap-1 shrink-0">
-                    <button onClick={() => { setEditingId(bookmark.id); setEditingName(bookmark.name); }} className="p-2 th-text-muted hover:text-indigo-400 th-hover-surface rounded-md transition-colors" title={t('Rename')}>
-                      <Pencil className="w-4 h-4" />
-                    </button>
-                    <button onClick={() => setBookmarks((items) => items.filter((item) => item.id !== bookmark.id))} className="p-2 th-text-muted hover:text-rose-400 hover:bg-rose-500/10 rounded-md transition-colors" title={t('Delete')}>
-                      <Trash2 className="w-4 h-4" />
-                    </button>
-                  </div>
-                )}
-              </div>
-            ))}
+              );
+            })}
           </div>
         )}
       </section>
