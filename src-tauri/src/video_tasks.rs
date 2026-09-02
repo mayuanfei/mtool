@@ -2,20 +2,33 @@ use base64::{engine::general_purpose::STANDARD, Engine as _};
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use tauri::{AppHandle, Manager, WebviewUrl, WebviewWindowBuilder};
 
 const ULEARN_HOME: &str = "https://ulearn.cup.com.cn/home";
-const MERCHANT_HOME: &str = "https://ysstudy.lzdxedu.com/login";
+const BRIDGE_CAPTURE_START_PREFIX: &str = "MTOOL_CAPTURE_START|";
 const BRIDGE_CAPTURE_PREFIX: &str = "MTOOL_CAPTURE|";
 const BRIDGE_MEDIA_PREFIX: &str = "MTOOL_MEDIA|";
-const CAPTURE_CHUNK_SIZE: usize = 320;
+const CAPTURE_CHUNK_SIZE: usize = 800;
 const CAPTURE_CHUNK_INTERVAL_MS: u64 = 100;
+const CAPTURE_POLL_INTERVAL_MS: u64 = 50;
+const CAPTURE_START_TIMEOUT_MS: u64 = 8_000;
+const CAPTURE_SCAN_TIMEOUT_MS: u64 = 30_000;
+const CAPTURE_IDLE_TIMEOUT_MS: u64 = 5_000;
+const CAPTURE_TOTAL_TIMEOUT_MS: u64 = 60_000;
 static CAPTURE_COUNTER: AtomicU64 = AtomicU64::new(1);
+
+fn decode_obfuscated_url(encoded: &str) -> String {
+    STANDARD
+        .decode(encoded)
+        .ok()
+        .and_then(|bytes| String::from_utf8(bytes).ok())
+        .unwrap_or_default()
+}
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
 enum Provider {
@@ -42,19 +55,28 @@ impl Provider {
     fn name(self) -> &'static str {
         match self {
             Self::Ulearn => "银联乐学",
-            Self::Merchant => "银商学堂",
+            Self::Merchant => "YS学堂",
         }
     }
 
-    fn home(self) -> &'static str {
+    fn home(self) -> String {
         match self {
-            Self::Ulearn => ULEARN_HOME,
-            Self::Merchant => MERCHANT_HOME,
+            Self::Ulearn => ULEARN_HOME.to_string(),
+            // 运行时解码 "https://ys.../login"
+            Self::Merchant => decode_obfuscated_url("aHR0cHM6Ly95c3N0dWR5Lmx6ZHhlZHUuY29tL2xvZ2lu"),
         }
+    }
+
+    fn player_label(self) -> String {
+        format!("video-task-{}-player", self.key())
+    }
+
+    fn browser_label(self) -> String {
+        format!("video-task-{}-browser", self.key())
     }
 
     fn label(self) -> String {
-        format!("video-task-{}", self.key())
+        self.player_label()
     }
 }
 
@@ -112,6 +134,8 @@ struct CaptureBuffer {
 
 #[derive(Default)]
 struct CaptureExchange {
+    active_requests: HashSet<String>,
+    started_requests: HashSet<String>,
     buffers: HashMap<String, CaptureBuffer>,
     completed: HashMap<String, Result<PageTopicCapture, String>>,
 }
@@ -124,6 +148,8 @@ struct ActiveCourse {
     phase: String,
     phase_since: i64,
     last_media_at: i64,
+    current_time: f64,
+    duration: f64,
 }
 
 #[derive(Default)]
@@ -169,6 +195,10 @@ struct CourseRecord {
     url: String,
     locator: String,
     kind: String,
+    title: String,
+    duration_seconds: i64,
+    progress: f64,
+    sort_order: i64,
 }
 
 #[derive(Serialize)]
@@ -273,7 +303,10 @@ fn provider_accepts_url(provider: Provider, url: &tauri::Url) -> bool {
     };
     match provider {
         Provider::Ulearn => host == "cup.com.cn" || host.ends_with(".cup.com.cn"),
-        Provider::Merchant => host == "lzdxedu.com" || host.ends_with(".lzdxedu.com"),
+        Provider::Merchant => {
+            let domain = decode_obfuscated_url("bHpkeGVkdS5jb20=");
+            host == domain || host.ends_with(&format!(".{domain}"))
+        }
     }
 }
 
@@ -321,8 +354,8 @@ fn init_db(path: &PathBuf) -> Result<(), String> {
     .map_err(|error| format!("初始化视频任务数据库失败: {error}"))?;
     conn.execute(
         "UPDATE video_courses
-         SET status='pending',last_error='上次运行被中断，已重新加入队列'
-         WHERE kind='video' AND status IN('playing','verifying')",
+         SET status='pending',last_error=NULL
+         WHERE kind='video' AND status IN('opening','playing','verifying')",
         [],
     )
     .map_err(|error| format!("恢复未完成视频任务失败: {error}"))?;
@@ -361,7 +394,14 @@ fn bridge_script(provider: Provider, speed: f64, muted: bool) -> String {
 (() => {
   if (window.__MTOOL_LEARNING_BRIDGE__) return;
   const provider = "__PROVIDER__";
-  const state = { speed: __SPEED__, muted: __MUTED__, tracked: new WeakSet() };
+  const homeUrl = "__HOME_URL__";
+  const state = {
+    speed: __SPEED__,
+    muted: __MUTED__,
+    autoPlay: false,
+    tracked: new WeakSet(),
+  };
+
   const setTitleMessage = (message) => {
     const previous = document.title;
     document.title = message;
@@ -369,49 +409,408 @@ fn bridge_script(provider: Provider, speed: f64, muted: bool) -> String {
       if (document.title === message) document.title = previous;
     }, 80);
   };
+
   const report = (eventName, media) => {
-    const message = "MTOOL_MEDIA|" + provider + "|" + eventName + "|" +
-      (Number(media.currentTime) || 0) + "|" + (Number(media.duration) || 0);
+    const cur = Number(media.currentTime) || 0;
+    const dur = Number(media.duration) || 0;
+    const message = "MTOOL_MEDIA|" + provider + "|" + eventName + "|" + cur + "|" + dur;
     if (window.top === window) setTitleMessage(message);
     else {
       try { window.top.postMessage({ __mtoolMedia: message }, "*"); } catch (_) {}
     }
   };
+
   if (window.top === window) {
     window.addEventListener("message", (event) => {
       if (event.data && event.data.__mtoolMedia) setTitleMessage(event.data.__mtoolMedia);
     });
+
+    // 快捷键支持：Alt + ← 后退，Alt + → 前进
+    window.addEventListener("keydown", (e) => {
+      if ((e.altKey || e.metaKey) && e.key === "ArrowLeft") {
+        e.preventDefault();
+        window.history.back();
+      } else if ((e.altKey || e.metaKey) && e.key === "ArrowRight") {
+        e.preventDefault();
+        window.history.forward();
+      }
+    });
   }
+
+  const simulateFullClick = (el) => {
+    if (!el) return;
+    try {
+      const rect = el.getBoundingClientRect();
+      const x = rect.left + rect.width / 2;
+      const y = rect.top + rect.height / 2;
+      const eventInit = {
+        bubbles: true,
+        cancelable: true,
+        view: window,
+        clientX: x,
+        clientY: y,
+        screenX: x,
+        screenY: y,
+        button: 0,
+        buttons: 1,
+      };
+      el.dispatchEvent(new PointerEvent("pointerdown", eventInit));
+      el.dispatchEvent(new MouseEvent("mousedown", eventInit));
+      el.dispatchEvent(new PointerEvent("pointerup", eventInit));
+      el.dispatchEvent(new MouseEvent("mouseup", eventInit));
+      el.dispatchEvent(new MouseEvent("click", eventInit));
+      if (typeof el.click === "function") el.click();
+    } catch (_) {
+      try { el.click(); } catch (_) {}
+    }
+  };
+
   const track = (media) => {
     if (state.tracked.has(media)) return;
     state.tracked.add(media);
-    ["play", "pause", "ended", "error"].forEach((name) => {
+    ["play", "playing", "pause", "ended", "error", "canplay", "canplaythrough", "loadedmetadata", "durationchange"].forEach((name) => {
       media.addEventListener(name, () => report(name, media), true);
     });
     media.addEventListener("timeupdate", () => {
-      if (!media.__mtoolLastReport || Date.now() - media.__mtoolLastReport > 5000) {
+      if (!media.__mtoolLastReport || Date.now() - media.__mtoolLastReport > 800) {
         media.__mtoolLastReport = Date.now();
         report("timeupdate", media);
       }
+      if (media.duration > 5 && (media.currentTime >= media.duration - 1.5 || (media.currentTime / media.duration >= 0.98))) {
+        report("ended", media);
+      }
+    }, true);
+    media.addEventListener("ratechange", () => {
+      if (Math.abs(media.playbackRate - state.speed) > 0.05) {
+        try { media.playbackRate = state.speed; } catch (_) {}
+      }
     }, true);
   };
-  const apply = () => {
-    document.querySelectorAll("video,audio").forEach((media) => {
-      track(media);
-      try { media.defaultPlaybackRate = state.speed; media.playbackRate = state.speed; } catch (_) {}
-      try { media.muted = state.muted; } catch (_) {}
-    });
+
+  const isMediaReallyAdvancing = (media) => {
+    if (!media || media.paused || media.ended) return false;
+    const nowTs = Date.now();
+    if (media.__lastTime === undefined || Math.abs(media.currentTime - media.__lastTime) > 0.05) {
+      media.__lastTime = media.currentTime;
+      media.__lastTimeChangedAt = nowTs;
+      return true;
+    }
+    if (nowTs - (media.__lastTimeChangedAt || nowTs) > 2500) {
+      return false;
+    }
+    return true;
   };
-  state.update = (speedValue, mutedValue) => {
+
+  const isAnyMediaPlaying = (docs) => {
+    for (const doc of docs) {
+      const medias = doc.querySelectorAll("video, audio");
+      for (const media of medias) {
+        if (isMediaReallyAdvancing(media)) {
+          return true;
+        }
+      }
+    }
+    return false;
+  };
+
+  const tryPlayMedia = (media) => {
+    if (!media || media.ended) return;
+    try {
+      media.defaultPlaybackRate = state.speed;
+      media.playbackRate = state.speed;
+      media.muted = state.muted;
+      media.defaultMuted = state.muted;
+      media.setAttribute("playsinline", "true");
+      media.setAttribute("webkit-playsinline", "true");
+      media.setAttribute("autoplay", "true");
+    } catch (_) {}
+
+    try {
+      media.muted = true;
+      const res = media.play();
+      if (res && res.then) {
+        res.then(() => {
+          if (!state.muted && !media.paused) {
+            window.setTimeout(() => { if (!media.paused) media.muted = false; }, 300);
+          }
+        }).catch(() => {});
+      }
+    } catch (_) {}
+  };
+
+  const triggerPlayUI = (doc) => {
+    if (!doc) return;
+
+    // 1. 自动处理视频中间弹出的互动问答题（选择第一项并提交）
+    try {
+      const options = doc.querySelectorAll("input[type='radio'], input[type='checkbox'], [class*='quiz'] [class*='option'], [class*='question'] [class*='item'], [class*='answer-item']");
+      if (options.length > 0) {
+        for (const opt of options) {
+          if (opt.offsetWidth > 0 || opt.offsetHeight > 0 || opt.getClientRects().length > 0) {
+            simulateFullClick(opt);
+            if (typeof opt.click === "function") opt.click();
+            break;
+          }
+        }
+      }
+    } catch (_) {}
+
+    // 2. 全覆盖识别防挂机、继续、确定、提交等弹窗按钮
+    try {
+      const allButtons = doc.querySelectorAll("button, a, [role='button'], input[type='button'], input[type='submit'], .ant-btn, .el-button, [class*='btn'], [class*='button']");
+      allButtons.forEach((btn) => {
+        if (btn.offsetWidth === 0 && btn.offsetHeight === 0 && btn.getClientRects().length === 0) return;
+        // 排除底部的播放器控制条切换键
+        if (btn.matches(".prism-play-btn, .vjs-play-control, [class*='play-btn'], [class*='playBtn'], [class*='volume']")) return;
+        const text = (btn.innerText || btn.value || btn.title || "").replace(/\s+/g, "");
+        if (/^(继续学习|继续播放|我知道了|确定|确认|知道了|继续|提交|完成|立即学习|开始学习|好的|交卷|下一步)$/.test(text)) {
+          simulateFullClick(btn);
+        }
+      });
+    } catch (_) {}
+
+    // 3. 弹窗右上角关闭按钮
+    try {
+      const closeButtons = doc.querySelectorAll(".ant-modal-close, .el-dialog__headerbtn, .layui-layer-close, [class*='dialog'] [class*='close'], [class*='modal'] [class*='close'], [aria-label='Close']");
+      closeButtons.forEach((btn) => {
+        if (btn.offsetWidth > 0 || btn.offsetHeight > 0 || btn.getClientRects().length > 0) {
+          simulateFullClick(btn);
+        }
+      });
+    } catch (_) {}
+
+    // 4. 居中大播放按钮
+    const bigPlaySelectors = [
+      ".prism-big-play-btn", ".vjs-big-play-button", ".pv-big-play-btn",
+      ".xgplayer-start", ".tcplayer-center-play", "[class*='big-play']",
+      "[class*='center-play']", "[class*='play-mask']", "[class*='player-mask']"
+    ];
+    try {
+      doc.querySelectorAll(bigPlaySelectors.join(",")).forEach((btn) => {
+        if (btn.offsetWidth > 0 || btn.offsetHeight > 0 || btn.getClientRects().length > 0) {
+          simulateFullClick(btn);
+        }
+      });
+    } catch (_) {}
+
+    // 5. 播放器全局 API
+    try {
+      if (window.player && typeof window.player.play === "function") window.player.play();
+      if (window.aliplayer && typeof window.aliplayer.play === "function") window.aliplayer.play();
+      if (window.videoPlayer && typeof window.videoPlayer.play === "function") window.videoPlayer.play();
+    } catch (_) {}
+  };
+
+  const getAccessibleDocs = () => {
+    const docs = [document];
+    try {
+      document.querySelectorAll("iframe").forEach((frame) => {
+        try {
+          if (frame.contentDocument && !docs.includes(frame.contentDocument)) {
+            docs.push(frame.contentDocument);
+          }
+        } catch (_) {}
+      });
+    } catch (_) {}
+    return docs;
+  };
+
+  const injectNavToolbar = () => {
+    if (window.top !== window || document.getElementById("__mtool_nav_toolbar__")) return;
+    const bar = document.createElement("div");
+    bar.id = "__mtool_nav_toolbar__";
+    bar.setAttribute("style", `
+      position: fixed;
+      bottom: 24px;
+      left: 24px;
+      z-index: 2147483647;
+      display: flex;
+      align-items: center;
+      gap: 3px;
+      padding: 4px 6px;
+      background: rgba(15, 23, 42, 0.88);
+      backdrop-filter: blur(16px);
+      -webkit-backdrop-filter: blur(16px);
+      border: 1px solid rgba(255, 255, 255, 0.18);
+      border-radius: 9999px;
+      box-shadow: 0 8px 24px rgba(0, 0, 0, 0.38);
+      color: #f8fafc;
+      font-size: 13px;
+      user-select: none;
+      -webkit-user-select: none;
+      transition: opacity 0.2s;
+    `);
+
+    const createBtn = (title, svgPath, onClick) => {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.title = title;
+      btn.setAttribute("style", `
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        width: 28px;
+        height: 28px;
+        border: none;
+        background: transparent;
+        color: #e2e8f0;
+        border-radius: 50%;
+        cursor: pointer;
+        outline: none;
+        padding: 0;
+        transition: background 0.15s, color 0.15s, transform 0.1s;
+      `);
+      btn.innerHTML = `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">${svgPath}</svg>`;
+      btn.onmouseenter = () => { btn.style.background = "rgba(255,255,255,0.18)"; btn.style.color = "#ffffff"; };
+      btn.onmouseleave = () => { btn.style.background = "transparent"; btn.style.color = "#e2e8f0"; };
+      btn.onmousedown = () => { btn.style.transform = "scale(0.92)"; };
+      btn.onmouseup = () => { btn.style.transform = "scale(1)"; };
+      btn.onclick = (e) => { e.preventDefault(); e.stopPropagation(); onClick(); };
+      return btn;
+    };
+
+    // 拖拽手柄
+    const handle = document.createElement("div");
+    handle.title = "按住可拖动位置";
+    handle.setAttribute("style", `
+      cursor: grab;
+      padding: 0 4px;
+      display: flex;
+      align-items: center;
+      color: #94a3b8;
+    `);
+    handle.innerHTML = `<svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor"><circle cx="9" cy="6" r="2"/><circle cx="15" cy="6" r="2"/><circle cx="9" cy="12" r="2"/><circle cx="15" cy="12" r="2"/><circle cx="9" cy="18" r="2"/><circle cx="15" cy="18" r="2"/></svg>`;
+
+    let isDragging = false;
+    let startX = 0, startY = 0, initialLeft = 0, initialTop = 0;
+
+    handle.onmousedown = (e) => {
+      isDragging = true;
+      handle.style.cursor = "grabbing";
+      const rect = bar.getBoundingClientRect();
+      startX = e.clientX;
+      startY = e.clientY;
+      initialLeft = rect.left;
+      initialTop = rect.top;
+      bar.style.bottom = "auto";
+      bar.style.right = "auto";
+      bar.style.left = initialLeft + "px";
+      bar.style.top = initialTop + "px";
+      e.preventDefault();
+    };
+
+    window.addEventListener("mousemove", (e) => {
+      if (!isDragging) return;
+      const dx = e.clientX - startX;
+      const dy = e.clientY - startY;
+      bar.style.left = Math.max(8, Math.min(window.innerWidth - bar.offsetWidth - 8, initialLeft + dx)) + "px";
+      bar.style.top = Math.max(8, Math.min(window.innerHeight - bar.offsetHeight - 8, initialTop + dy)) + "px";
+    });
+
+    window.addEventListener("mouseup", () => {
+      if (isDragging) {
+        isDragging = false;
+        handle.style.cursor = "grab";
+      }
+    });
+
+    // 后退 (Chevron Left)
+    const backBtn = createBtn("后退 (Alt+←)", '<path d="m15 18-6-6 6-6"/>', () => window.history.back());
+    // 前进 (Chevron Right)
+    const forwardBtn = createBtn("前进 (Alt+→)", '<path d="m9 18 6-6-6-6"/>', () => window.history.forward());
+    // 刷新
+    const refreshBtn = createBtn("刷新页面", '<path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M8 16H3v5"/>', () => window.location.reload());
+    // 首页
+    const homeBtn = createBtn("返回平台首页", '<path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/>', () => { window.location.href = homeUrl; });
+
+    bar.appendChild(handle);
+    bar.appendChild(backBtn);
+    bar.appendChild(forwardBtn);
+    bar.appendChild(refreshBtn);
+    bar.appendChild(homeBtn);
+
+    const mount = () => {
+      if (document.body && !document.getElementById("__mtool_nav_toolbar__")) {
+        document.body.appendChild(bar);
+      }
+    };
+    if (document.body) mount();
+    else document.addEventListener("DOMContentLoaded", mount, { once: true });
+  };
+
+  const apply = (autoPlay) => {
+    injectNavToolbar();
+    const shouldPlay = Boolean(autoPlay || state.autoPlay);
+    const docs = getAccessibleDocs();
+
+    // 0. 实时检测平台是否已弹出“您已完成当前资源的学习”等提示，立即触发完播流转
+    for (const doc of docs) {
+      try {
+        const fullText = (doc.body ? doc.body.innerText || "" : "").replace(/\s+/g, "");
+        if (
+          fullText.includes("您已完成当前资源的学习") ||
+          fullText.includes("已完成当前资源的学习") ||
+          fullText.includes("当前资源学习完成") ||
+          fullText.includes("恭喜您已完成") ||
+          fullText.includes("恭喜完成学习") ||
+          fullText.includes("已完成该课程学习") ||
+          fullText.includes("已达到学时要求") ||
+          fullText.includes("学习已完成")
+        ) {
+          report("ended", { currentTime: 100, duration: 100 });
+          return;
+        }
+      } catch (_) {}
+    }
+
+    // 1. 维持倍速与事件跟踪
+    docs.forEach((doc) => {
+      doc.querySelectorAll("video, audio").forEach((media) => {
+        track(media);
+        if (Math.abs(media.playbackRate - state.speed) > 0.05) {
+          try { media.defaultPlaybackRate = state.speed; media.playbackRate = state.speed; } catch (_) {}
+        }
+        if (media.muted !== state.muted && !media.paused) {
+          try { media.muted = state.muted; } catch (_) {}
+        }
+      });
+    });
+
+    if (!shouldPlay) return;
+
+    // 2. 如果已经有视频在正常播放中，绝不要触发任何点击，避免把正在播放的视频点暂停！
+    if (isAnyMediaPlaying(docs)) {
+      return;
+    }
+
+    // 3. 所有视频都处于暂停状态时，先尝试原生 play()
+    docs.forEach((doc) => {
+      doc.querySelectorAll("video, audio").forEach((media) => {
+        if (media.paused && !media.ended) {
+          tryPlayMedia(media);
+        }
+      });
+    });
+
+    // 4. 若依然处于暂停，尝试触发大播放按钮与弹窗
+    if (!isAnyMediaPlaying(docs)) {
+      docs.forEach((doc) => {
+        triggerPlayUI(doc);
+      });
+    }
+  };
+
+  state.update = (speedValue, mutedValue, autoPlay) => {
     state.speed = Math.min(2, Math.max(1, Number(speedValue) || 2));
     state.muted = Boolean(mutedValue);
-    apply();
+    if (autoPlay !== undefined) state.autoPlay = Boolean(autoPlay);
+    apply(Boolean(autoPlay));
   };
+
   Object.defineProperty(window, "__MTOOL_LEARNING_BRIDGE__", { value: state });
   const start = () => {
-    apply();
-    new MutationObserver(apply).observe(document.documentElement || document, { childList: true, subtree: true });
-    window.setInterval(apply, 1000);
+    apply(true);
+    window.setInterval(() => apply(false), 1500);
   };
   if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", start, { once: true });
   else start();
@@ -419,8 +818,135 @@ fn bridge_script(provider: Provider, speed: f64, muted: bool) -> String {
 "##;
     TEMPLATE
         .replace("__PROVIDER__", provider.key())
+        .replace("__HOME_URL__", &provider.home())
         .replace("__SPEED__", &clamp_speed(speed).to_string())
         .replace("__MUTED__", if muted { "true" } else { "false" })
+}
+
+fn browser_nav_script(provider: Provider) -> String {
+    const TEMPLATE: &str = r##"
+(() => {
+  if (window.top !== window || document.getElementById("__mtool_nav_toolbar__")) return;
+  const homeUrl = "__HOME_URL__";
+  const bar = document.createElement("div");
+  bar.id = "__mtool_nav_toolbar__";
+  bar.setAttribute("style", `
+    position: fixed;
+    bottom: 24px;
+    left: 24px;
+    z-index: 2147483647;
+    display: flex;
+    align-items: center;
+    gap: 3px;
+    padding: 4px 6px;
+    background: rgba(15, 23, 42, 0.88);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    border: 1px solid rgba(255, 255, 255, 0.18);
+    border-radius: 9999px;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.38);
+    color: #f8fafc;
+    font-size: 13px;
+    user-select: none;
+    -webkit-user-select: none;
+    transition: opacity 0.2s;
+  `);
+
+  const createBtn = (title, svgPath, onClick) => {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.title = title;
+    btn.setAttribute("style", `
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      width: 28px;
+      height: 28px;
+      border: none;
+      background: transparent;
+      color: #e2e8f0;
+      border-radius: 50%;
+      cursor: pointer;
+      outline: none;
+      padding: 0;
+      transition: background 0.15s, color 0.15s, transform 0.1s;
+    `);
+    btn.innerHTML = `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">${svgPath}</svg>`;
+    btn.onmouseenter = () => { btn.style.background = "rgba(255,255,255,0.18)"; btn.style.color = "#ffffff"; };
+    btn.onmouseleave = () => { btn.style.background = "transparent"; btn.style.color = "#e2e8f0"; };
+    btn.onmousedown = () => { btn.style.transform = "scale(0.92)"; };
+    btn.onmouseup = () => { btn.style.transform = "scale(1)"; };
+    btn.onclick = (e) => { e.preventDefault(); e.stopPropagation(); onClick(); };
+    return btn;
+  };
+
+  const handle = document.createElement("div");
+  handle.title = "按住拖动工具条";
+  handle.setAttribute("style", `
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 18px;
+    height: 28px;
+    cursor: grab;
+    color: #94a3b8;
+    padding-left: 2px;
+  `);
+  handle.innerHTML = `<svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor"><circle cx="8" cy="6" r="2"/><circle cx="16" cy="6" r="2"/><circle cx="8" cy="12" r="2"/><circle cx="16" cy="12" r="2"/><circle cx="8" cy="18" r="2"/><circle cx="16" cy="18" r="2"/></svg>`;
+
+  let isDragging = false;
+  let startX = 0, startY = 0, initialLeft = 0, initialTop = 0;
+  handle.onmousedown = (e) => {
+    isDragging = true;
+    handle.style.cursor = "grabbing";
+    const rect = bar.getBoundingClientRect();
+    startX = e.clientX;
+    startY = e.clientY;
+    initialLeft = rect.left;
+    initialTop = rect.top;
+    bar.style.bottom = "auto";
+    bar.style.right = "auto";
+    bar.style.left = initialLeft + "px";
+    bar.style.top = initialTop + "px";
+    e.preventDefault();
+  };
+
+  window.addEventListener("mousemove", (e) => {
+    if (!isDragging) return;
+    const dx = e.clientX - startX;
+    const dy = e.clientY - startY;
+    bar.style.left = Math.max(8, Math.min(window.innerWidth - bar.offsetWidth - 8, initialLeft + dx)) + "px";
+    bar.style.top = Math.max(8, Math.min(window.innerHeight - bar.offsetHeight - 8, initialTop + dy)) + "px";
+  });
+
+  window.addEventListener("mouseup", () => {
+    if (isDragging) {
+      isDragging = false;
+      handle.style.cursor = "grab";
+    }
+  });
+
+  const backBtn = createBtn("后退 (Alt+←)", '<path d="m15 18-6-6 6-6"/>', () => window.history.back());
+  const forwardBtn = createBtn("前进 (Alt+→)", '<path d="m9 18 6-6-6-6"/>', () => window.history.forward());
+  const refreshBtn = createBtn("刷新页面", '<path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M8 16H3v5"/>', () => window.location.reload());
+  const homeBtn = createBtn("返回平台首页", '<path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/>', () => { window.location.href = homeUrl; });
+
+  bar.appendChild(handle);
+  bar.appendChild(backBtn);
+  bar.appendChild(forwardBtn);
+  bar.appendChild(refreshBtn);
+  bar.appendChild(homeBtn);
+
+  const mount = () => {
+    if (document.body && !document.getElementById("__mtool_nav_toolbar__")) {
+      document.body.appendChild(bar);
+    }
+  };
+  if (document.body) mount();
+  else document.addEventListener("DOMContentLoaded", mount, { once: true });
+})();
+"##;
+    TEMPLATE.replace("__HOME_URL__", &provider.home())
 }
 
 fn update_media_script(speed: f64, muted: bool, auto_play: bool) -> String {
@@ -428,19 +954,116 @@ fn update_media_script(speed: f64, muted: bool, auto_play: bool) -> String {
         r#"(() => {{
           const speed = {};
           const muted = {};
-          if (window.__MTOOL_LEARNING_BRIDGE__) window.__MTOOL_LEARNING_BRIDGE__.update(speed, muted);
-          document.querySelectorAll("video,audio").forEach((media) => {{
-            try {{ media.defaultPlaybackRate = speed; media.playbackRate = speed; media.muted = muted; }} catch (_) {{}}
-            {}
+          const autoPlay = {};
+          if (window.__MTOOL_LEARNING_BRIDGE__) {{
+            window.__MTOOL_LEARNING_BRIDGE__.update(speed, muted, autoPlay);
+            return;
+          }}
+          const docs = [document];
+          try {{
+            document.querySelectorAll("iframe").forEach((frame) => {{
+              try {{ if (frame.contentDocument) docs.push(frame.contentDocument); }} catch (_) {{}}
+            }});
+          }} catch (_) {{}}
+          docs.forEach((doc) => {{
+            doc.querySelectorAll("video,audio").forEach((media) => {{
+              try {{
+                media.defaultPlaybackRate = speed;
+                media.playbackRate = speed;
+                media.muted = muted;
+                if (autoPlay && media.paused && !media.ended) {{
+                  media.muted = true;
+                  media.play().catch(() => {{}});
+                }}
+              }} catch (_) {{}}
+            }});
           }});
         }})();"#,
         clamp_speed(speed),
         if muted { "true" } else { "false" },
-        if auto_play {
-            "try { const result = media.play(); if (result && result.catch) result.catch(() => {}); } catch (_) {}"
-        } else {
-            ""
-        }
+        if auto_play { "true" } else { "false" }
+    )
+}
+
+fn course_click_script(title: &str, locator: &str) -> String {
+    let title_json = serde_json::to_string(title).unwrap_or_default();
+    let locator_json = serde_json::to_string(locator).unwrap_or_default();
+    format!(
+        r#"(() => {{
+          const targetTitle = {title_json};
+          const targetLocator = {locator_json};
+          const clean = (value) => String(value || "").replace(/\s+/g, " ").trim();
+
+          // 拦截 window.open 防止弹空白页
+          try {{
+            window.open = (url) => {{
+              const next = clean(url);
+              if (next && next !== "about:blank") {{
+                try {{ window.location.assign(new URL(next, window.location.href).href); }} catch (_) {{}}
+              }}
+              return window;
+            }};
+          }} catch (_) {{}}
+
+          const byLocator = targetLocator ? document.querySelector(targetLocator) : null;
+          const all = Array.from(document.querySelectorAll("body *"));
+          const byTitle = all.find((el) => clean(el.innerText) === clean(targetTitle)) ||
+            all.find((el) => {{
+              const text = clean(el.innerText);
+              return text.length <= clean(targetTitle).length + 10 && text.includes(clean(targetTitle));
+            }});
+          let target = byLocator || byTitle;
+          if (!target) return;
+
+          let card = target;
+          for (let current = target, depth = 0; current && current !== document.body && depth < 8; current = current.parentElement, depth++) {{
+            if (current.matches("a[href], [class*='card'], [class*='item'], [class*='course'], [class*='list-item'], [class*='row'], tr, li")) {{
+              card = current;
+              break;
+            }}
+          }}
+
+          try {{ card.scrollIntoView({{ block: "center", behavior: "instant" }}); }} catch (_) {{}}
+
+          const actionBtn = Array.from(card.querySelectorAll("button, a, [role='button'], div, span")).find((el) => {{
+            const t = clean(el.innerText);
+            return /^(去学习|开始学习|继续学习|立即学习|学习中|进入学习|播放)$/.test(t) ||
+                   el.matches("[class*='btn-primary'], [class*='study-btn'], [class*='play-btn'], [class*='start']");
+          }});
+
+          const anchor = card.matches("a[href]") ? card : card.querySelector("a[href]");
+          let clickTarget = actionBtn || anchor || (card.matches("button, [role='button']") ? card : null) || target;
+
+          if (clickTarget.tagName === "A" && clickTarget.getAttribute("href") && !/^javascript:/i.test(clickTarget.getAttribute("href"))) {{
+            clickTarget.removeAttribute("target");
+            try {{
+              window.location.assign(new URL(clickTarget.getAttribute("href"), window.location.href).href);
+              return;
+            }} catch (_) {{}}
+          }}
+
+          clickTarget.querySelectorAll?.("a[target]").forEach((a) => a.removeAttribute("target"));
+          if (clickTarget.matches?.("a[target]")) clickTarget.removeAttribute("target");
+          try {{
+            const rect = clickTarget.getBoundingClientRect();
+            const init = {{
+              bubbles: true,
+              cancelable: true,
+              view: window,
+              clientX: rect.left + rect.width / 2,
+              clientY: rect.top + rect.height / 2,
+              button: 0,
+            }};
+            clickTarget.dispatchEvent(new PointerEvent("pointerdown", init));
+            clickTarget.dispatchEvent(new MouseEvent("mousedown", init));
+            clickTarget.dispatchEvent(new PointerEvent("pointerup", init));
+            clickTarget.dispatchEvent(new MouseEvent("mouseup", init));
+            clickTarget.dispatchEvent(new MouseEvent("click", init));
+            if (typeof clickTarget.click === "function") clickTarget.click();
+          }} catch (_) {{
+            try {{ clickTarget.click(); }} catch (_) {{}}
+          }}
+        }})();"#
     )
 }
 
@@ -448,138 +1071,428 @@ fn capture_script(request_id: &str, provider: Provider) -> String {
     const TEMPLATE: &str = r##"
 (() => {
   const requestId = "__REQUEST_ID__";
-  const provider = "__PROVIDER__";
-  const clean = (value) => String(value || "").replace(/\s+/g, " ").trim();
-  const ownText = (element) => clean(Array.from(element.childNodes || [])
-    .filter((node) => node.nodeType === Node.TEXT_NODE).map((node) => node.textContent).join(" "));
-  const visible = (element) => {
-    const style = window.getComputedStyle(element);
-    return style.display !== "none" && style.visibility !== "hidden";
-  };
-  const cssPath = (element) => {
-    if (!element || element === document.body) return "body";
-    const parts = [];
-    let current = element;
-    while (current && current !== document.body && parts.length < 7) {
-      if (current.id) { parts.unshift("#" + CSS.escape(current.id)); break; }
-      let part = current.tagName.toLowerCase();
-      const siblings = current.parentElement ? Array.from(current.parentElement.children)
-        .filter((item) => item.tagName === current.tagName) : [];
-      if (siblings.length > 1) part += ":nth-of-type(" + (siblings.indexOf(current) + 1) + ")";
-      parts.unshift(part);
-      current = current.parentElement;
-    }
-    return parts.join(" > ");
-  };
-  const courseContainer = (marker) => {
-    let element = marker;
-    for (let depth = 0; element && depth < 8; depth++, element = element.parentElement) {
-      const text = clean(element.innerText);
-      if (text.length >= 12 && text.length <= 900) {
-        if (provider === "merchant" && /学习时长/.test(text) && /进度/.test(text)) return element;
-        if (provider === "ulearn" && /(学时|学分)/.test(text) && /(未学习|已学习|学习中)/.test(text)) return element;
-      }
-    }
-    return marker.parentElement || marker;
-  };
-  const titleFrom = (container) => {
-    const lines = String(container.innerText || "").split(/\n+/).map(clean).filter(Boolean);
-    const ignored = /^(未学习|已学习|学习中|已完成|已考试|课程|知识|考试|选修)$/;
-    const meta = /(学习时长|必修学分|选修学分|进度\s*[:：]|学时\s|学分\s)/;
-    return lines.find((line) => line.length > 2 && !ignored.test(line) && !meta.test(line)) || lines[0] || "未命名课程";
-  };
-  const linkFrom = (container) => {
-    const anchor = container.matches && container.matches("a[href]") ? container : container.querySelector("a[href]");
-    if (!anchor) return "";
-    const href = anchor.getAttribute("href") || "";
-    if (!href || /^javascript:/i.test(href)) return "";
-    try { return new URL(href, location.href).href; } catch (_) { return ""; }
-  };
-  const externalIdFrom = (container, url, locator, title) => {
-    let element = container;
-    for (let depth = 0; element && depth < 5; depth++, element = element.parentElement) {
-      const data = element.dataset || {};
-      const value = data.courseId || data.contentId || data.knowledgeId || data.resourceId || data.id;
-      if (value) return String(value);
-    }
-    return url || locator || title;
-  };
-  const sectionTitleFrom = (container) => {
-    if (provider !== "merchant") return "";
-    let current = container;
-    for (let depth = 0; current && current.parentElement && depth < 5; depth++, current = current.parentElement) {
-      const siblings = Array.from(current.parentElement.children);
-      const index = siblings.indexOf(current);
-      for (let offset = index - 1; offset >= 0; offset--) {
-        const text = clean(siblings[offset].innerText);
-        if (text && text.length <= 80 && (/^\d{1,2}\s/.test(text) || /^第.+期/.test(text))) return text;
-      }
-    }
-    return "";
-  };
-  const markers = Array.from(document.querySelectorAll("body *")).filter((element) => {
-    if (!visible(element)) return false;
-    const text = ownText(element);
-    if (provider === "merchant") return /^(已完成|已考试)$/.test(text) || /^进度\s*[:：]?\s*\d+(?:\.\d+)?%$/.test(text);
-    return /^(未学习|已学习|学习中)$/.test(text);
-  });
-  const seen = new Set();
-  const courses = [];
-  markers.forEach((marker) => {
-    const container = courseContainer(marker);
-    const text = clean(container.innerText);
-    const title = titleFrom(container);
-    const locator = cssPath(container);
-    const url = linkFrom(container);
-    const externalId = externalIdFrom(container, url, locator, title);
-    if (!title || seen.has(externalId)) return;
-    seen.add(externalId);
-    const progressMatch = text.match(/进度\s*[:：]?\s*(\d+(?:\.\d+)?)%/);
-    const progress = progressMatch ? Number(progressMatch[1]) : (/(已学习|已完成|已考试)/.test(text) ? 100 : 0);
-    const durationMatch = text.match(/学习时长\s*[:：]?\s*(\d+)\s*分钟/);
-    let kind = "video";
-    if (/考试/.test(title) || /(^|\s)考试(\s|$)/.test(text)) kind = "exam";
-    else if (/课件/.test(title)) kind = "slides";
-    else if (/(文档|阅读材料|参考资料)/.test(title)) kind = "material";
-    courses.push({
-      externalId,
-      title,
-      url,
-      locator,
-      sectionTitle: sectionTitleFrom(container),
-      kind,
-      durationSeconds: durationMatch ? Number(durationMatch[1]) * 60 : 0,
-      progress,
-      completed: progress >= 100 || /(已学习|已完成|已考试)/.test(text)
-    });
-  });
-  const bodyText = clean(document.body.innerText);
-  const topicTitle = clean((document.querySelector("h1,h2,[class*='title']") || {}).textContent) || document.title || location.hostname;
-  const topicProgressMatch = bodyText.match(/学习进度\s*[:：]?\s*(\d+(?:\.\d+)?)%/);
-  const countMatch = bodyText.match(/完成任务数\s*(\d+)\s*\/\s*(\d+)/);
-  const completedCount = countMatch ? Number(countMatch[1]) : courses.filter((item) => item.completed).length;
-  const totalCount = countMatch ? Number(countMatch[2]) : courses.length;
-  const payload = {
-    title: topicTitle,
-    url: location.href,
-    progress: topicProgressMatch ? Number(topicProgressMatch[1]) : (totalCount ? completedCount / totalCount * 100 : 0),
-    totalCount,
-    completedCount,
-    courses
-  };
-  const bytes = new TextEncoder().encode(JSON.stringify(payload));
-  let binary = "";
-  bytes.forEach((byte) => { binary += String.fromCharCode(byte); });
-  const encoded = btoa(binary);
-  const chunkSize = __CHUNK_SIZE__;
-  const chunks = encoded.match(new RegExp(".{1," + chunkSize + "}", "g")) || [""];
   const originalTitle = document.title;
-  chunks.forEach((chunk, index) => {
-    window.setTimeout(() => {
-      document.title = "MTOOL_CAPTURE|" + requestId + "|" + index + "|" + chunks.length + "|" + encoded.length + "|" + chunk;
-      if (index === chunks.length - 1) window.setTimeout(() => { document.title = originalTitle; }, __RESTORE_DELAY__);
-    }, index * __CHUNK_INTERVAL__);
-  });
+  window.__MTOOL_CAPTURE_REQUEST__ = requestId;
+  document.title = "MTOOL_CAPTURE_START|" + requestId;
+  window.setTimeout(() => {
+    try {
+      const provider = "__PROVIDER__";
+    const clean = (value) => String(value || "").replace(/\s+/g, " ").trim();
+    const ownText = (element) => clean(Array.from(element.childNodes || [])
+      .filter((node) => node.nodeType === Node.TEXT_NODE).map((node) => node.textContent).join(" "));
+    const visible = (element) => {
+      if (!element) return false;
+      const style = window.getComputedStyle(element);
+      return style.display !== "none" && style.visibility !== "hidden";
+    };
+    const cssPath = (element) => {
+      if (!element || element === document.body) return "body";
+      const parts = [];
+      let current = element;
+      while (current && current !== document.body && parts.length < 7) {
+        if (current.id) { parts.unshift("#" + CSS.escape(current.id)); break; }
+        let part = current.tagName.toLowerCase();
+        const siblings = current.parentElement ? Array.from(current.parentElement.children)
+          .filter((item) => item.tagName === current.tagName) : [];
+        if (siblings.length > 1) part += ":nth-of-type(" + (siblings.indexOf(current) + 1) + ")";
+        parts.unshift(part);
+        current = current.parentElement;
+      }
+      return parts.join(" > ");
+    };
+    const countMatches = (str, regex) => (String(str || "").match(regex) || []).length;
+    const isTagOrBadge = (s) => /^(知识|课程|考试|测验|课件|文档|阅读材料|参考资料|必修|选修|必修课|选修课|必修学分|选修学分|已完成|已学习|未学习|学习中|已考试|已通过|未通过|进行中|全部|展开|收起|去学习|立即学习|开始学习|重新学习|继续学习|查看|详情|\d{1,2})$/i.test(s);
+    const isMeta = (s) => /(学习时长|必修学分|选修学分|进度\s*[:：]?|学时\s*[:：]?\s*\d+|学分\s*[:：]?\s*\d+|起止时间|得分|正确率|总分|题数|时长\s*[:：]|考试时长|课程数|浏览人数|学习人数)/i.test(s);
+    const isSiteOrUiTitle = (s) => /^(YS学堂|银联乐学|中国银联|乐学|首页|个人中心|学习中心|学习地图|考试中心|赛事中心|全部|培训管理|培训介绍|培训内容|专题介绍|课程大纲|乐学圈|我的学习|我的课程|课程详情|专题详情|全部课程|培训项目|学习任务|登录|加入自学|已加入)$/i.test(s);
+
+    const titleFrom = (container) => {
+      if (!container) return "";
+      const titleElements = Array.from(container.querySelectorAll("h1, h2, h3, h4, h5, [class*='title'], [class*='name'], [class*='text'], a"))
+        .map((el) => clean(el.innerText))
+        .filter((t) => t && t.length >= 2 && !isTagOrBadge(t) && !isMeta(t) && !/^\d{1,2}$/.test(t) && !isSiteOrUiTitle(t));
+      if (titleElements.length > 0) {
+        return titleElements[0];
+      }
+
+      const lines = String(container.innerText || "")
+        .split(/\n+/)
+        .map(clean)
+        .filter(Boolean);
+      const validLines = lines.filter((line) => line.length >= 2 && !isTagOrBadge(line) && !isMeta(line) && !isSiteOrUiTitle(line));
+      if (validLines.length > 0) {
+        return validLines[0];
+      }
+      return "";
+    };
+
+    const isCourseCard = (element) => {
+      if (!element || element === document.body) return false;
+      const text = clean(element.innerText);
+      if (text.length < 6 || text.length > 1200) return false;
+
+      const title = titleFrom(element);
+      if (!title || isTagOrBadge(title) || isMeta(title)) return false;
+
+      if (provider === "merchant") {
+        const hasMeta = /学习时长|进度|学分|已完成|已考试/.test(text) || /考试/.test(text);
+        if (!hasMeta) return false;
+        const parent = element.parentElement;
+        if (parent && parent !== document.body) {
+          const parentText = clean(parent.innerText);
+          const selfDurations = countMatches(text, /学习时长\s*[:：]?\s*\d+|必修学分/g);
+          const parentDurations = countMatches(parentText, /学习时长\s*[:：]?\s*\d+|必修学分/g);
+          if (selfDurations === 1 && parentDurations === 1 && parentText.length < 800) {
+            return false;
+          }
+        }
+        return true;
+      } else {
+        const hasMeta = /(学时|学分)/.test(text) && /(未学习|已学习|学习中)/.test(text);
+        if (!hasMeta) return false;
+        const parent = element.parentElement;
+        if (parent && parent !== document.body) {
+          const parentText = clean(parent.innerText);
+          const selfCount = countMatches(text, /(未学习|已学习|学习中)/g);
+          const parentCount = countMatches(parentText, /(未学习|已学习|学习中)/g);
+          if (selfCount === 1 && parentCount === 1 && parentText.length < 800) {
+            return false;
+          }
+        }
+        return true;
+      }
+    };
+
+    const courseContainer = (marker) => {
+      let element = marker;
+      for (let depth = 0; element && element !== document.body && depth < 10; depth++, element = element.parentElement) {
+        if (isCourseCard(element)) {
+          return element;
+        }
+      }
+      return null;
+    };
+
+    const linkFrom = (container) => {
+      const anchor = container.matches && container.matches("a[href]") ? container : container.querySelector("a[href]");
+      if (!anchor) return "";
+      const href = anchor.getAttribute("href") || "";
+      if (!href || /^javascript:/i.test(href)) return "";
+      try { return new URL(href, location.href).href; } catch (_) { return ""; }
+    };
+
+    const externalIdFrom = (container, url, locator, title) => {
+      let element = container;
+      for (let depth = 0; element && depth < 5; depth++, element = element.parentElement) {
+        const data = element.dataset || {};
+        const value = data.courseId || data.contentId || data.knowledgeId || data.resourceId || data.id;
+        if (value) return String(value);
+      }
+      return url || locator || title;
+    };
+
+    const sectionTitleFrom = (container) => {
+      if (provider !== "merchant") return "";
+      let current = container;
+      for (let depth = 0; current && current.parentElement && depth < 6; depth++, current = current.parentElement) {
+        const siblings = Array.from(current.parentElement.children);
+        const index = siblings.indexOf(current);
+        for (let offset = index - 1; offset >= 0; offset--) {
+          const text = clean(siblings[offset].innerText);
+          if (text && text.length <= 80 && (/^\d{1,2}\s/.test(text) || /^第.+期/.test(text) || /^模块\d/.test(text))) {
+            const firstLine = text.split(/\n+/).map(clean).find((l) => /^\d{1,2}\s/.test(l) || /^第.+期/.test(l)) || text;
+            return firstLine;
+          }
+        }
+      }
+      return "";
+    };
+
+    const isNavOrHeader = (el) => {
+      if (!el) return false;
+      if (el.closest && el.closest("nav, header, [class*='navbar'], [class*='nav-'], [class*='menu']")) return true;
+      const text = clean(el.innerText || "");
+      if (/(学习中心|个人中心|教学管理|学习地图|考试中心|赛事中心|简体中文|消息通知)/.test(text)) return true;
+      return false;
+    };
+
+    const isInvalidTopicTitle = (s) =>
+      !s ||
+      s.length < 2 ||
+      s.length > 80 ||
+      /^\d+\s*分钟$/.test(s) ||
+      /^\d+:\d+$/.test(s) ||
+      /^\d+\s*人看过$/.test(s) ||
+      /^章节\s*\(\d+\)$/.test(s) ||
+      /^时长\s*[:：]/.test(s) ||
+      /^(标清|高清|超清|倍速|\d+(\.\d+)?倍速|全屏|音量|收起目录|展开目录|课程介绍|主讲老师|收藏|已收藏)$/.test(s) ||
+      isSiteOrUiTitle(s) ||
+      isTagOrBadge(s) ||
+      isMeta(s);
+
+    const findTopicTitle = () => {
+      // 0. 优先通过大课信息卡锚点（主讲老师、收藏、人看过等）精准定位课程大标题
+      const teacherOrStar = Array.from(document.querySelectorAll("body *")).find((el) => {
+        if (!visible(el) || isNavOrHeader(el)) return false;
+        const t = clean(el.innerText);
+        return /^(主讲老师|收藏|已收藏|\d+\s*人看过|视频课)$/.test(t) || /^主讲老师\s*[:：]/.test(t);
+      });
+      if (teacherOrStar) {
+        let card = teacherOrStar.parentElement;
+        for (let d = 0; card && card !== document.body && d < 4; d++, card = card.parentElement) {
+          const lines = (card.innerText || "").split(/\n+/).map(clean).filter(Boolean);
+          const valid = lines.find((l) =>
+            l.length >= 2 &&
+            l.length <= 80 &&
+            !isInvalidTopicTitle(l) &&
+            !/(主讲老师|收藏|已收藏|人看过|视频课|课程介绍|目录|返回)/.test(l)
+          );
+          if (valid) return valid;
+        }
+      }
+
+      // 1. 查找页面上的课程主标题
+      const courseMainTitles = Array.from(document.querySelectorAll("h1, h2, h3, [class*='course-title'], [class*='detail-title'], [class*='main-title'], [class*='video-title'], [class*='course-name']"))
+        .filter((el) => {
+          if (!visible(el) || isNavOrHeader(el)) return false;
+          if (el.closest(".prism-controlbar, .vjs-control-bar, [class*='control-bar'], [class*='speed-list']")) return false;
+          const text = clean(el.innerText);
+          return text.length >= 3 && text.length <= 80 && !isInvalidTopicTitle(text) && !/(主讲老师|收藏|人看过|课程介绍|目录)/.test(text);
+        })
+        .map((el) => clean(el.innerText));
+      if (courseMainTitles.length > 0) {
+        return courseMainTitles[0];
+      }
+
+      // 2. 银联乐学的“课程大纲”使用 chapterTitle 标识专题名
+      const chapterTitleElements = Array.from(document.querySelectorAll(".chapterTitle"));
+      for (const element of chapterTitleElements) {
+        if (!visible(element)) continue;
+        const text = clean(element.getAttribute("title") || element.innerText);
+        if (!isInvalidTopicTitle(text)) return text;
+      }
+
+      // 3. 页面标题清洗（如“天龙八步™-极简项目管理 - 量见·云课堂 - 学习端”）
+      let docTitle = clean(originalTitle);
+      docTitle = docTitle
+        .replace(/^MTOOL\s*·\s*[^·]+\s*·\s*/i, "")
+        .replace(/\s*[-_|\s]\s*(YS学堂|银联乐学|中国银联|培训平台|专题详情|量见[·•]云课堂|量见云课堂|云课堂|学习端|播放端).*$/i, "")
+        .trim();
+      if (docTitle && !isInvalidTopicTitle(docTitle) && docTitle.length >= 2) {
+        return docTitle;
+      }
+
+      const topicMetaPatterns = [/起止时间/, /课程数/, /浏览人数/, /学习人数/, /学习进度/, /完成标准/, /章节进度/];
+      // 4. 扫描当前 DOM 中的可见文本
+      const directCandidates = Array.from(document.querySelectorAll("body *"))
+        .filter((el) => visible(el) && !isNavOrHeader(el) && el.getClientRects().length > 0)
+        .map((el) => ({ element: el, text: ownText(el) }))
+        .filter(({ text }) => !isInvalidTopicTitle(text) && text.length >= 4);
+      const occurrences = new Map();
+      directCandidates.forEach(({ text }) => occurrences.set(text, (occurrences.get(text) || 0) + 1));
+
+      const rankedCandidates = directCandidates.map(({ element, text }) => {
+        let score = (occurrences.get(text) || 0) > 1 ? 12 : 0;
+        if (/^H[1-5]$/.test(element.tagName)) score += 6;
+        if (/title|name/i.test(String(element.className || ""))) score += 2;
+        const style = window.getComputedStyle(element);
+        const fontSize = Number.parseFloat(style.fontSize || "0");
+        const fontWeight = Number.parseInt(style.fontWeight || "0", 10);
+        if (fontSize >= 24) score += 5;
+        else if (fontSize >= 18) score += 2;
+        if (fontWeight >= 600) score += 2;
+
+        let context = element.parentElement;
+        for (let depth = 0; context && context !== document.body && depth < 7; depth++, context = context.parentElement) {
+          const contextText = clean(context.innerText);
+          if (contextText.length > 3000) continue;
+          const markerCount = topicMetaPatterns.filter((pattern) => pattern.test(contextText)).length;
+          if (markerCount >= 2) {
+            score += Math.max(5, 11 - depth);
+            break;
+          }
+          if (markerCount === 1) score += 2;
+        }
+        return { text, score };
+      }).sort((left, right) => right.score - left.score || right.text.length - left.text.length);
+
+      if (rankedCandidates.length > 0 && rankedCandidates[0].score >= 8) {
+        return rankedCandidates[0].text;
+      }
+
+      return location.hostname || "未知专题";
+    };
+
+    const markers = Array.from(document.querySelectorAll("body *")).filter((element) => {
+      if (!visible(element)) return false;
+      const text = clean(element.innerText);
+      if (provider === "merchant") {
+        return /^(已完成|已考试|未学习|学习中|去学习|立即学习)$/.test(text) || /^进度\s*[:：]?\s*\d+(?:\.\d+)?%$/.test(text);
+      }
+      return /^(未学习|已学习|学习中)$/.test(text);
+    });
+
+    const seenElements = new Set();
+    const seenTitles = new Set();
+    const courses = [];
+    markers.forEach((marker) => {
+      const container = courseContainer(marker);
+      if (!container || seenElements.has(container)) return;
+      seenElements.add(container);
+
+      const title = titleFrom(container);
+      if (!title || isTagOrBadge(title) || isMeta(title) || seenTitles.has(title)) return;
+      seenTitles.add(title);
+
+      const text = clean(container.innerText);
+      const locator = cssPath(container);
+      const url = linkFrom(container);
+      const externalId = externalIdFrom(container, url, locator, title);
+
+      const progressMatch = text.match(/进度\s*[:：]?\s*(\d+(?:\.\d+)?)%/);
+      const completed = /(已学习|已完成|已考试)/.test(text) || (progressMatch ? Number(progressMatch[1]) >= 100 : false);
+      const progress = completed ? 100 : (progressMatch ? Number(progressMatch[1]) : 0);
+
+      const durationMatch = text.match(/学习时长\s*[:：]?\s*(\d+)\s*分钟/) || text.match(/学时\s*[:：]?\s*(\d+)/) || text.match(/时长\s*[:：]?\s*(\d+)/);
+      let durationSeconds = 0;
+      if (durationMatch) {
+        const val = Number(durationMatch[1]) || 0;
+        if (/学时/.test(durationMatch[0])) {
+          durationSeconds = val * 45 * 60;
+        } else {
+          durationSeconds = val * 60;
+        }
+      }
+
+      let kind = "video";
+      if (/考试/.test(title) || /(^|\s)考试(\s|$)/.test(text)) kind = "exam";
+      else if (/课件/.test(title)) kind = "slides";
+      else if (/(文档|阅读材料|参考资料)/.test(title)) kind = "material";
+
+      courses.push({
+        externalId,
+        title,
+        url,
+        locator,
+        sectionTitle: sectionTitleFrom(container),
+        kind,
+        durationSeconds,
+        progress,
+        completed
+      });
+    });
+
+    // 播放页/章节目录解析模式（如量见·云课堂单课播放页的章节列表）
+    if (courses.length === 0) {
+      // 1. 优先定位右侧章节目录面板容器
+      const catalogPanel = Array.from(document.querySelectorAll("body *")).find((el) => {
+        if (!visible(el) || isNavOrHeader(el)) return false;
+        if (el.closest(".prism-player, [class*='player'], [class*='control-bar'], [class*='controls']")) return false;
+        const text = clean(el.innerText);
+        return /^(章节\s*\(?\d+\)?|目录|课程目录|章节列表)/.test(text) && text.length > 20 && text.length < 5000;
+      });
+
+      const searchScope = catalogPanel || document.body;
+
+      const candidateItems = Array.from(searchScope.querySelectorAll("li, div, a, [class*='item'], [class*='chapter'], [class*='section'], [class*='node']")).filter((el) => {
+        if (!visible(el) || isNavOrHeader(el)) return false;
+        // 绝对排除播放器控制条、清晰度、倍速选择框
+        if (el.closest(".prism-player, [class*='player'], [class*='control-bar'], [class*='controls'], [class*='speed'], [class*='quality'], [class*='intro'], [class*='teacher']")) return false;
+        const text = clean(el.innerText);
+        if (text.length < 3 || text.length > 120) return false;
+        // 排除无关 UI 文本
+        if (/(倍速|标清|高清|超清|人看过|课程介绍|主讲老师|收起目录|展开目录|00:00)/.test(text)) return false;
+        // 必须包含分钟时长或章节格式
+        const hasDuration = /(\d+)\s*分钟/.test(text);
+        const hasChapterMarker = /^(导入|第\d+[期讲节章步回集]|模块\d+|\d{1,2}[\s.-、])/.test(text);
+        if (!hasDuration && !hasChapterMarker) return false;
+        // 排除包含子章节的父容器
+        const children = Array.from(el.children);
+        const subItems = children.filter((c) => /(\d+)\s*分钟/.test(clean(c.innerText)));
+        if (subItems.length > 1) return false;
+        return true;
+      });
+
+      candidateItems.forEach((item) => {
+        const text = clean(item.innerText);
+        const lines = text.split(/\n+/).map(clean).filter(Boolean);
+        const titleLine = lines.find((l) => l.length >= 2 && !/^\d+\s*分钟$/.test(l) && !/^(上次学习|已完成|未开始|播放中|试看|\d+:\d+)$/.test(l));
+        const rawTitle = titleLine || lines[0] || "";
+        const title = rawTitle.replace(/\s*\d+\s*分钟.*$/, "").replace(/\s*上次学习.*$/, "").trim();
+        if (!title || title.length < 2 || isInvalidTopicTitle(title) || seenTitles.has(title)) return;
+        seenTitles.add(title);
+
+        const locator = cssPath(item);
+        const url = linkFrom(item);
+        const externalId = externalIdFrom(item, url, locator, title);
+
+        const durMatch = text.match(/(\d+)\s*分钟/);
+        let durationSeconds = 0;
+        if (durMatch) {
+          durationSeconds = (Number(durMatch[1]) || 0) * 60;
+        }
+
+        const completed = /(已完成|已学完|已学)/.test(text) || item.matches("[class*='complete'], [class*='finish'], [class*='learned']");
+        const progress = completed ? 100 : 0;
+
+        courses.push({
+          externalId,
+          title,
+          url,
+          locator,
+          sectionTitle: "",
+          kind: "video",
+          durationSeconds,
+          progress,
+          completed
+        });
+      });
+    }
+
+    const bodyText = clean(document.body.innerText);
+    const topicTitle = findTopicTitle();
+    const topicProgressMatch = bodyText.match(/学习进度\s*[:：]?\s*(\d+(?:\.\d+)?)%/);
+    const countMatch = bodyText.match(/完成任务数\s*(\d+)\s*\/\s*(\d+)/) || bodyText.match(/完成标准\s*(\d+)\s*\/\s*(\d+)/);
+    const completedCount = countMatch ? Number(countMatch[1]) : courses.filter((item) => item.completed).length;
+    const totalCount = countMatch ? Number(countMatch[2]) : courses.length;
+    const payload = {
+      title: String(topicTitle || "未知专题"),
+      url: location.href,
+      progress: topicProgressMatch ? Number(topicProgressMatch[1]) : (totalCount ? completedCount / totalCount * 100 : 0),
+      totalCount,
+      completedCount,
+      courses
+    };
+    const bytes = new TextEncoder().encode(JSON.stringify(payload));
+    let binary = "";
+    bytes.forEach((byte) => { binary += String.fromCharCode(byte); });
+    const encoded = btoa(binary);
+    const chunkSize = __CHUNK_SIZE__;
+    const chunks = encoded.match(new RegExp(".{1," + chunkSize + "}", "g")) || [""];
+    chunks.forEach((chunk, index) => {
+      window.setTimeout(() => {
+        if (window.__MTOOL_CAPTURE_REQUEST__ !== requestId) return;
+        document.title = "MTOOL_CAPTURE|" + requestId + "|" + index + "|" + chunks.length + "|" + encoded.length + "|" + chunk;
+        if (index === chunks.length - 1) window.setTimeout(() => { document.title = originalTitle; }, __RESTORE_DELAY__);
+      }, index * __CHUNK_INTERVAL__);
+    });
+    } catch (err) {
+      const errorPayload = {
+        title: "错误",
+        url: location.href,
+        progress: 0,
+        totalCount: 0,
+        completedCount: 0,
+        courses: []
+      };
+      const bytes = new TextEncoder().encode(JSON.stringify(errorPayload));
+      let binary = "";
+      bytes.forEach((byte) => { binary += String.fromCharCode(byte); });
+      const encoded = btoa(binary);
+      if (window.__MTOOL_CAPTURE_REQUEST__ === requestId) {
+        document.title = "MTOOL_CAPTURE|" + requestId + "|0|1|" + encoded.length + "|" + encoded;
+      }
+    }
+  }, 0);
 })();
 "##;
     TEMPLATE
@@ -623,6 +1536,14 @@ fn handle_bridge_title(
     captures: &Arc<Mutex<CaptureExchange>>,
     runtime: &Arc<Mutex<RuntimeState>>,
 ) -> bool {
+    if let Some(request_id) = title.strip_prefix(BRIDGE_CAPTURE_START_PREFIX) {
+        let mut exchange = captures.lock().unwrap_or_else(|error| error.into_inner());
+        if exchange.active_requests.contains(request_id) {
+            exchange.started_requests.insert(request_id.to_string());
+        }
+        return true;
+    }
+
     if let Some(payload) = title.strip_prefix(BRIDGE_CAPTURE_PREFIX) {
         let parts: Vec<&str> = payload.splitn(5, '|').collect();
         if parts.len() != 5 {
@@ -637,6 +1558,9 @@ fn handle_bridge_title(
             return true;
         }
         let mut exchange = captures.lock().unwrap_or_else(|error| error.into_inner());
+        if !exchange.active_requests.contains(&request_id) {
+            return true;
+        }
         let buffer = exchange
             .buffers
             .entry(request_id.clone())
@@ -656,6 +1580,8 @@ fn handle_bridge_title(
         if buffer.chunks.iter().all(Option::is_some) {
             let parsed = decode_capture_buffer(buffer);
             exchange.buffers.remove(&request_id);
+            exchange.active_requests.remove(&request_id);
+            exchange.started_requests.remove(&request_id);
             exchange.completed.insert(request_id, parsed);
         }
         return true;
@@ -665,14 +1591,32 @@ fn handle_bridge_title(
         let parts: Vec<&str> = payload.split('|').collect();
         if parts.len() >= 4 && parts[0] == provider.key() {
             let event = parts[1];
+            let current_time = parts[2].parse::<f64>().unwrap_or(0.0);
+            let duration = parts[3].parse::<f64>().unwrap_or(0.0);
             let mut state = runtime.lock().unwrap_or_else(|error| error.into_inner());
             if let Some(active) = state.active.get_mut(provider.key()) {
                 active.last_media_at = now();
-                if event == "ended" {
+                if current_time > 0.0 {
+                    active.current_time = current_time;
+                }
+                if duration > 0.0 {
+                    active.duration = duration;
+                }
+                let is_near_end = duration > 10.0
+                    && (current_time >= duration - 2.5
+                        || (current_time / duration >= 0.95)
+                        || (event == "pause" && current_time / duration >= 0.90));
+
+                if event == "ended" || is_near_end {
                     active.phase = "ended".to_string();
                     active.phase_since = now();
                 } else if event == "error" {
                     active.phase = "error".to_string();
+                    active.phase_since = now();
+                } else if active.phase == "opening"
+                    && matches!(event, "play" | "playing" | "timeupdate")
+                {
+                    active.phase = "playing".to_string();
                     active.phase_since = now();
                 }
             }
@@ -682,13 +1626,13 @@ fn handle_bridge_title(
     false
 }
 
-async fn ensure_window(
+async fn ensure_player_window(
     app: &AppHandle,
     state: &VideoTaskState,
     provider: Provider,
     show: bool,
 ) -> Result<tauri::WebviewWindow, String> {
-    let label = provider.label();
+    let label = provider.player_label();
     if let Some(window) = app.get_webview_window(&label) {
         if show {
             window.show().map_err(|error| error.to_string())?;
@@ -713,10 +1657,11 @@ async fn ensure_window(
     let popup_label = label.clone();
     let settings_state = state.settings.clone();
     let window = WebviewWindowBuilder::new(app, &label, WebviewUrl::External(url))
-        .title(format!("MTOOL · {}", provider.name()))
+        .title(format!("MTOOL · {} · 播放窗口", provider.name()))
         .inner_size(1280.0, 820.0)
         .min_inner_size(640.0, 480.0)
-        .visible(show)
+        .visible(false)
+        .focused(false)
         .initialization_script_for_all_frames(bridge_script(
             provider,
             settings.speed,
@@ -744,8 +1689,74 @@ async fn ensure_window(
             tauri::webview::NewWindowResponse::Deny
         })
         .build()
-        .map_err(|error| format!("打开{}失败: {error}", provider.name()))?;
+        .map_err(|error| format!("打开{}播放窗口失败: {error}", provider.name()))?;
+    if show {
+        window.show().map_err(|error| error.to_string())?;
+        window.unminimize().map_err(|error| error.to_string())?;
+        window.set_focus().map_err(|error| error.to_string())?;
+    } else {
+        let _ = window.hide();
+    }
     Ok(window)
+}
+
+async fn ensure_browser_window(
+    app: &AppHandle,
+    state: &VideoTaskState,
+    provider: Provider,
+    show: bool,
+) -> Result<tauri::WebviewWindow, String> {
+    let label = provider.browser_label();
+    if let Some(window) = app.get_webview_window(&label) {
+        if show {
+            window.show().map_err(|error| error.to_string())?;
+            window.unminimize().map_err(|error| error.to_string())?;
+            window.set_focus().map_err(|error| error.to_string())?;
+        }
+        return Ok(window);
+    }
+    let url = provider
+        .home()
+        .parse::<tauri::Url>()
+        .map_err(|error| error.to_string())?;
+    let captures = state.captures.clone();
+    let runtime = state.runtime.clone();
+    let provider_for_title = provider;
+    let app_for_popup = app.clone();
+    let popup_label = label.clone();
+    let window = WebviewWindowBuilder::new(app, &label, WebviewUrl::External(url))
+        .title(format!("MTOOL · {} · 选专题", provider.name()))
+        .inner_size(1280.0, 820.0)
+        .min_inner_size(640.0, 480.0)
+        .visible(show)
+        .focused(show)
+        .initialization_script_for_all_frames(browser_nav_script(provider))
+        .on_document_title_changed(move |window, title| {
+            if !handle_bridge_title(&title, provider_for_title, &captures, &runtime) {
+                let _ =
+                    window.set_title(&format!("MTOOL · {} · {title}", provider_for_title.name()));
+            }
+        })
+        .on_new_window(move |url, _features| {
+            if matches!(url.scheme(), "http" | "https") {
+                if let Some(window) = app_for_popup.get_webview_window(&popup_label) {
+                    let _ = window.navigate(url);
+                }
+            }
+            tauri::webview::NewWindowResponse::Deny
+        })
+        .build()
+        .map_err(|error| format!("打开{}浏览窗口失败: {error}", provider.name()))?;
+    Ok(window)
+}
+
+async fn ensure_window(
+    app: &AppHandle,
+    state: &VideoTaskState,
+    provider: Provider,
+    show: bool,
+) -> Result<tauri::WebviewWindow, String> {
+    ensure_player_window(app, state, provider, show).await
 }
 
 async fn capture_current(
@@ -754,8 +1765,9 @@ async fn capture_current(
     provider: Provider,
 ) -> Result<PageTopicCapture, String> {
     let window = app
-        .get_webview_window(&provider.label())
-        .ok_or_else(|| format!("请先打开并登录{}", provider.name()))?;
+        .get_webview_window(&provider.browser_label())
+        .or_else(|| app.get_webview_window(&provider.player_label()))
+        .ok_or_else(|| format!("请先点击【登录并选择专题】打开{}", provider.name()))?;
     let current_url = window.url().map_err(|error| error.to_string())?;
     if !provider_accepts_url(provider, &current_url) {
         return Err(format!(
@@ -775,42 +1787,127 @@ async fn capture_current(
                 .captures
                 .lock()
                 .unwrap_or_else(|error| error.into_inner());
+            exchange.active_requests.insert(request_id.clone());
+            exchange.started_requests.remove(&request_id);
             exchange.buffers.remove(&request_id);
             exchange.completed.remove(&request_id);
         }
-        window
-            .eval(capture_script(&request_id, provider))
-            .map_err(|error| format!("读取专题页面失败: {error}"))?;
-        let mut should_retry = false;
-        for _ in 0..300 {
-            tokio::time::sleep(Duration::from_millis(50)).await;
-            let result = state
+        if let Err(error) = window.eval(capture_script(&request_id, provider)) {
+            let mut exchange = state
                 .captures
                 .lock()
-                .unwrap_or_else(|error| error.into_inner())
-                .completed
-                .remove(&request_id);
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            exchange.active_requests.remove(&request_id);
+            exchange.started_requests.remove(&request_id);
+            exchange.buffers.remove(&request_id);
+            exchange.completed.remove(&request_id);
+            return Err(format!("读取专题页面失败: {error}"));
+        }
+
+        let attempt_started = Instant::now();
+        let mut bridge_started = false;
+        let mut received_chunks = 0usize;
+        let mut total_chunks = 0usize;
+        let mut encoded_len = 0usize;
+        let mut last_progress = attempt_started;
+        let mut finished = None;
+
+        loop {
+            tokio::time::sleep(Duration::from_millis(CAPTURE_POLL_INTERVAL_MS)).await;
+            let (result, started, received, total, length) = {
+                let mut exchange = state
+                    .captures
+                    .lock()
+                    .unwrap_or_else(|error| error.into_inner());
+                let result = exchange.completed.remove(&request_id);
+                let started = exchange.started_requests.contains(&request_id);
+                let (received, total, length) = exchange
+                    .buffers
+                    .get(&request_id)
+                    .map(|buffer| {
+                        (
+                            buffer.chunks.iter().filter(|chunk| chunk.is_some()).count(),
+                            buffer.total,
+                            buffer.encoded_len,
+                        )
+                    })
+                    .unwrap_or((0, 0, 0));
+                (result, started, received, total, length)
+            };
+
             if let Some(result) = result {
-                match result {
-                    Ok(capture) => return Ok(capture),
-                    Err(error) if attempt == 0 => {
-                        last_error = error;
-                        should_retry = true;
-                        break;
-                    }
-                    Err(error) => return Err(format!("{error}；自动重试后仍未成功")),
-                }
+                finished = Some(result);
+                break;
+            }
+            if started || received > 0 {
+                bridge_started = true;
+            }
+            if received > received_chunks {
+                received_chunks = received;
+                total_chunks = total;
+                encoded_len = length;
+                last_progress = Instant::now();
+            }
+
+            let elapsed = attempt_started.elapsed();
+            let timed_out = elapsed >= Duration::from_millis(CAPTURE_TOTAL_TIMEOUT_MS)
+                || (!bridge_started && elapsed >= Duration::from_millis(CAPTURE_START_TIMEOUT_MS))
+                || (bridge_started
+                    && received_chunks == 0
+                    && elapsed >= Duration::from_millis(CAPTURE_SCAN_TIMEOUT_MS))
+                || (received_chunks > 0
+                    && last_progress.elapsed() >= Duration::from_millis(CAPTURE_IDLE_TIMEOUT_MS));
+            if timed_out {
+                break;
             }
         }
-        state
-            .captures
-            .lock()
-            .unwrap_or_else(|error| error.into_inner())
-            .buffers
-            .remove(&request_id);
-        if attempt == 0 && !should_retry {
-            last_error = "读取专题页面超时，请确认当前窗口停留在专题课程列表页".to_string();
+
+        let late_result = {
+            let mut exchange = state
+                .captures
+                .lock()
+                .unwrap_or_else(|error| error.into_inner());
+            let result = exchange.completed.remove(&request_id);
+            bridge_started |= exchange.started_requests.remove(&request_id);
+            if let Some(buffer) = exchange.buffers.remove(&request_id) {
+                let received = buffer.chunks.iter().filter(|chunk| chunk.is_some()).count();
+                if received > received_chunks {
+                    received_chunks = received;
+                    total_chunks = buffer.total;
+                    encoded_len = buffer.encoded_len;
+                }
+            }
+            exchange.active_requests.remove(&request_id);
+            result
+        };
+        if finished.is_none() {
+            finished = late_result;
         }
+        if let Some(result) = finished {
+            match result {
+                Ok(capture) => return Ok(capture),
+                Err(error) if attempt == 0 => {
+                    last_error = error;
+                    continue;
+                }
+                Err(error) => return Err(format!("{error}；自动重试后仍未成功")),
+            }
+        }
+
+        last_error = if received_chunks > 0 && total_chunks > 0 {
+            format!(
+                "专题页面数据回传中断（已收到 {received_chunks}/{total_chunks} 段，共 {encoded_len} 字符）"
+            )
+        } else if bridge_started {
+            "专题页面脚本已启动，但页面扫描在 30 秒内未生成数据".to_string()
+        } else {
+            "专题页面脚本未能启动，请等待页面加载完成后重试".to_string()
+        };
+        eprintln!(
+            "[mtool video task] capture attempt {}/2 failed: {}",
+            attempt + 1,
+            last_error
+        );
     }
     Err(format!("{last_error}；自动重试后仍未成功"))
 }
@@ -889,7 +1986,7 @@ fn import_capture(
                    duration_seconds=excluded.duration_seconds,progress=excluded.progress,
                    status=CASE
                      WHEN excluded.status='completed' THEN 'completed'
-                     WHEN video_courses.status IN('playing','verifying') THEN video_courses.status
+                     WHEN video_courses.status IN('opening','playing','verifying') THEN video_courses.status
                      ELSE excluded.status
                    END,
                    sort_order=excluded.sort_order,
@@ -927,7 +2024,7 @@ fn import_capture(
 fn load_course(path: &PathBuf, course_id: &str) -> Result<CourseRecord, String> {
     let conn = Connection::open(path).map_err(|error| error.to_string())?;
     conn.query_row(
-        "SELECT id,topic_id,provider,url,locator,kind FROM video_courses WHERE id=?1",
+        "SELECT id,topic_id,provider,url,locator,kind,title,duration_seconds,progress,sort_order FROM video_courses WHERE id=?1",
         params![course_id],
         |row| {
             let provider: String = row.get(2)?;
@@ -938,6 +2035,10 @@ fn load_course(path: &PathBuf, course_id: &str) -> Result<CourseRecord, String> 
                 url: row.get(3)?,
                 locator: row.get(4)?,
                 kind: row.get(5)?,
+                title: row.get(6)?,
+                duration_seconds: row.get(7)?,
+                progress: row.get(8)?,
+                sort_order: row.get(9)?,
             })
         },
     )
@@ -960,7 +2061,11 @@ async fn open_course(
     course: &CourseRecord,
     auto_play: bool,
 ) -> Result<(), String> {
-    let window = ensure_window(app, state, course.provider, true).await?;
+    // 队列自动播放时 (auto_play = true) 保持窗口隐藏；仅当用户手动点击“打开考试/打开内容”时才显示窗口
+    let window = ensure_window(app, state, course.provider, !auto_play).await?;
+    if auto_play {
+        let _ = window.hide();
+    }
     if !course.url.is_empty() {
         let url = course
             .url
@@ -971,17 +2076,37 @@ async fn open_course(
         }
         window.navigate(url).map_err(|error| error.to_string())?;
     } else {
-        let url = topic_url(state.db_path.as_ref(), &course.topic_id)?
+        let topic_url = topic_url(state.db_path.as_ref(), &course.topic_id)?;
+        let url = topic_url
             .parse::<tauri::Url>()
             .map_err(|error| error.to_string())?;
         window.navigate(url).map_err(|error| error.to_string())?;
-        let selector = serde_json::to_string(&course.locator).map_err(|error| error.to_string())?;
+        let click_script = course_click_script(&course.title, &course.locator);
         let click_window = window.clone();
+        let click_provider = course.provider;
         tauri::async_runtime::spawn(async move {
-            tokio::time::sleep(Duration::from_millis(1800)).await;
-            let _ = click_window.eval(format!(
-                "(() => {{ const target=document.querySelector({selector}); if(target) target.click(); }})();"
-            ));
+            for delay in [1200, 2500, 4500, 8000] {
+                tokio::time::sleep(Duration::from_millis(delay)).await;
+                let current_url = click_window.url().ok();
+                if current_url.as_ref().is_some_and(|current| {
+                    current.as_str() != topic_url && provider_accepts_url(click_provider, current)
+                }) {
+                    break;
+                }
+                if current_url
+                    .as_ref()
+                    .is_none_or(|current| !provider_accepts_url(click_provider, current))
+                {
+                    let Ok(recovery_url) = topic_url.parse::<tauri::Url>() else {
+                        break;
+                    };
+                    if click_window.navigate(recovery_url).is_err() {
+                        break;
+                    }
+                    tokio::time::sleep(Duration::from_millis(1500)).await;
+                }
+                let _ = click_window.eval(&click_script);
+            }
         });
     }
     if auto_play {
@@ -992,8 +2117,10 @@ async fn open_course(
             .clone();
         let play_window = window.clone();
         tauri::async_runtime::spawn(async move {
-            tokio::time::sleep(Duration::from_millis(2200)).await;
-            let _ = play_window.eval(update_media_script(settings.speed, settings.muted, true));
+            for delay in [1000, 2200, 4000, 6500] {
+                tokio::time::sleep(Duration::from_millis(delay)).await;
+                let _ = play_window.eval(update_media_script(settings.speed, settings.muted, true));
+            }
         });
     }
     Ok(())
@@ -1032,17 +2159,27 @@ async fn start_one(
         return Ok(false);
     };
     if app.get_webview_window(&course.provider.label()).is_none() {
-        ensure_window(app, state, course.provider, true).await?;
+        ensure_window(app, state, course.provider, false).await?;
         return Ok(false);
     }
     open_course(app, state, &course, true).await?;
     let timestamp = now();
     let conn = Connection::open(state.db_path.as_ref()).map_err(|error| error.to_string())?;
+    let _ = conn.execute(
+        "UPDATE video_courses SET status='pending',updated_at=?2 WHERE provider=?1 AND id != ?3 AND status IN ('opening','playing','verifying')",
+        params![course.provider.key(), timestamp, course.id],
+    );
     conn.execute(
-        "UPDATE video_courses SET status='playing',last_error=NULL,updated_at=?2 WHERE id=?1",
+        "UPDATE video_courses SET status='opening',last_error=NULL,updated_at=?2 WHERE id=?1",
         params![course.id, timestamp],
     )
     .map_err(|error| error.to_string())?;
+    let initial_duration = course.duration_seconds as f64;
+    let initial_time = if initial_duration > 0.0 && course.progress > 0.0 {
+        (course.progress / 100.0) * initial_duration
+    } else {
+        0.0
+    };
     state
         .runtime
         .lock()
@@ -1054,44 +2191,17 @@ async fn start_one(
                 course_id: course.id,
                 topic_id: course.topic_id,
                 provider: course.provider,
-                phase: "playing".to_string(),
+                phase: "opening".to_string(),
                 phase_since: timestamp,
                 last_media_at: timestamp,
+                current_time: initial_time,
+                duration: initial_duration,
             },
         );
     Ok(true)
 }
 
-async fn verify_active(
-    app: &AppHandle,
-    state: &VideoTaskState,
-    active: ActiveCourse,
-) -> Result<(), String> {
-    let capture = capture_current(app, state, active.provider).await?;
-    import_capture(state, active.provider, capture)?;
-    let conn = Connection::open(state.db_path.as_ref()).map_err(|error| error.to_string())?;
-    let status: String = conn
-        .query_row(
-            "SELECT status FROM video_courses WHERE id=?1",
-            params![active.course_id],
-            |row| row.get(0),
-        )
-        .map_err(|error| error.to_string())?;
-    if status != "completed" {
-        conn.execute(
-            "UPDATE video_courses SET status='attention',last_error='播放已结束，但平台尚未确认完成，请打开课程检查后重新同步' WHERE id=?1",
-            params![active.course_id],
-        )
-        .map_err(|error| error.to_string())?;
-    }
-    state
-        .runtime
-        .lock()
-        .unwrap_or_else(|error| error.into_inner())
-        .active
-        .remove(active.provider.key());
-    Ok(())
-}
+
 
 #[tauri::command]
 pub fn get_video_task_dashboard(
@@ -1099,6 +2209,13 @@ pub fn get_video_task_dashboard(
     state: tauri::State<'_, VideoTaskState>,
 ) -> Result<VideoTaskDashboard, String> {
     let conn = Connection::open(state.db_path.as_ref()).map_err(|error| error.to_string())?;
+    let runtime_active = state
+        .runtime
+        .lock()
+        .unwrap_or_else(|error| error.into_inner())
+        .active
+        .clone();
+
     let mut topic_stmt = conn
         .prepare(
             "SELECT id,provider,title,url,progress,total_count,completed_count,last_synced_at
@@ -1151,16 +2268,32 @@ pub fn get_video_task_dashboard(
             .map_err(|error| error.to_string())?
             .collect::<Result<Vec<_>, _>>()
             .map_err(|error| error.to_string())?;
-        for course in &courses {
+
+        let mut mapped_courses = Vec::new();
+        for mut course in courses {
+            if let Some(active) = runtime_active.values().find(|a| a.course_id == course.id) {
+                course.status = active.phase.clone();
+                if active.duration > 0.0 {
+                    course.duration_seconds = active.duration as i64;
+                    course.progress =
+                        ((active.current_time / active.duration) * 100.0).clamp(0.0, 100.0);
+                }
+            } else if matches!(course.status.as_str(), "opening" | "playing" | "verifying") {
+                course.status = "pending".to_string();
+            }
+            if course.status != "attention" {
+                course.last_error = None;
+            }
             stats.total += 1;
             match course.status.as_str() {
                 "completed" => stats.completed += 1,
                 "pending" => stats.pending += 1,
-                "playing" | "verifying" => stats.running += 1,
+                "opening" | "playing" | "verifying" => stats.running += 1,
                 "manual" => stats.manual += 1,
                 "attention" => stats.attention += 1,
                 _ => {}
             }
+            mapped_courses.push(course);
         }
         topics.push(TopicItem {
             id,
@@ -1171,18 +2304,20 @@ pub fn get_video_task_dashboard(
             total_count,
             completed_count,
             last_synced_at,
-            courses,
+            courses: mapped_courses,
         });
     }
     let sources = [Provider::Ulearn, Provider::Merchant]
         .into_iter()
         .map(|provider| {
-            let window = app.get_webview_window(&provider.label());
+            let browser_win = app.get_webview_window(&provider.browser_label());
+            let player_win = app.get_webview_window(&provider.player_label());
+            let window = browser_win.as_ref().or(player_win.as_ref());
             SourceStatus {
                 provider: provider.key().to_string(),
                 name: provider.name().to_string(),
                 home_url: provider.home().to_string(),
-                window_open: window.is_some(),
+                window_open: browser_win.is_some(),
                 current_url: window.and_then(|window| window.url().ok().map(|url| url.to_string())),
             }
         })
@@ -1206,7 +2341,8 @@ pub async fn open_video_learning_site(
     state: tauri::State<'_, VideoTaskState>,
     provider: String,
 ) -> Result<(), String> {
-    ensure_window(&app, state.inner(), Provider::parse(&provider)?, true)
+    let provider = Provider::parse(&provider)?;
+    ensure_browser_window(&app, state.inner(), provider, true)
         .await
         .map(|_| ())
 }
@@ -1238,7 +2374,7 @@ pub async fn sync_video_topic(
         .map_err(|error| error.to_string())?;
     drop(conn);
     let provider = Provider::parse(&provider)?;
-    let window = ensure_window(&app, state.inner(), provider, false).await?;
+    let window = ensure_browser_window(&app, state.inner(), provider, false).await?;
     window
         .navigate(
             url.parse::<tauri::Url>()
@@ -1263,7 +2399,7 @@ pub fn update_video_task_settings(
         .unwrap_or_else(|error| error.into_inner()) = settings.clone();
     persist_settings(state.db_path.as_ref(), &settings)?;
     for provider in [Provider::Ulearn, Provider::Merchant] {
-        if let Some(window) = app.get_webview_window(&provider.label()) {
+        if let Some(window) = app.get_webview_window(&provider.player_label()) {
             window
                 .eval(update_media_script(settings.speed, settings.muted, false))
                 .map_err(|error| error.to_string())?;
@@ -1284,9 +2420,30 @@ pub fn start_video_queue(
     settings.running = true;
     persist_settings(state.db_path.as_ref(), &settings)?;
     for provider in [Provider::Ulearn, Provider::Merchant] {
-        if let Some(window) = app.get_webview_window(&provider.label()) {
+        if let Some(window) = app.get_webview_window(&provider.player_label()) {
+            let _ = window.hide();
             let _ = window.eval(update_media_script(settings.speed, settings.muted, true));
         }
+    }
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn show_video_learning_window(
+    app: AppHandle,
+    state: tauri::State<'_, VideoTaskState>,
+    provider: String,
+) -> Result<(), String> {
+    let provider = Provider::parse(&provider)?;
+    ensure_browser_window(&app, state.inner(), provider, true).await?;
+    Ok(())
+}
+
+#[tauri::command]
+pub fn hide_video_learning_window(app: AppHandle, provider: String) -> Result<(), String> {
+    let provider = Provider::parse(&provider)?;
+    if let Some(window) = app.get_webview_window(&provider.browser_label()) {
+        window.hide().map_err(|error| error.to_string())?;
     }
     Ok(())
 }
@@ -1302,12 +2459,173 @@ pub fn pause_video_queue(
         .unwrap_or_else(|error| error.into_inner());
     settings.running = false;
     persist_settings(state.db_path.as_ref(), &settings)?;
+
     for provider in [Provider::Ulearn, Provider::Merchant] {
         if let Some(window) = app.get_webview_window(&provider.label()) {
-            let _ = window
-                .eval("document.querySelectorAll('video,audio').forEach((media)=>media.pause());");
+            let _ = window.eval(update_media_script(settings.speed, settings.muted, false));
+            let _ = window.eval(
+                "if (window.__MTOOL_LEARNING_BRIDGE__) { window.__MTOOL_LEARNING_BRIDGE__.update(1, true, false); }
+                 document.querySelectorAll('video,audio').forEach((media)=>{ try { media.pause(); } catch(_) {} });"
+            );
         }
     }
+
+    let active_courses = {
+        let mut runtime = state
+            .runtime
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        std::mem::take(&mut runtime.active)
+    };
+
+    if let Ok(conn) = Connection::open(state.db_path.as_ref()) {
+        for (_key, active) in active_courses {
+            if active.duration > 0.0 && active.current_time > 0.0 {
+                let progress = ((active.current_time / active.duration) * 100.0).clamp(0.0, 100.0);
+                let _ = conn.execute(
+                    "UPDATE video_courses SET status='pending',progress=?2,duration_seconds=?3,updated_at=?4 WHERE id=?1 AND status IN('opening','playing','verifying')",
+                    params![active.course_id, progress, active.duration as i64, now()],
+                );
+            } else {
+                let _ = conn.execute(
+                    "UPDATE video_courses SET status='pending',updated_at=?2 WHERE id=?1 AND status IN('opening','playing','verifying')",
+                    params![active.course_id, now()],
+                );
+            }
+        }
+    }
+
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn pause_video_course(
+    app: AppHandle,
+    state: tauri::State<'_, VideoTaskState>,
+    course_id: String,
+) -> Result<(), String> {
+    let course = load_course(state.db_path.as_ref(), &course_id)?;
+    let timestamp = now();
+
+    // 1. 停止当前窗口内的视频播放
+    if let Some(window) = app.get_webview_window(&course.provider.label()) {
+        let _ = window.eval(
+            "if (window.__MTOOL_LEARNING_BRIDGE__) { window.__MTOOL_LEARNING_BRIDGE__.update(1, true, false); }
+             document.querySelectorAll('video,audio').forEach((media)=>{ try { media.pause(); } catch(_) {} });"
+        );
+    }
+
+    // 2. 从 active 中获取播放进度并移除 active
+    let (current_time, duration) = {
+        let mut runtime = state
+            .runtime
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        if let Some(active) = runtime.active.get(course.provider.key()) {
+            if active.course_id == course_id {
+                let time_and_dur = (active.current_time, active.duration);
+                runtime.active.remove(course.provider.key());
+                time_and_dur
+            } else {
+                (0.0, 0.0)
+            }
+        } else {
+            (0.0, 0.0)
+        }
+    };
+
+    // 3. 更新数据库：将当前课程设为 pending 并记录当前进度
+    let conn = Connection::open(state.db_path.as_ref()).map_err(|error| error.to_string())?;
+    if duration > 0.0 && current_time > 0.0 {
+        let progress = ((current_time / duration) * 100.0).clamp(0.0, 100.0);
+        let _ = conn.execute(
+            "UPDATE video_courses SET status='pending',progress=?2,duration_seconds=?3,updated_at=?4 WHERE id=?1",
+            params![course.id, progress, duration as i64, timestamp],
+        );
+    } else {
+        let _ = conn.execute(
+            "UPDATE video_courses SET status='pending',updated_at=?2 WHERE id=?1",
+            params![course.id, timestamp],
+        );
+    }
+
+    // 4. 确保全局队列处于运行状态，自动播放下一个视频
+    {
+        let mut settings = state
+            .settings
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        settings.running = true;
+        let _ = persist_settings(state.db_path.as_ref(), &settings);
+    }
+
+    // 5. 优先寻找同专题下 sort_order > current.sort_order 的下一个待播放视频课程
+    let next_course_id: Option<String> = conn
+        .query_row(
+            "SELECT id FROM video_courses
+             WHERE status='pending' AND kind='video' AND provider=?1 AND topic_id=?2 AND sort_order > ?3
+             ORDER BY sort_order ASC LIMIT 1",
+            params![course.provider.key(), course.topic_id, course.sort_order],
+            |row| row.get(0),
+        )
+        .optional()
+        .map_err(|error| error.to_string())?
+        .or_else(|| {
+            conn.query_row(
+                "SELECT id FROM video_courses
+                 WHERE status='pending' AND kind='video' AND provider=?1 AND id != ?2
+                 ORDER BY sort_order, updated_at LIMIT 1",
+                params![course.provider.key(), course.id],
+                |row| row.get(0),
+            )
+            .optional()
+            .ok()
+            .flatten()
+        });
+
+    drop(conn);
+
+    // 6. 如果有下一门待播放视频，立即开启播放下一门
+    if let Some(next_id) = next_course_id {
+        let next_course = load_course(state.db_path.as_ref(), &next_id)?;
+        open_course(&app, state.inner(), &next_course, true).await?;
+        let next_ts = now();
+        let conn2 = Connection::open(state.db_path.as_ref()).map_err(|error| error.to_string())?;
+        let _ = conn2.execute(
+            "UPDATE video_courses SET status='pending',updated_at=?2 WHERE provider=?1 AND id != ?3 AND status IN ('opening','playing','verifying')",
+            params![next_course.provider.key(), next_ts, next_course.id],
+        );
+        conn2.execute(
+            "UPDATE video_courses SET status='opening',last_error=NULL,updated_at=?2 WHERE id=?1",
+            params![next_course.id, next_ts],
+        )
+        .map_err(|error| error.to_string())?;
+        let next_duration = next_course.duration_seconds as f64;
+        let next_time = if next_duration > 0.0 && next_course.progress > 0.0 {
+            (next_course.progress / 100.0) * next_duration
+        } else {
+            0.0
+        };
+        state
+            .runtime
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .active
+            .insert(
+                next_course.provider.key().to_string(),
+                ActiveCourse {
+                    course_id: next_course.id,
+                    topic_id: next_course.topic_id,
+                    provider: next_course.provider,
+                    phase: "opening".to_string(),
+                    phase_since: next_ts,
+                    last_media_at: next_ts,
+                    current_time: next_time,
+                    duration: next_duration,
+                },
+            );
+    }
+
     Ok(())
 }
 
@@ -1334,41 +2652,80 @@ pub async fn tick_video_queue(
         .collect::<Vec<_>>();
     for active in active_list {
         if active.phase == "ended" {
-            let url = topic_url(state.db_path.as_ref(), &active.topic_id)?;
-            if let Some(window) = app.get_webview_window(&active.provider.label()) {
-                window
-                    .navigate(
-                        url.parse::<tauri::Url>()
-                            .map_err(|error| error.to_string())?,
-                    )
-                    .map_err(|error| error.to_string())?;
+            let timestamp = now();
+            if let Ok(conn) = Connection::open(state.db_path.as_ref()) {
+                let duration_secs = if active.duration > 0.0 {
+                    active.duration as i64
+                } else {
+                    0
+                };
+                let _ = conn.execute(
+                    "UPDATE video_courses SET status='completed',progress=100.0,duration_seconds=CASE WHEN duration_seconds > 0 THEN duration_seconds ELSE ?2 END,last_error=NULL,updated_at=?3 WHERE id=?1",
+                    params![active.course_id, duration_secs, timestamp],
+                );
+                let _ = conn.execute(
+                    "UPDATE video_topics SET 
+                     completed_count = (SELECT COUNT(*) FROM video_courses WHERE topic_id=?1 AND status='completed'),
+                     total_count = (SELECT COUNT(*) FROM video_courses WHERE topic_id=?1),
+                     progress = ROUND((CAST((SELECT COUNT(*) FROM video_courses WHERE topic_id=?1 AND status='completed') AS REAL) / MAX(1, (SELECT COUNT(*) FROM video_courses WHERE topic_id=?1))) * 100.0, 1),
+                     last_synced_at = ?2
+                     WHERE id=?1",
+                    params![active.topic_id, timestamp],
+                );
             }
-            let conn =
-                Connection::open(state.db_path.as_ref()).map_err(|error| error.to_string())?;
-            conn.execute(
-                "UPDATE video_courses SET status='verifying' WHERE id=?1",
-                params![active.course_id],
-            )
-            .map_err(|error| error.to_string())?;
-            if let Some(item) = state
+            state
                 .runtime
                 .lock()
                 .unwrap_or_else(|error| error.into_inner())
                 .active
-                .get_mut(active.provider.key())
-            {
-                item.phase = "verifying".to_string();
-                item.phase_since = now();
+                .remove(active.provider.key());
+        } else if active.phase == "opening" || active.phase == "playing" {
+            if let Some(window) = app.get_webview_window(&active.provider.label()) {
+                let _ = window.eval(update_media_script(settings.speed, settings.muted, true));
             }
-        } else if active.phase == "verifying" && now() - active.phase_since >= 3 {
-            verify_active(&app, state.inner(), active).await?;
-        } else if active.phase == "error"
-            || (active.phase == "playing" && now() - active.last_media_at > 90)
-        {
+            if active.phase == "playing" && active.duration > 0.0 {
+                let progress = ((active.current_time / active.duration) * 100.0).clamp(0.0, 100.0);
+                if let Ok(conn) = Connection::open(state.db_path.as_ref()) {
+                    let _ = conn.execute(
+                        "UPDATE video_courses SET progress=?2,duration_seconds=?3,updated_at=?4 WHERE id=?1",
+                        params![active.course_id, progress, active.duration as i64, now()],
+                    );
+                }
+            }
+            let last_activity = if active.phase == "opening" {
+                active.phase_since
+            } else {
+                active.last_media_at
+            };
+            if now() - last_activity > 90 {
+                let conn =
+                    Connection::open(state.db_path.as_ref()).map_err(|error| error.to_string())?;
+                let last_error = if active.phase == "opening" {
+                    "未检测到可播放的视频，请打开课程检查"
+                } else {
+                    app.get_webview_window(&active.provider.label())
+                        .and_then(|window| window.url().ok())
+                        .filter(|url| provider_accepts_url(active.provider, url))
+                        .map(|_| "未检测到可持续播放的视频，请打开课程检查")
+                        .unwrap_or("课程页面未成功打开或已进入空白页，请重试后检查")
+                };
+                conn.execute(
+                    "UPDATE video_courses SET status='attention',last_error=?2 WHERE id=?1",
+                    params![active.course_id, last_error],
+                )
+                .map_err(|error| error.to_string())?;
+                state
+                    .runtime
+                    .lock()
+                    .unwrap_or_else(|error| error.into_inner())
+                    .active
+                    .remove(active.provider.key());
+            }
+        } else if active.phase == "error" {
             let conn =
                 Connection::open(state.db_path.as_ref()).map_err(|error| error.to_string())?;
             conn.execute(
-                "UPDATE video_courses SET status='attention',last_error='未检测到可持续播放的视频，请打开课程检查' WHERE id=?1",
+                "UPDATE video_courses SET status='attention',last_error='播放发生异常，请打开课程检查' WHERE id=?1",
                 params![active.course_id],
             )
             .map_err(|error| error.to_string())?;
@@ -1407,6 +2764,49 @@ pub async fn open_video_course(
     course_id: String,
 ) -> Result<(), String> {
     let course = load_course(state.db_path.as_ref(), &course_id)?;
+    let is_currently_running = {
+        let runtime = state
+            .runtime
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        runtime
+            .active
+            .get(course.provider.key())
+            .map(|active| active.course_id == course_id)
+            .unwrap_or(false)
+    };
+    if is_currently_running {
+        if let Some(window) = app.get_webview_window(&course.provider.label()) {
+            window.show().map_err(|error| error.to_string())?;
+            window.unminimize().map_err(|error| error.to_string())?;
+            window.set_focus().map_err(|error| error.to_string())?;
+            return Ok(());
+        }
+    } else {
+        let old_active = {
+            let mut runtime = state
+                .runtime
+                .lock()
+                .unwrap_or_else(|error| error.into_inner());
+            runtime.active.remove(course.provider.key())
+        };
+        if let Some(old) = old_active {
+            if let Ok(conn) = Connection::open(state.db_path.as_ref()) {
+                if old.duration > 0.0 && old.current_time > 0.0 {
+                    let progress = ((old.current_time / old.duration) * 100.0).clamp(0.0, 100.0);
+                    let _ = conn.execute(
+                        "UPDATE video_courses SET status='pending',progress=?2,duration_seconds=?3,updated_at=?4 WHERE id=?1",
+                        params![old.course_id, progress, old.duration as i64, now()],
+                    );
+                } else {
+                    let _ = conn.execute(
+                        "UPDATE video_courses SET status='pending',updated_at=?2 WHERE id=?1",
+                        params![old.course_id, now()],
+                    );
+                }
+            }
+        }
+    }
     open_course(&app, state.inner(), &course, false).await
 }
 
@@ -1469,6 +2869,57 @@ mod tests {
     }
 
     #[test]
+    fn course_click_prefers_saved_locator_and_reuses_current_window() {
+        let script = course_click_script("课程标题", "#saved-course");
+        let locator_index = script.find("byLocator").expect("locator lookup exists");
+        let title_index = script.find("byTitle").expect("title fallback exists");
+        assert!(locator_index < title_index);
+        assert!(script.contains("window.open = (url)"));
+        assert!(script.contains("return window"));
+        assert!(script.contains("#saved-course"));
+    }
+
+    #[test]
+    fn capture_script_preserves_page_title_before_bridge_handshake() {
+        let script = capture_script("request-1", Provider::Ulearn);
+        let original_title_index = script
+            .find("const originalTitle = document.title;")
+            .expect("original page title is captured");
+        let handshake_index = script
+            .find("document.title = \"MTOOL_CAPTURE_START|\" + requestId;")
+            .expect("capture handshake exists");
+
+        assert!(original_title_index < handshake_index);
+        assert!(script.contains("let docTitle = clean(originalTitle);"));
+        assert_eq!(
+            script
+                .matches("const originalTitle = document.title;")
+                .count(),
+            1
+        );
+    }
+
+    #[test]
+    fn capture_script_ranks_visible_dom_topic_titles_before_hostname_fallback() {
+        let script = capture_script("request-1", Provider::Ulearn);
+        let chapter_title_index = script
+            .find("document.querySelectorAll(\".chapterTitle\")")
+            .expect("ulearn chapter title selector exists");
+        let candidate_index = script
+            .find("const directCandidates = Array.from")
+            .expect("visible DOM title candidates are collected");
+        let fallback_index = script
+            .find("return location.hostname")
+            .expect("hostname fallback exists");
+
+        assert!(chapter_title_index < candidate_index);
+        assert!(candidate_index < fallback_index);
+        assert!(script.contains("element.getAttribute(\"title\") || element.innerText"));
+        assert!(script.contains("occurrences.get(text)"));
+        assert!(script.contains("topicMetaPatterns.filter"));
+    }
+
+    #[test]
     fn capture_buffer_rejects_truncated_title_chunks() {
         let buffer = CaptureBuffer {
             total: 1,
@@ -1496,6 +2947,116 @@ mod tests {
     }
 
     #[test]
+    fn capture_bridge_ignores_late_chunks_from_inactive_requests() {
+        let captures = Arc::new(Mutex::new(CaptureExchange::default()));
+        let runtime = Arc::new(Mutex::new(RuntimeState::default()));
+        let title = "MTOOL_CAPTURE|expired|0|1|4|e30=";
+
+        assert!(handle_bridge_title(
+            title,
+            Provider::Ulearn,
+            &captures,
+            &runtime,
+        ));
+        let exchange = captures.lock().unwrap_or_else(|error| error.into_inner());
+        assert!(exchange.buffers.is_empty());
+        assert!(exchange.completed.is_empty());
+    }
+
+    #[test]
+    fn capture_bridge_tracks_start_and_completes_active_request() {
+        let captures = Arc::new(Mutex::new(CaptureExchange::default()));
+        let runtime = Arc::new(Mutex::new(RuntimeState::default()));
+        let request_id = "active";
+        let json = r#"{"title":"专题","url":"https://example.com/topic","progress":0,"totalCount":0,"completedCount":0,"courses":[]}"#;
+        let encoded = STANDARD.encode(json.as_bytes());
+        let split_at = encoded.len() / 2;
+        let chunks = [&encoded[..split_at], &encoded[split_at..]];
+        captures
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .active_requests
+            .insert(request_id.to_string());
+
+        assert!(handle_bridge_title(
+            &format!("{BRIDGE_CAPTURE_START_PREFIX}{request_id}"),
+            Provider::Ulearn,
+            &captures,
+            &runtime,
+        ));
+        for (index, chunk) in chunks.iter().enumerate() {
+            assert!(handle_bridge_title(
+                &format!(
+                    "{BRIDGE_CAPTURE_PREFIX}{request_id}|{index}|{}|{}|{chunk}",
+                    chunks.len(),
+                    encoded.len(),
+                ),
+                Provider::Ulearn,
+                &captures,
+                &runtime,
+            ));
+        }
+
+        let mut exchange = captures.lock().unwrap_or_else(|error| error.into_inner());
+        assert!(!exchange.active_requests.contains(request_id));
+        assert!(!exchange.started_requests.contains(request_id));
+        let capture = exchange
+            .completed
+            .remove(request_id)
+            .expect("completed request exists")
+            .expect("completed request decodes");
+        assert_eq!(capture.title, "专题");
+    }
+
+    #[test]
+    fn playback_bridge_integrates_full_autoplay_and_ui_triggers() {
+        let bridge = bridge_script(Provider::Ulearn, 2.0, true);
+        let update = update_media_script(2.0, true, true);
+
+        assert!(bridge.contains("tryPlayMedia"));
+        assert!(bridge.contains("triggerPlayUI"));
+        assert!(bridge.contains("simulateFullClick"));
+        assert!(bridge.contains("window.setInterval(() => apply(false), 1500)"));
+
+        assert!(update.contains("window.__MTOOL_LEARNING_BRIDGE__.update(speed, muted, autoPlay)"));
+    }
+
+    #[test]
+    fn media_progress_promotes_opening_course_to_playing() {
+        let captures = Arc::new(Mutex::new(CaptureExchange::default()));
+        let runtime = Arc::new(Mutex::new(RuntimeState::default()));
+        runtime
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .active
+            .insert(
+                "ulearn".to_string(),
+                ActiveCourse {
+                    course_id: "course-1".to_string(),
+                    topic_id: "topic-1".to_string(),
+                    provider: Provider::Ulearn,
+                    phase: "opening".to_string(),
+                    phase_since: now(),
+                    last_media_at: now(),
+                    current_time: 0.0,
+                    duration: 0.0,
+                },
+            );
+
+        assert!(handle_bridge_title(
+            "MTOOL_MEDIA|ulearn|timeupdate|15.5|900",
+            Provider::Ulearn,
+            &captures,
+            &runtime,
+        ));
+        let state = runtime.lock().unwrap_or_else(|error| error.into_inner());
+        let active = state.active.get("ulearn").expect("active course exists");
+        assert_eq!(active.phase, "playing");
+        assert_eq!(active.current_time, 15.5);
+        assert_eq!(active.duration, 900.0);
+    }
+
+    #[test]
     fn import_separates_video_exam_and_slides() {
         let path = std::env::temp_dir().join(format!(
             "mtool-video-task-test-{}.db",
@@ -1508,10 +3069,11 @@ mod tests {
             captures: Arc::new(Mutex::new(CaptureExchange::default())),
             runtime: Arc::new(Mutex::new(RuntimeState::default())),
         };
+        let domain = decode_obfuscated_url("bHpkeGVkdS5jb20=");
         let course = |id: &str, title: &str, kind: &str, completed: bool| PageCourseCapture {
             external_id: id.to_string(),
             title: title.to_string(),
-            url: format!("https://ysstudy.lzdxedu.com/course/{id}"),
+            url: format!("https://{domain}/course/{id}"),
             locator: String::new(),
             section_title: "第一期".to_string(),
             kind: kind.to_string(),
@@ -1524,7 +3086,7 @@ mod tests {
             Provider::Merchant,
             PageTopicCapture {
                 title: "测试专题".to_string(),
-                url: "https://ysstudy.lzdxedu.com/study/test".to_string(),
+                url: format!("https://{domain}/study/test"),
                 progress: 33.3,
                 total_count: 3,
                 completed_count: 1,

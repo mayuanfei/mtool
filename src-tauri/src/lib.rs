@@ -1441,8 +1441,11 @@ pub fn run() {
             video_tasks::pause_video_queue,
             video_tasks::tick_video_queue,
             video_tasks::open_video_course,
+            video_tasks::pause_video_course,
             video_tasks::retry_video_course,
             video_tasks::remove_video_topic,
+            video_tasks::show_video_learning_window,
+            video_tasks::hide_video_learning_window,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")

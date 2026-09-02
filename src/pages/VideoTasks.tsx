@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import {
-  AlertTriangle, BookOpen, CheckCircle2, ChevronDown, ChevronRight,
+  AlertTriangle, BookOpen, CheckCircle2, ChevronRight,
   ClipboardCheck, Clock3, ExternalLink, FileText, Gauge, GraduationCap,
   Loader2, Pause, Play, Presentation, RefreshCw, ShieldCheck, Trash2,
   Video, Volume2, VolumeX,
@@ -9,7 +9,7 @@ import {
 
 type Provider = 'ulearn' | 'merchant';
 type CourseKind = 'video' | 'exam' | 'slides' | 'material';
-type CourseStatus = 'completed' | 'pending' | 'playing' | 'verifying' | 'manual' | 'attention';
+type CourseStatus = 'completed' | 'pending' | 'opening' | 'playing' | 'verifying' | 'manual' | 'attention';
 
 interface VideoTaskSettings {
   speed: number;
@@ -84,6 +84,7 @@ const EMPTY_DASHBOARD: VideoTaskDashboard = {
 const STATUS_META: Record<CourseStatus, { label: string; classes: string }> = {
   completed: { label: '已完成', classes: 'text-emerald-400 bg-emerald-500/10 border-emerald-500/25' },
   pending: { label: '待播放', classes: 'text-sky-400 bg-sky-500/10 border-sky-500/25' },
+  opening: { label: '正在打开', classes: 'text-sky-400 bg-sky-500/10 border-sky-500/25' },
   playing: { label: '正在播放', classes: 'text-indigo-400 bg-indigo-500/10 border-indigo-500/25' },
   verifying: { label: '完成核验中', classes: 'text-amber-400 bg-amber-500/10 border-amber-500/25' },
   manual: { label: '需本人处理', classes: 'text-orange-400 bg-orange-500/10 border-orange-500/25' },
@@ -126,8 +127,10 @@ export function VideoTasks() {
   const [loading, setLoading] = useState(true);
   const [busyKey, setBusyKey] = useState<string | null>(null);
   const [expandedTopics, setExpandedTopics] = useState<Set<string>>(new Set());
+  const [deleteConfirmTopic, setDeleteConfirmTopic] = useState<TopicItem | null>(null);
   const [message, setMessage] = useState<{ text: string; error: boolean } | null>(null);
   const tickRunning = useRef(false);
+  const initialLoadedRef = useRef(false);
 
   const showMessage = useCallback((text: string, error = false) => {
     setMessage({ text, error });
@@ -138,10 +141,12 @@ export function VideoTasks() {
     try {
       const next = await invoke<VideoTaskDashboard>('get_video_task_dashboard');
       setDashboard(next);
-      setExpandedTopics((current) => {
-        if (current.size > 0 || next.topics.length === 0) return current;
-        return new Set([next.topics[0].id]);
-      });
+      if (!initialLoadedRef.current) {
+        initialLoadedRef.current = true;
+        if (next.topics.length > 0) {
+          setExpandedTopics(new Set([next.topics[0].id]));
+        }
+      }
     } catch (error) {
       showMessage(String(error), true);
     } finally {
@@ -308,11 +313,17 @@ export function VideoTasks() {
               </div>
               <span className={cx(
                 'text-[11px] px-2 py-1 rounded-md border',
-                source.windowOpen
+                dashboard.settings.running && source.windowOpen
+                  ? 'text-indigo-400 border-indigo-500/25 bg-indigo-500/10'
+                  : source.windowOpen
                   ? 'text-emerald-400 border-emerald-500/25 bg-emerald-500/10'
                   : 'th-text-muted th-border',
               )}>
-                {source.windowOpen ? '会话打开' : '未连接'}
+                {dashboard.settings.running && source.windowOpen
+                  ? '静默运行中'
+                  : source.windowOpen
+                  ? '会话已连接'
+                  : '未连接'}
               </span>
             </div>
             <div className="mt-4 flex flex-wrap gap-2">
@@ -458,7 +469,7 @@ export function VideoTasks() {
           <div className="divide-y th-divide">
             {dashboard.topics.map((topic) => {
               const expanded = expandedTopics.has(topic.id);
-              const providerName = topic.provider === 'ulearn' ? '银联乐学' : '银商学堂';
+              const providerName = topic.provider === 'ulearn' ? '银联乐学' : 'YS学堂';
               const denominator = topic.totalCount || topic.courses.length;
               const numerator = topic.completedCount || topic.courses.filter((course) => course.status === 'completed').length;
               return (
@@ -466,12 +477,15 @@ export function VideoTasks() {
                   <div className="px-5 py-4 flex items-center gap-4 th-hover-surface">
                     <button
                       onClick={() => toggleTopic(topic.id)}
-                      className="p-1 rounded-md th-text-muted th-hover-surface"
+                      className="p-1 rounded-md th-text-muted hover:text-indigo-400 th-hover-surface shrink-0"
                       aria-label={expanded ? '收起专题' : '展开专题'}
                     >
-                      {expanded ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
+                      <ChevronRight className={cx('w-4 h-4 transition-transform duration-200', expanded && 'rotate-90 text-indigo-400')} />
                     </button>
-                    <div className="min-w-0 flex-1">
+                    <div
+                      onClick={() => toggleTopic(topic.id)}
+                      className="min-w-0 flex-1 cursor-pointer"
+                    >
                       <div className="flex flex-wrap items-center gap-2">
                         <span className="text-[11px] px-2 py-0.5 rounded bg-indigo-500/10 text-indigo-400 border border-indigo-500/20">
                           {providerName}
@@ -497,14 +511,7 @@ export function VideoTasks() {
                         <RefreshCw className={cx('w-4 h-4', busyKey === 'sync-' + topic.id && 'animate-spin')} />
                       </button>
                       <button
-                        onClick={() => {
-                          if (!window.confirm('确定从管理台移除“' + topic.title + '”吗？平台学习记录不会被删除。')) return;
-                          void runAction(
-                            'remove-topic',
-                            () => invoke('remove_video_topic', { topicId: topic.id }),
-                            '专题已从管理台移除。',
-                          );
-                        }}
+                        onClick={() => setDeleteConfirmTopic(topic)}
                         className="p-2 rounded-lg th-text-muted hover:text-rose-400 hover:bg-rose-500/10"
                         title="从管理台移除"
                       >
@@ -527,31 +534,68 @@ export function VideoTasks() {
                             <div className="min-w-0 flex-1">
                               <div className="flex flex-wrap items-center gap-2">
                                 <span className="text-sm font-medium th-text-2 truncate">{course.title}</span>
-                                <span className={cx('text-[10px] px-1.5 py-0.5 rounded border', status.classes)}>{status.label}</span>
+                                <span className={cx('text-[10px] px-1.5 py-0.5 rounded border flex items-center gap-1', status.classes)}>
+                                  {(course.status === 'opening' || course.status === 'playing') && <Loader2 className="w-2.5 h-2.5 animate-spin" />}
+                                  {course.status === 'playing' ? '正在播放 ' + Math.round(course.progress) + '%' : status.label}
+                                </span>
                                 <span className="text-[10px] th-text-muted">{kind.label}</span>
                               </div>
-                              <div className="flex flex-wrap items-center gap-3 mt-1 text-[11px] th-text-muted">
+                              <div className="flex flex-wrap items-center gap-3 mt-1.5 text-[11px] th-text-muted">
                                 {course.sectionTitle && <span>{course.sectionTitle}</span>}
-                                <span className="flex items-center gap-1"><Clock3 className="w-3 h-3" />{formatDuration(course.durationSeconds)}</span>
-                                <span>平台进度 {Math.round(course.progress)}%</span>
-                                {course.lastError && (
-                                  <span className="text-rose-400 flex items-center gap-1">
+                                <span className="flex items-center gap-1">
+                                  <Clock3 className="w-3 h-3" />
+                                  {formatDuration(course.durationSeconds)}
+                                </span>
+                                {course.status === 'playing' ? (
+                                  <div className="flex items-center gap-2">
+                                    <div className="w-20 h-1.5 rounded-full th-bg-surface overflow-hidden">
+                                      <div
+                                        className="h-full bg-indigo-500 rounded-full transition-all duration-300"
+                                        style={{ width: String(Math.max(4, course.progress)) + '%' }}
+                                      />
+                                    </div>
+                                    <span className="text-indigo-400 font-medium">{Math.round(course.progress)}%</span>
+                                  </div>
+                                ) : (
+                                  <span>平台进度 {Math.round(course.progress)}%</span>
+                                )}
+                                {course.status === 'attention' && course.lastError && (
+                                   <span className="text-rose-400 flex items-center gap-1">
                                     <AlertTriangle className="w-3 h-3" />{course.lastError}
                                   </span>
                                 )}
                               </div>
                             </div>
                             <div className="flex items-center gap-2 shrink-0">
-                              {(course.kind !== 'video' || course.status === 'attention') && course.status !== 'completed' && (
+                              {/* 仅正在播放中的视频，或需要人工处理的考试/课件，展示打开按钮 */}
+                              {(course.status === 'opening' || course.status === 'playing' || course.kind !== 'video') && (
                                 <button
                                   onClick={() => void runAction(
                                     'open-course-' + course.id,
                                     () => invoke('open_video_course', { courseId: course.id }),
                                   )}
                                   className="px-3 py-1.5 rounded-md border th-border-subtle th-bg-input-alt th-text-2 text-xs font-semibold flex items-center gap-1.5 th-hover-surface"
+                                  title="打开网页窗口查看内容"
                                 >
                                   <ExternalLink className="w-3.5 h-3.5" />
                                   {course.kind === 'exam' ? '打开考试' : course.kind === 'slides' ? '打开课件' : '打开内容'}
+                                </button>
+                              )}
+                              {(course.status === 'opening' || course.status === 'playing') && (
+                                <button
+                                  onClick={() => void runAction(
+                                    'pause-course-' + course.id,
+                                    () => invoke('pause_video_course', { courseId: course.id }),
+                                    '已暂停当前课程，继续播放下一门。',
+                                  )}
+                                  disabled={busyKey === 'pause-course-' + course.id}
+                                  className="px-3 py-1.5 rounded-md border border-amber-500/30 bg-amber-500/10 text-amber-300 text-xs font-semibold flex items-center gap-1.5 hover:bg-amber-500/20 disabled:opacity-50"
+                                  title="暂停当前视频，开始播放下一个"
+                                >
+                                  {busyKey === 'pause-course-' + course.id
+                                    ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                                    : <Pause className="w-3.5 h-3.5" />}
+                                  暂停
                                 </button>
                               )}
                               {course.status === 'attention' && course.kind === 'video' && (
@@ -559,14 +603,14 @@ export function VideoTasks() {
                                   onClick={() => void runAction(
                                     'retry-' + course.id,
                                     () => invoke('retry_video_course', { courseId: course.id }),
-                                    '课程已重新加入队列。',
+                                    '已重新加入待播放队列，当前视频播放完毕后将自动播放。',
                                   )}
                                   className="px-3 py-1.5 rounded-md border border-indigo-500/25 bg-indigo-500/10 text-indigo-400 text-xs font-semibold"
                                 >
                                   重试
                                 </button>
                               )}
-                              {course.status === 'playing' && <Loader2 className="w-4 h-4 animate-spin text-indigo-400" />}
+                              {(course.status === 'opening' || course.status === 'playing') && <Loader2 className="w-4 h-4 animate-spin text-indigo-400" />}
                               {course.status === 'completed' && <CheckCircle2 className="w-5 h-5 text-emerald-400" />}
                             </div>
                           </div>
@@ -580,6 +624,42 @@ export function VideoTasks() {
           </div>
         )}
       </section>
+
+      {deleteConfirmTopic && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="th-bg-card border th-border rounded-xl max-w-md w-full p-6 shadow-2xl animate-in fade-in zoom-in-95 duration-150">
+            <h3 className="text-base font-bold th-text">移除专题确认</h3>
+            <p className="text-sm th-text-muted mt-2 leading-relaxed">
+              确定从管理台移除专题“<span className="th-text font-medium">{deleteConfirmTopic.title}</span>”吗？
+            </p>
+            <p className="text-xs th-text-faint mt-1">
+              注意：仅从本工具管理台移除，平台的学习记录不会被删除。
+            </p>
+            <div className="mt-6 flex justify-end gap-3">
+              <button
+                onClick={() => setDeleteConfirmTopic(null)}
+                className="px-4 py-2 rounded-lg border th-border th-bg-surface th-text-2 text-xs font-semibold th-hover-surface"
+              >
+                取消
+              </button>
+              <button
+                onClick={() => {
+                  const topicId = deleteConfirmTopic.id;
+                  setDeleteConfirmTopic(null);
+                  void runAction(
+                    'remove-topic',
+                    () => invoke('remove_video_topic', { topicId }),
+                    '专题已从管理台移除。',
+                  );
+                }}
+                className="px-4 py-2 rounded-lg bg-rose-600 hover:bg-rose-500 text-white text-xs font-semibold"
+              >
+                确认移除
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
