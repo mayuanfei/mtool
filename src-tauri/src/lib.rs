@@ -1443,6 +1443,8 @@ pub fn run() {
             video_tasks::open_video_course,
             video_tasks::pause_video_course,
             video_tasks::retry_video_course,
+            video_tasks::reset_video_course,
+            video_tasks::reset_video_topic,
             video_tasks::remove_video_topic,
             video_tasks::show_video_learning_window,
             video_tasks::hide_video_learning_window,

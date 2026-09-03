@@ -3,7 +3,7 @@ import { invoke } from '@tauri-apps/api/core';
 import {
   AlertTriangle, BookOpen, CheckCircle2, ChevronRight,
   ClipboardCheck, Clock3, ExternalLink, FileText, Gauge, GraduationCap,
-  Loader2, Pause, Play, Presentation, RefreshCw, ShieldCheck, Trash2,
+  Loader2, Pause, Play, Presentation, RefreshCw, RotateCcw, ShieldCheck, SkipForward, Trash2,
   Video, Volume2, VolumeX,
 } from 'lucide-react';
 
@@ -91,12 +91,43 @@ const STATUS_META: Record<CourseStatus, { label: string; classes: string }> = {
   attention: { label: '需要处理', classes: 'text-rose-400 bg-rose-500/10 border-rose-500/25' },
 };
 
-const KIND_META: Record<CourseKind, { label: string; icon: typeof Video; classes: string }> = {
-  video: { label: '课程视频', icon: Video, classes: 'text-indigo-400 bg-indigo-500/10' },
-  exam: { label: '考试', icon: ClipboardCheck, classes: 'text-orange-400 bg-orange-500/10' },
-  slides: { label: '翻页课件', icon: Presentation, classes: 'text-cyan-400 bg-cyan-500/10' },
-  material: { label: '知识材料', icon: FileText, classes: 'text-slate-400 bg-slate-500/10' },
+const KIND_META: Record<CourseKind, { label: string; icon: typeof Video; classes: string; badgeClasses: string }> = {
+  video: {
+    label: '课程视频',
+    icon: Video,
+    classes: 'text-indigo-400 bg-indigo-500/10 border-indigo-500/25',
+    badgeClasses: 'text-indigo-400 bg-indigo-500/10 border-indigo-500/25',
+  },
+  slides: {
+    label: 'PPT 课件',
+    icon: Presentation,
+    classes: 'text-amber-400 bg-amber-500/10 border-amber-500/25',
+    badgeClasses: 'text-amber-400 bg-amber-500/10 border-amber-500/25',
+  },
+  material: {
+    label: '文档资料',
+    icon: FileText,
+    classes: 'text-emerald-400 bg-emerald-500/10 border-emerald-500/25',
+    badgeClasses: 'text-emerald-400 bg-emerald-500/10 border-emerald-500/25',
+  },
+  exam: {
+    label: '课程考试',
+    icon: ClipboardCheck,
+    classes: 'text-rose-400 bg-rose-500/10 border-rose-500/25',
+    badgeClasses: 'text-rose-400 bg-rose-500/10 border-rose-500/25',
+  },
 };
+
+function resolveCourseKind(course: { kind?: string; title?: string }): CourseKind {
+  const title = (course.title || '').trim();
+  if (/考试|测验|测试/.test(title)) return 'exam';
+  if (/ppt|课件|幻灯片|演示/i.test(title)) return 'slides';
+  if (/文档|阅读材料|参考资料|资料|pdf|手册/i.test(title)) return 'material';
+  if (course.kind === 'exam' || course.kind === 'slides' || course.kind === 'material') {
+    return course.kind;
+  }
+  return 'video';
+}
 
 function cx(...values: Array<string | false | null | undefined>): string {
   return values.filter(Boolean).join(' ');
@@ -235,6 +266,18 @@ export function VideoTasks() {
     });
   };
 
+  const activeTasks = useMemo(() => {
+    const list: Array<{ topicId: string; topicTitle: string; course: CourseItem }> = [];
+    for (const topic of dashboard.topics) {
+      for (const course of topic.courses) {
+        if (course.status === 'opening' || course.status === 'playing' || course.status === 'verifying') {
+          list.push({ topicId: topic.id, topicTitle: topic.title, course });
+        }
+      }
+    }
+    return list;
+  }, [dashboard.topics]);
+
   if (loading) {
     return (
       <div className="h-full flex items-center justify-center th-text-muted">
@@ -313,13 +356,17 @@ export function VideoTasks() {
               </div>
               <span className={cx(
                 'text-[11px] px-2 py-1 rounded-md border',
-                dashboard.settings.running && source.windowOpen
+                source.currentUrl?.toLowerCase().includes('/login') || source.currentUrl?.toLowerCase().includes('/sso')
+                  ? 'text-amber-400 border-amber-500/25 bg-amber-500/10'
+                  : dashboard.settings.running && source.windowOpen
                   ? 'text-indigo-400 border-indigo-500/25 bg-indigo-500/10'
                   : source.windowOpen
                   ? 'text-emerald-400 border-emerald-500/25 bg-emerald-500/10'
                   : 'th-text-muted th-border',
               )}>
-                {dashboard.settings.running && source.windowOpen
+                {source.currentUrl?.toLowerCase().includes('/login') || source.currentUrl?.toLowerCase().includes('/sso')
+                  ? '需扫码/登录'
+                  : dashboard.settings.running && source.windowOpen
                   ? '静默运行中'
                   : source.windowOpen
                   ? '会话已连接'
@@ -330,12 +377,19 @@ export function VideoTasks() {
               <button
                 onClick={() => void openSite(source.provider)}
                 disabled={busyKey === 'open-' + source.provider}
-                className="px-3 py-2 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white rounded-lg text-xs font-semibold flex items-center gap-2"
+                className={cx(
+                  'px-3 py-2 disabled:opacity-50 text-white rounded-lg text-xs font-semibold flex items-center gap-2',
+                  source.currentUrl?.toLowerCase().includes('/login') || source.currentUrl?.toLowerCase().includes('/sso')
+                    ? 'bg-amber-600 hover:bg-amber-500'
+                    : 'bg-indigo-600 hover:bg-indigo-500'
+                )}
               >
                 {busyKey === 'open-' + source.provider
                   ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
                   : <ExternalLink className="w-3.5 h-3.5" />}
-                {source.windowOpen ? '打开/选择专题' : '登录并选择专题'}
+                {source.currentUrl?.toLowerCase().includes('/login') || source.currentUrl?.toLowerCase().includes('/sso')
+                  ? '打开完成登录'
+                  : source.windowOpen ? '打开/选择专题' : '登录并选择专题'}
               </button>
               <button
                 onClick={() => void importTopic(source.provider)}
@@ -413,7 +467,7 @@ export function VideoTasks() {
               />
               跨站并行（最多 2 路）
             </label>
-            {dashboard.settings.running ? (
+            {dashboard.settings.running && (dashboard.stats.running > 0 || dashboard.stats.pending > 0) ? (
               <button
                 onClick={() => void runAction('pause', () => invoke('pause_video_queue'), '队列已暂停。')}
                 className="px-4 py-2.5 rounded-lg border border-amber-500/30 bg-amber-500/10 text-amber-300 text-sm font-semibold flex items-center gap-2"
@@ -429,6 +483,7 @@ export function VideoTasks() {
                 }, '队列已开始运行。')}
                 disabled={dashboard.stats.pending === 0}
                 className="px-4 py-2.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 text-white text-sm font-semibold flex items-center gap-2"
+                title={dashboard.stats.pending === 0 ? '所有课程已全部完成' : '开始自动播放待播放课程'}
               >
                 <Play className="w-4 h-4 fill-current" />
                 开始队列
@@ -436,6 +491,32 @@ export function VideoTasks() {
             )}
           </div>
         </div>
+        {activeTasks.length > 0 && (
+          <div className="mt-4 pt-4 border-t th-border flex flex-wrap items-center gap-3">
+            <span className="text-xs font-semibold th-text-muted flex items-center gap-2 shrink-0">
+              <span className="relative flex h-2 w-2">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
+                <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500" />
+              </span>
+              当前正在播放：
+            </span>
+            {activeTasks.map(({ topicId, topicTitle, course }) => (
+              <button
+                key={course.id}
+                onClick={() => {
+                  setExpandedTopics((prev) => new Set(prev).add(topicId));
+                  document.getElementById('topic-' + topicId)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                }}
+                className="px-3 py-1.5 rounded-lg bg-indigo-500/10 border border-indigo-500/30 text-xs flex items-center gap-2 hover:bg-indigo-500/20 hover:border-indigo-500/50 transition-colors text-left"
+                title="点击展开并定位到该专题"
+              >
+                <span className="text-indigo-400 font-semibold">【{topicTitle}】</span>
+                <span className="th-text-2 font-medium truncate max-w-xs">{course.title}</span>
+                <span className="text-emerald-400 font-bold tabular-nums">{Math.round(course.progress)}%</span>
+              </button>
+            ))}
+          </div>
+        )}
       </section>
 
       <section className="mb-5 rounded-xl border border-orange-500/25 bg-orange-500/10 px-5 py-4">
@@ -472,8 +553,16 @@ export function VideoTasks() {
               const providerName = topic.provider === 'ulearn' ? '银联乐学' : 'YS学堂';
               const denominator = topic.totalCount || topic.courses.length;
               const numerator = topic.completedCount || topic.courses.filter((course) => course.status === 'completed').length;
+              const activeCourse = topic.courses.find((course) => course.status === 'opening' || course.status === 'playing' || course.status === 'verifying');
               return (
-                <div key={topic.id}>
+                <div
+                  key={topic.id}
+                  id={'topic-' + topic.id}
+                  className={cx(
+                    'transition-colors duration-200',
+                    activeCourse && 'bg-indigo-500/[0.04]'
+                  )}
+                >
                   <div className="px-5 py-4 flex items-center gap-4 th-hover-surface">
                     <button
                       onClick={() => toggleTopic(topic.id)}
@@ -491,6 +580,12 @@ export function VideoTasks() {
                           {providerName}
                         </span>
                         <h3 className="text-sm font-semibold th-text-2 truncate">{topic.title}</h3>
+                        {activeCourse && (
+                          <span className="text-[11px] px-2.5 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/30 font-medium flex items-center gap-1.5 animate-pulse">
+                            <Loader2 className="w-3 h-3 animate-spin" />
+                            正在播放: {activeCourse.title} ({Math.round(activeCourse.progress)}%)
+                          </span>
+                        )}
                       </div>
                       <div className="mt-2 flex items-center gap-3">
                         <div className="h-1.5 rounded-full th-bg-surface flex-1 max-w-sm overflow-hidden">
@@ -503,6 +598,18 @@ export function VideoTasks() {
                       </div>
                     </div>
                     <div className="flex items-center gap-1 shrink-0">
+                      <button
+                        onClick={() => void runAction(
+                          'reset-' + topic.id,
+                          () => invoke('reset_video_topic', { topicId: topic.id }),
+                          '专题所有课程已重置为待播放状态。',
+                        )}
+                        disabled={busyKey === 'reset-' + topic.id}
+                        className="p-2 rounded-lg th-text-muted hover:text-amber-400 th-hover-surface"
+                        title="重置本专题（重新设为待播放）"
+                      >
+                        <RotateCcw className={cx('w-4 h-4', busyKey === 'reset-' + topic.id && 'animate-spin')} />
+                      </button>
                       <button
                         onClick={() => void syncTopic(topic)}
                         className="p-2 rounded-lg th-text-muted hover:text-indigo-400 th-hover-surface"
@@ -523,22 +630,37 @@ export function VideoTasks() {
                   {expanded && (
                     <div className="border-t th-border bg-black/5">
                       {topic.courses.map((course) => {
-                        const kind = KIND_META[course.kind] || KIND_META.video;
+                        const kindKey = resolveCourseKind(course);
+                        const kind = KIND_META[kindKey] || KIND_META.video;
                         const status = STATUS_META[course.status] || STATUS_META.pending;
                         const KindIcon = kind.icon;
+                        const isLoginError = course.status === 'attention' && Boolean(course.lastError?.includes('登录'));
+                        const isSkipped = course.status === 'attention' && Boolean(course.lastError?.includes('跳过'));
+                        const statusLabel = isLoginError
+                          ? '需要登录'
+                          : isSkipped
+                          ? '已自动跳过'
+                          : (course.status === 'playing' ? '正在播放 ' + Math.round(course.progress) + '%' : status.label);
+                        const statusClasses = isLoginError
+                          ? 'text-amber-400 bg-amber-500/10 border-amber-500/30'
+                          : isSkipped
+                          ? 'text-amber-400 bg-amber-500/10 border-amber-500/30'
+                          : status.classes;
                         return (
                           <div key={course.id} className="px-6 py-3.5 ml-7 border-b last:border-b-0 th-border flex items-center gap-4">
-                            <div className={cx('w-9 h-9 rounded-lg flex items-center justify-center shrink-0', kind.classes)}>
+                            <div className={cx('w-9 h-9 rounded-lg flex items-center justify-center shrink-0 border', kind.classes)} title={kind.label}>
                               <KindIcon className="w-4 h-4" />
                             </div>
                             <div className="min-w-0 flex-1">
                               <div className="flex flex-wrap items-center gap-2">
                                 <span className="text-sm font-medium th-text-2 truncate">{course.title}</span>
-                                <span className={cx('text-[10px] px-1.5 py-0.5 rounded border flex items-center gap-1', status.classes)}>
+                                <span className={cx('text-[10px] px-1.5 py-0.5 rounded border flex items-center gap-1', statusClasses)}>
                                   {(course.status === 'opening' || course.status === 'playing') && <Loader2 className="w-2.5 h-2.5 animate-spin" />}
-                                  {course.status === 'playing' ? '正在播放 ' + Math.round(course.progress) + '%' : status.label}
+                                  {statusLabel}
                                 </span>
-                                <span className="text-[10px] th-text-muted">{kind.label}</span>
+                                <span className={cx('text-[10px] px-1.5 py-0.5 rounded border font-medium', kind.badgeClasses)}>
+                                  {kind.label}
+                                </span>
                               </div>
                               <div className="flex flex-wrap items-center gap-3 mt-1.5 text-[11px] th-text-muted">
                                 {course.sectionTitle && <span>{course.sectionTitle}</span>}
@@ -560,25 +682,30 @@ export function VideoTasks() {
                                   <span>平台进度 {Math.round(course.progress)}%</span>
                                 )}
                                 {course.status === 'attention' && course.lastError && (
-                                   <span className="text-rose-400 flex items-center gap-1">
+                                   <span className={cx('flex items-center gap-1', (isLoginError || isSkipped) ? 'text-amber-400 font-medium' : 'text-rose-400')}>
                                     <AlertTriangle className="w-3 h-3" />{course.lastError}
                                   </span>
                                 )}
                               </div>
                             </div>
                             <div className="flex items-center gap-2 shrink-0">
-                              {/* 仅正在播放中的视频，或需要人工处理的考试/课件，展示打开按钮 */}
-                              {(course.status === 'opening' || course.status === 'playing' || course.kind !== 'video') && (
+                              {/* 仅正在播放中的视频，需要人工处理的考试/课件，或者需要登录/处理的异常课程，展示打开按钮 */}
+                              {(course.status === 'opening' || course.status === 'playing' || course.status === 'attention' || kindKey !== 'video') && (
                                 <button
                                   onClick={() => void runAction(
                                     'open-course-' + course.id,
                                     () => invoke('open_video_course', { courseId: course.id }),
                                   )}
-                                  className="px-3 py-1.5 rounded-md border th-border-subtle th-bg-input-alt th-text-2 text-xs font-semibold flex items-center gap-1.5 th-hover-surface"
-                                  title="打开网页窗口查看内容"
+                                  className={cx(
+                                    'px-3 py-1.5 rounded-md border text-xs font-semibold flex items-center gap-1.5 th-hover-surface',
+                                    isLoginError
+                                      ? 'border-amber-500/30 bg-amber-500/10 text-amber-300 hover:bg-amber-500/20'
+                                      : 'th-border-subtle th-bg-input-alt th-text-2'
+                                  )}
+                                  title={isLoginError ? '打开窗口完成扫码/账号登录' : '打开网页窗口查看内容'}
                                 >
                                   <ExternalLink className="w-3.5 h-3.5" />
-                                  {course.kind === 'exam' ? '打开考试' : course.kind === 'slides' ? '打开课件' : '打开内容'}
+                                  {isLoginError ? '打开登录' : kindKey === 'exam' ? '打开考试' : kindKey === 'slides' ? '打开课件' : kindKey === 'material' ? '打开资料' : '打开内容'}
                                 </button>
                               )}
                               {(course.status === 'opening' || course.status === 'playing') && (
@@ -586,19 +713,19 @@ export function VideoTasks() {
                                   onClick={() => void runAction(
                                     'pause-course-' + course.id,
                                     () => invoke('pause_video_course', { courseId: course.id }),
-                                    '已暂停当前课程，继续播放下一门。',
+                                    '已跳过当前课程，开始播放下一门。',
                                   )}
                                   disabled={busyKey === 'pause-course-' + course.id}
                                   className="px-3 py-1.5 rounded-md border border-amber-500/30 bg-amber-500/10 text-amber-300 text-xs font-semibold flex items-center gap-1.5 hover:bg-amber-500/20 disabled:opacity-50"
-                                  title="暂停当前视频，开始播放下一个"
+                                  title="跳过当前视频，开始播放下一个"
                                 >
                                   {busyKey === 'pause-course-' + course.id
                                     ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                                    : <Pause className="w-3.5 h-3.5" />}
-                                  暂停
+                                    : <SkipForward className="w-3.5 h-3.5" />}
+                                  跳过
                                 </button>
                               )}
-                              {course.status === 'attention' && course.kind === 'video' && (
+                              {course.status === 'attention' && (kindKey === 'video' || kindKey === 'slides') && (
                                 <button
                                   onClick={() => void runAction(
                                     'retry-' + course.id,
@@ -611,7 +738,23 @@ export function VideoTasks() {
                                 </button>
                               )}
                               {(course.status === 'opening' || course.status === 'playing') && <Loader2 className="w-4 h-4 animate-spin text-indigo-400" />}
-                              {course.status === 'completed' && <CheckCircle2 className="w-5 h-5 text-emerald-400" />}
+                              {course.status === 'completed' && (
+                                <div className="flex items-center gap-1.5">
+                                  <button
+                                    onClick={() => void runAction(
+                                      'reset-course-' + course.id,
+                                      () => invoke('reset_video_course', { courseId: course.id }),
+                                      '已将该课程重置为待播放。',
+                                    )}
+                                    disabled={busyKey === 'reset-course-' + course.id}
+                                    className="p-1.5 rounded-md th-text-muted hover:text-amber-400 th-hover-surface"
+                                    title="重新学习（重置为待播放）"
+                                  >
+                                    <RotateCcw className={cx('w-3.5 h-3.5', busyKey === 'reset-course-' + course.id && 'animate-spin')} />
+                                  </button>
+                                  <CheckCircle2 className="w-5 h-5 text-emerald-400" />
+                                </div>
+                              )}
                             </div>
                           </div>
                         );
