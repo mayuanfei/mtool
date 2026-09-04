@@ -1350,8 +1350,21 @@ fn capture_script(request_id: &str, provider: Provider) -> String {
         return false;
       }
 
+      // 如果当前元素包含多个子任务（多个学习时长、多个学分或多个完成状态），说明是分组容器而非单门课程
+      const selfDurations = countMatches(text, /学习时长\s*[:：]?\s*\d+/g);
+      const selfStatusCount = countMatches(text, /(已完成|已学完|已学习|未学习|学习中|已考试)/g);
+      const selfCredits = countMatches(text, /(必修学分|选修学分|学分)\s*[:：]?\s*\d+/g);
+      if (selfDurations > 1 || selfStatusCount > 1 || selfCredits > 1) {
+        return false;
+      }
+
       const title = titleFrom(element);
       if (!title || isTagOrBadge(title) || isMeta(title)) return false;
+
+      // 如果标题本身是期次/阶段/模块等分组大标题，排除作为单课
+      if (/^(\d{1,2}\s*)?(第.+[期阶段部分步回篇]|模块\d+)\s*[:：]/.test(title)) {
+        return false;
+      }
 
       if (provider === "merchant") {
         const hasMeta = /学习时长|进度|学分|已完成|已考试/.test(text) || /考试/.test(text);
@@ -1359,14 +1372,23 @@ fn capture_script(request_id: &str, provider: Provider) -> String {
         const parent = element.parentElement;
         if (parent && parent !== document.body) {
           const parentText = clean(parent.innerText);
-          // 若父容器包含更完整有效的标题且长度合理，继续向上冒泡至真正的卡片外层
-          const parentTitle = titleFrom(parent);
-          if (parentTitle && parentTitle.length > title.length && !isTagOrBadge(parentTitle) && parentText.length < 1200) {
-            return false;
-          }
-          const selfDurations = countMatches(text, /学习时长\s*[:：]?\s*\d+/g);
           const parentDurations = countMatches(parentText, /学习时长\s*[:：]?\s*\d+/g);
-          if (selfDurations <= 1 && parentDurations <= 1 && parentText.length < 800) {
+          const parentStatusCount = countMatches(parentText, /(已完成|已学完|已学习|未学习|学习中|已考试)/g);
+          const parentCredits = countMatches(parentText, /(必修学分|选修学分|学分)\s*[:：]?\s*\d+/g);
+
+          // 若父级包含多个任务（说明父级是分组列表），当前元素就是独立的子项目卡片，严禁向上冒泡吞并！
+          if (parentDurations > 1 || parentStatusCount > 1 || parentCredits > 1) {
+            return true;
+          }
+
+          const parentTitle = titleFrom(parent);
+          if (
+            parentTitle &&
+            parentTitle.length > title.length &&
+            !isTagOrBadge(parentTitle) &&
+            !/^(\d{1,2}\s*)?(第.+[期阶段部分步回篇]|模块\d+)\s*[:：]/.test(parentTitle) &&
+            parentText.length < 600
+          ) {
             return false;
           }
         }
@@ -1377,9 +1399,11 @@ fn capture_script(request_id: &str, provider: Provider) -> String {
         const parent = element.parentElement;
         if (parent && parent !== document.body) {
           const parentText = clean(parent.innerText);
-          const selfCount = countMatches(text, /(未学习|已学习|学习中)/g);
           const parentCount = countMatches(parentText, /(未学习|已学习|学习中)/g);
-          if (selfCount === 1 && parentCount === 1 && parentText.length < 800) {
+          if (parentCount > 1) {
+            return true;
+          }
+          if (parentText.length < 800 && parentCount === 1) {
             return false;
           }
         }
@@ -1418,7 +1442,7 @@ fn capture_script(request_id: &str, provider: Provider) -> String {
     const sectionTitleFrom = (container) => {
       if (provider !== "merchant") return "";
       let current = container;
-      for (let depth = 0; current && current.parentElement && depth < 6; depth++, current = current.parentElement) {
+      for (let depth = 0; current && current.parentElement && depth < 8; depth++, current = current.parentElement) {
         const siblings = Array.from(current.parentElement.children);
         const index = siblings.indexOf(current);
         for (let offset = index - 1; offset >= 0; offset--) {
@@ -1426,6 +1450,15 @@ fn capture_script(request_id: &str, provider: Provider) -> String {
           if (text && text.length <= 80 && (/^\d{1,2}\s/.test(text) || /^第.+期/.test(text) || /^模块\d/.test(text))) {
             const firstLine = text.split(/\n+/).map(clean).find((l) => /^\d{1,2}\s/.test(l) || /^第.+期/.test(l)) || text;
             return firstLine;
+          }
+        }
+        const headers = Array.from(current.parentElement.querySelectorAll("h1, h2, h3, h4, h5, [class*='header'], [class*='title'], [class*='phase'], [class*='section']"));
+        for (const h of headers) {
+          if (h !== current && !current.contains(h)) {
+            const ht = clean(h.innerText);
+            if (ht && ht.length <= 80 && (/^\d{1,2}\s/.test(ht) || /第.+期/.test(ht) || /模块\d/.test(ht))) {
+              return ht;
+            }
           }
         }
       }
@@ -3216,6 +3249,40 @@ pub async fn open_video_course(
     course_id: String,
 ) -> Result<(), String> {
     let course = load_course(state.db_path.as_ref(), &course_id)?;
+    if course.kind != "video" {
+        // 课件、考试、资料属于用户手动交互内容，在前台选专题/浏览窗口打开，完全不打扰后台视频播放队列
+        let window = ensure_browser_window(&app, state.inner(), course.provider, true).await?;
+        if !course.url.trim().is_empty() {
+            if let Ok(url) = course.url.parse::<tauri::Url>() {
+                let _ = window.navigate(url);
+            }
+        } else {
+            let topic_url = topic_url(state.db_path.as_ref(), &course.topic_id)?;
+            if let Ok(url) = topic_url.parse::<tauri::Url>() {
+                let _ = window.navigate(url);
+                let click_script = course_click_script(&course.title, &course.locator);
+                let click_window = window.clone();
+                let click_provider = course.provider;
+                tauri::async_runtime::spawn(async move {
+                    for delay in [1200, 2500, 4500, 8000] {
+                        tokio::time::sleep(Duration::from_millis(delay)).await;
+                        let current_url = click_window.url().ok();
+                        if current_url.as_ref().is_some_and(|current| {
+                            current.as_str() != topic_url && provider_accepts_url(click_provider, current)
+                        }) {
+                            break;
+                        }
+                        let _ = click_window.eval(&click_script);
+                    }
+                });
+            }
+        }
+        let _ = window.show();
+        let _ = window.unminimize();
+        let _ = window.set_focus();
+        return Ok(());
+    }
+
     let is_currently_running = {
         let runtime = state
             .runtime
@@ -3259,45 +3326,43 @@ pub async fn open_video_course(
         }
     }
     open_course(&app, state.inner(), &course, false).await?;
-    if course.kind == "video" {
-        let timestamp = now();
-        let conn = Connection::open(state.db_path.as_ref()).map_err(|error| error.to_string())?;
-        let _ = conn.execute(
-            "UPDATE video_courses SET status='pending',updated_at=?2 WHERE provider=?1 AND id != ?3 AND status IN ('opening','playing','verifying')",
-            params![course.provider.key(), timestamp, course.id],
+    let timestamp = now();
+    let conn = Connection::open(state.db_path.as_ref()).map_err(|error| error.to_string())?;
+    let _ = conn.execute(
+        "UPDATE video_courses SET status='pending',updated_at=?2 WHERE provider=?1 AND id != ?3 AND status IN ('opening','playing','verifying')",
+        params![course.provider.key(), timestamp, course.id],
+    );
+    conn.execute(
+        "UPDATE video_courses SET status='opening',last_error=NULL,updated_at=?2 WHERE id=?1",
+        params![course.id, timestamp],
+    )
+    .map_err(|error| error.to_string())?;
+    let initial_duration = course.duration_seconds as f64;
+    let initial_time = if initial_duration > 0.0 && course.progress > 0.0 {
+        (course.progress / 100.0) * initial_duration
+    } else {
+        0.0
+    };
+    state
+        .runtime
+        .lock()
+        .unwrap_or_else(|error| error.into_inner())
+        .active
+        .insert(
+            course.provider.key().to_string(),
+            ActiveCourse {
+                course_id: course.id,
+                topic_id: course.topic_id,
+                provider: course.provider,
+                phase: "opening".to_string(),
+                phase_since: timestamp,
+                last_media_at: timestamp,
+                last_progress_at: timestamp,
+                last_advanced_time: initial_time,
+                current_time: initial_time,
+                duration: initial_duration,
+            },
         );
-        conn.execute(
-            "UPDATE video_courses SET status='opening',last_error=NULL,updated_at=?2 WHERE id=?1",
-            params![course.id, timestamp],
-        )
-        .map_err(|error| error.to_string())?;
-        let initial_duration = course.duration_seconds as f64;
-        let initial_time = if initial_duration > 0.0 && course.progress > 0.0 {
-            (course.progress / 100.0) * initial_duration
-        } else {
-            0.0
-        };
-        state
-            .runtime
-            .lock()
-            .unwrap_or_else(|error| error.into_inner())
-            .active
-            .insert(
-                course.provider.key().to_string(),
-                ActiveCourse {
-                    course_id: course.id,
-                    topic_id: course.topic_id,
-                    provider: course.provider,
-                    phase: "opening".to_string(),
-                    phase_since: timestamp,
-                    last_media_at: timestamp,
-                    last_progress_at: timestamp,
-                    last_advanced_time: initial_time,
-                    current_time: initial_time,
-                    duration: initial_duration,
-                },
-            );
-    }
     Ok(())
 }
 
@@ -3779,6 +3844,13 @@ mod tests {
         assert!(script.contains("问卷|调查问卷|调研问卷|评价表"));
         assert!(script.contains("const itemKind = detectCourseKind(title, text, durationSeconds);"));
         assert!(script.contains("const kind = detectCourseKind(title, text, durationSeconds);"));
+    }
+
+    #[test]
+    fn capture_script_prevents_group_container_from_swallowing_phase_sub_courses() {
+        let script = capture_script("test_req", Provider::Merchant);
+        assert!(script.contains("selfDurations > 1 || selfStatusCount > 1 || selfCredits > 1"));
+        assert!(script.contains("parentDurations > 1 || parentStatusCount > 1 || parentCredits > 1"));
     }
 }
 
