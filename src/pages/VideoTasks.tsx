@@ -3,8 +3,8 @@ import { invoke } from '@tauri-apps/api/core';
 import {
   AlertTriangle, BookOpen, CheckCircle2, ChevronRight,
   ClipboardCheck, Clock3, ExternalLink, FileText, Gauge, GraduationCap,
-  Loader2, Pause, Play, Presentation, RefreshCw, RotateCcw, ShieldCheck, SkipForward, Trash2,
-  Video, Volume2, VolumeX,
+  Loader2, Pause, Play, Presentation, RefreshCw, ShieldCheck, SkipForward, Trash2,
+  Undo2, Video, Volume2, VolumeX,
 } from 'lucide-react';
 
 type Provider = 'ulearn' | 'merchant';
@@ -317,13 +317,6 @@ export function VideoTasks() {
             )} />
             {dashboard.settings.running ? '队列运行中' : '队列已暂停'}
           </div>
-          <button
-            onClick={() => void runAction('refresh', refreshDashboard)}
-            className="px-3 py-2 rounded-lg border th-border th-bg-card th-text-3 th-hover-surface text-xs font-semibold flex items-center gap-2"
-          >
-            <RefreshCw className={cx('w-3.5 h-3.5', busyKey === 'refresh' && 'animate-spin')} />
-            刷新
-          </button>
         </div>
       </header>
 
@@ -625,7 +618,7 @@ export function VideoTasks() {
                         className="p-2 rounded-lg th-text-muted hover:text-amber-400 th-hover-surface"
                         title="重置本专题（重新设为待播放）"
                       >
-                        <RotateCcw className={cx('w-4 h-4', busyKey === 'reset-' + topic.id && 'animate-spin')} />
+                        <Undo2 className={cx('w-4 h-4', busyKey === 'reset-' + topic.id && 'animate-spin')} />
                       </button>
                       <button
                         onClick={() => void syncTopic(topic)}
@@ -785,7 +778,7 @@ export function VideoTasks() {
                                     className="p-1.5 rounded-md th-text-muted hover:text-amber-400 th-hover-surface"
                                     title="重新学习（重置为待播放）"
                                   >
-                                    <RotateCcw className={cx('w-3.5 h-3.5', busyKey === 'reset-course-' + course.id && 'animate-spin')} />
+                                    <Undo2 className={cx('w-3.5 h-3.5', busyKey === 'reset-course-' + course.id && 'animate-spin')} />
                                   </button>
                                   <CheckCircle2 className="w-5 h-5 text-emerald-400" />
                                 </div>
