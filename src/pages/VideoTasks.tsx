@@ -243,6 +243,11 @@ export function VideoTasks() {
     },
   );
 
+  const openTopic = (topic: TopicItem) => runAction(
+    'open-topic-' + topic.id,
+    () => invoke('open_video_topic', { topicId: topic.id }),
+  );
+
   const syncTopic = (topic: TopicItem) => runAction(
     'sync-' + topic.id,
     async () => {
@@ -599,6 +604,18 @@ export function VideoTasks() {
                     </div>
                     <div className="flex items-center gap-1 shrink-0">
                       <button
+                        onClick={() => void openTopic(topic)}
+                        disabled={busyKey === 'open-topic-' + topic.id}
+                        className="p-2 rounded-lg th-text-muted hover:text-indigo-400 th-hover-surface"
+                        title="打开专题页面"
+                      >
+                        {busyKey === 'open-topic-' + topic.id ? (
+                          <Loader2 className="w-4 h-4 animate-spin" />
+                        ) : (
+                          <ExternalLink className="w-4 h-4" />
+                        )}
+                      </button>
+                      <button
                         onClick={() => void runAction(
                           'reset-' + topic.id,
                           () => invoke('reset_video_topic', { topicId: topic.id }),
@@ -738,6 +755,24 @@ export function VideoTasks() {
                                 </button>
                               )}
                               {(course.status === 'opening' || course.status === 'playing') && <Loader2 className="w-4 h-4 animate-spin text-indigo-400" />}
+                              {course.status !== 'completed' && (
+                                <button
+                                  onClick={() => void runAction(
+                                    'complete-course-' + course.id,
+                                    () => invoke('complete_video_course', { courseId: course.id }),
+                                    '已将该课程直接标记为已完成。',
+                                  )}
+                                  disabled={busyKey === 'complete-course-' + course.id}
+                                  className="p-1.5 rounded-md th-text-muted hover:text-emerald-400 th-hover-surface"
+                                  title="直接标记为已完成（适用于已过期计划或线下课）"
+                                >
+                                  {busyKey === 'complete-course-' + course.id ? (
+                                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                                  ) : (
+                                    <CheckCircle2 className="w-4 h-4" />
+                                  )}
+                                </button>
+                              )}
                               {course.status === 'completed' && (
                                 <div className="flex items-center gap-1.5">
                                   <button

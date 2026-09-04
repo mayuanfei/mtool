@@ -476,7 +476,7 @@ fn bridge_script(provider: Provider, speed: f64, muted: bool) -> String {
         media.__mtoolLastReport = Date.now();
         report("timeupdate", media);
       }
-      if (media.duration > 5 && (media.currentTime >= media.duration - 1.5 || (media.currentTime / media.duration >= 0.98))) {
+      if (media.ended) {
         report("ended", media);
       }
     }, true);
@@ -781,6 +781,47 @@ fn bridge_script(provider: Provider, speed: f64, muted: bool) -> String {
       return false;
     };
 
+    // 0.2 检测课程计划是否已结束/过期（已结束的课程无法继续学习，直接标记为完成）
+    const hasExpiredOrEndedNotice = () => {
+      for (const doc of docs) {
+        try {
+          const bodyText = (doc.body ? doc.body.innerText : "") || "";
+          const alerts = doc.querySelectorAll(".el-message, .ant-message, [role='alert'], [class*='message'], [class*='toast'], [class*='notice'], [class*='tip'], [class*='alert']");
+          for (const a of alerts) {
+            if (!a || a.offsetWidth === 0 || a.offsetHeight === 0) continue;
+            const t = (a.innerText || "").replace(/\s+/g, "");
+            if (
+              t.includes("计划已结束") ||
+              t.includes("培训已结束") ||
+              t.includes("活动已结束") ||
+              t.includes("学习已结束") ||
+              t.includes("项目已结束") ||
+              t.includes("计划已关闭") ||
+              t.includes("已超过学习截止时间") ||
+              t.includes("已过学习截止时间") ||
+              t.includes("课程已下架") ||
+              t.includes("报名已结束")
+            ) {
+              return true;
+            }
+          }
+          const m = bodyText.match(/起止时间\s*[:：]?\s*\d{4}[-/.]\d{1,2}[-/.]\d{1,2}.*?[~至到-]\s*(\d{4}[-/.]\d{1,2}[-/.]\d{1,2}(?:\s+\d{1,2}:\d{1,2}(?::\d{1,2})?)?)/);
+          if (m) {
+            const endTs = new Date(m[1].replace(/-/g, "/")).getTime();
+            if (endTs && !isNaN(endTs) && endTs < Date.now()) {
+              return true;
+            }
+          }
+        } catch (_) {}
+      }
+      return false;
+    };
+
+    if (hasExpiredOrEndedNotice()) {
+      report("ended", { currentTime: 100, duration: 100 });
+      return;
+    }
+
     // 1. 维持倍速、事件跟踪，并主动上报当前播放进度
     const allMedias = [];
     docs.forEach((doc) => {
@@ -873,8 +914,57 @@ fn bridge_script(provider: Provider, speed: f64, muted: bool) -> String {
 fn browser_nav_script(provider: Provider) -> String {
     const TEMPLATE: &str = r##"
 (() => {
+  // 1. 全局媒体静音暂停（在所有 frame / iframe 均生效）
+  // 选专题窗口专门用于浏览目录和导入专题，防止视频自动出声并避免抢占学习
+  try {
+    if (!window.__MTOOL_BROWSER_NAV_SHIELD__) {
+      window.__MTOOL_BROWSER_NAV_SHIELD__ = true;
+
+      // 使用标准的 play 事件捕获监听，自动静音并暂停，绝不修改页面任何 DOM 结构与样式
+      window.addEventListener("play", (e) => {
+        try {
+          const media = e.target;
+          if (media && typeof media.pause === "function") {
+            media.muted = true;
+            media.pause();
+          }
+        } catch (_) {}
+      }, true);
+
+      const ensurePaused = () => {
+        try {
+          document.querySelectorAll("video, audio").forEach((m) => {
+            if (!m.paused) {
+              m.muted = true;
+              m.pause();
+            }
+          });
+        } catch (_) {}
+      };
+
+      if (document.body) ensurePaused();
+      else document.addEventListener("DOMContentLoaded", ensurePaused, { once: true });
+
+      const timer = setInterval(ensurePaused, 1000);
+      setTimeout(() => clearInterval(timer), 15000);
+    }
+  } catch (_) {}
+
+  // 2. 仅在顶层窗口（Top Frame）挂载导航工具栏与快捷键
   if (window.top !== window || document.getElementById("__mtool_nav_toolbar__")) return;
   const homeUrl = "__HOME_URL__";
+
+  // 快捷键支持：Alt + ← 后退，Alt + → 前进
+  window.addEventListener("keydown", (e) => {
+    if ((e.altKey || e.metaKey) && e.key === "ArrowLeft") {
+      e.preventDefault();
+      window.history.back();
+    } else if ((e.altKey || e.metaKey) && e.key === "ArrowRight") {
+      e.preventDefault();
+      window.history.forward();
+    }
+  });
+
   const bar = document.createElement("div");
   bar.id = "__mtool_nav_toolbar__";
   bar.setAttribute("style", `
@@ -1110,6 +1200,21 @@ fn course_click_script(title: &str, locator: &str) -> String {
           }} catch (_) {{
             try {{ clickTarget.click(); }} catch (_) {{}}
           }}
+
+          window.setTimeout(() => {{
+            const alerts = Array.from(document.querySelectorAll(".el-message, .ant-message, [role='alert'], [class*='message'], [class*='toast'], [class*='notice'], [class*='tip']"));
+            for (const a of alerts) {{
+              const t = (a.innerText || "").replace(/\s+/g, "");
+              if (t.includes("计划已结束") || t.includes("培训已结束") || t.includes("活动已结束") || t.includes("已超过学习截止时间")) {{
+                const message = "MTOOL_MEDIA|merchant|ended|100|100|" + Date.now();
+                if (window.top === window) document.title = message;
+                else {{
+                  try {{ window.top.postMessage({{ __mtoolMedia: message }}, "*"); }} catch (_) {{}}
+                }}
+                break;
+              }}
+            }}
+          }}, 800);
         }})();"#
     )
 }
@@ -1148,9 +1253,45 @@ fn capture_script(request_id: &str, provider: Provider) -> String {
       return parts.join(" > ");
     };
     const countMatches = (str, regex) => (String(str || "").match(regex) || []).length;
-    const isTagOrBadge = (s) => /^(知识|课程|考试|测验|测试|课件|文档|阅读材料|参考资料|视频|音频|图文|直播|ppt|pptx|pdf|word|excel|练习|作业|大纲|目录|必修|选修|必修课|选修课|必修学分|选修学分|已完成|已学完|已学习|未学习|学习中|已考试|已通过|未通过|进行中|全部|展开|收起|去学习|立即学习|开始学习|重新学习|继续学习|查看|详情|上次学习|试看|播放中|\d{1,2})$/i.test(clean(s));
+    const isTagOrBadge = (s) => /^(知识|课程|考试|测验|测试|课件|文档|阅读材料|参考资料|视频|音频|图文|直播|ppt|pptx|pdf|word|excel|线下课|线上课|面授|面授课|公开课|问卷|调查问卷|评价表|满意度评价|调研|签到|打卡|活动|讨论|实操|练习|作业|大纲|目录|必修|选修|必修课|选修课|必修学分|选修学分|已完成|已学完|已学习|未学习|学习中|已考试|已通过|未通过|进行中|全部|展开|收起|去学习|立即学习|开始学习|重新学习|继续学习|查看|详情|上次学习|试看|播放中|\d{1,2})$/i.test(clean(s));
     const isMeta = (s) => /(学习时长|必修学分|选修学分|进度\s*[:：]?|学时\s*[:：]?\s*\d+|学分\s*[:：]?\s*\d+|起止时间|得分|正确率|总分|题数|时长\s*[:：]|考试时长|课程数|浏览人数|学习人数)/i.test(s);
     const isSiteOrUiTitle = (s) => /^(YS学堂|银商学堂|银联乐学|中国银联|乐学|首页|个人中心|学习中心|学习地图|考试中心|赛事中心|全部|培训管理|培训介绍|培训内容|专题介绍|课程大纲|乐学圈|我的学习|我的课程|课程详情|专题详情|全部课程|培训项目|学习任务|登录|加入自学|已加入)$/i.test(s);
+
+    const detectCourseKind = (title, text, durationSeconds) => {
+      const cleanTitle = String(title || "").trim();
+      const cleanText = String(text || "").trim();
+
+      if (/ppt|课件|幻灯片|演示/i.test(cleanTitle) || /(^|\s)(ppt|课件|幻灯片)(\s|$)/i.test(cleanText)) {
+        return "slides";
+      }
+      if (/(文档|阅读材料|参考资料|资料|pdf|手册)/i.test(cleanTitle) || /(^|\s)(文档|资料|pdf)(\s|$)/i.test(cleanText)) {
+        return "material";
+      }
+      if (/线下课|面授|签到|打卡/.test(cleanTitle) || /(^|\s)(线下课|面授)(\s|$)/.test(cleanText)) {
+        return "material";
+      }
+
+      // 排除 IT/软件工程等纯技术课程词汇误伤
+      const isTechTesting = /(软件测试|压力测试|接口测试|性能测试|自动化测试|测试用例|测试开发|单元测试|测试方法|测试体系|测试流程|测试实战|测试理论)/.test(cleanTitle);
+
+      const hasExplicitExamBadge = /(^|\s)(考试|测验|试卷)(\s|$)/.test(cleanText);
+      const hasExamKeywordInTitle = /(期末考试|结业考试|随堂测验|模拟考试|在线考试|阶段测验|课后测验|综合测试|结业测试|试卷)|^.*(考试|测验)$/.test(cleanTitle) ||
+        (!isTechTesting && /(考试|测验)/.test(cleanTitle));
+
+      if (hasExplicitExamBadge || hasExamKeywordInTitle) {
+        return "exam";
+      }
+
+      // 问卷/评价：仅匹配明确的问卷词汇，严禁单独匹配“调研”或“调查”误伤普通课题（如“市场调研”、“社会调查”）
+      const hasSurveyBadge = /(^|\s)(问卷|调查问卷|调研问卷|评价表|满意度评价)(\s|$)/.test(cleanText);
+      const hasSurveyTitle = /(问卷|调查问卷|调研问卷|满意度调查|评价表|满意度评价|课后评价|教学评价)/.test(cleanTitle);
+
+      if (hasSurveyBadge || hasSurveyTitle) {
+        return "exam";
+      }
+
+      return "video";
+    };
 
     const scoreTitleCandidate = (t) => {
       let score = 0;
@@ -1218,9 +1359,14 @@ fn capture_script(request_id: &str, provider: Provider) -> String {
         const parent = element.parentElement;
         if (parent && parent !== document.body) {
           const parentText = clean(parent.innerText);
-          const selfDurations = countMatches(text, /学习时长\s*[:：]?\s*\d+|必修学分/g);
-          const parentDurations = countMatches(parentText, /学习时长\s*[:：]?\s*\d+|必修学分/g);
-          if (selfDurations === 1 && parentDurations === 1 && parentText.length < 800) {
+          // 若父容器包含更完整有效的标题且长度合理，继续向上冒泡至真正的卡片外层
+          const parentTitle = titleFrom(parent);
+          if (parentTitle && parentTitle.length > title.length && !isTagOrBadge(parentTitle) && parentText.length < 1200) {
+            return false;
+          }
+          const selfDurations = countMatches(text, /学习时长\s*[:：]?\s*\d+/g);
+          const parentDurations = countMatches(parentText, /学习时长\s*[:：]?\s*\d+/g);
+          if (selfDurations <= 1 && parentDurations <= 1 && parentText.length < 800) {
             return false;
           }
         }
@@ -1497,10 +1643,7 @@ fn capture_script(request_id: &str, provider: Provider) -> String {
         const completed = /(已完成|已学完|已学)/.test(text) || (progressMatch ? Number(progressMatch[1]) >= 100 : false) || item.matches("[class*='complete'], [class*='finish'], [class*='learned']");
         const progress = completed ? 100 : (progressMatch ? Number(progressMatch[1]) : 0);
 
-        let itemKind = "video";
-        if (/考试|测验|测试/.test(title) || /(^|\s)考试(\s|$)/.test(text)) itemKind = "exam";
-        else if (/ppt|课件|幻灯片|演示/i.test(title) || /(^|\s)(ppt|课件|幻灯片)(\s|$)/i.test(text)) itemKind = "slides";
-        else if (/(文档|材料|资料|pdf|手册)/i.test(title)) itemKind = "material";
+        const itemKind = detectCourseKind(title, text, durationSeconds);
 
         parsed.push({
           externalId,
@@ -1563,10 +1706,7 @@ fn capture_script(request_id: &str, provider: Provider) -> String {
           }
         }
 
-        let kind = "video";
-        if (/考试|测验|测试/.test(title) || /(^|\s)考试(\s|$)/.test(text)) kind = "exam";
-        else if (/ppt|课件|幻灯片|演示/i.test(title) || /(^|\s)(ppt|课件|幻灯片)(\s|$)/i.test(text)) kind = "slides";
-        else if (/(文档|阅读材料|参考资料|资料|pdf|手册)/i.test(title)) kind = "material";
+        const kind = detectCourseKind(title, text, durationSeconds);
 
         courses.push({
           externalId,
@@ -1588,15 +1728,34 @@ fn capture_script(request_id: &str, provider: Provider) -> String {
     }
 
     const bodyText = clean(document.body.innerText);
+    const expiredMatch = bodyText.match(/起止时间\s*[:：]?\s*\d{4}[-/.]\d{1,2}[-/.]\d{1,2}.*?[~至到-]\s*(\d{4}[-/.]\d{1,2}[-/.]\d{1,2}(?:\s+\d{1,2}:\d{1,2}(?::\d{1,2})?)?)/);
+    let isTopicExpired = false;
+    if (expiredMatch) {
+      const endTs = new Date(expiredMatch[1].replace(/-/g, "/")).getTime();
+      if (endTs && !isNaN(endTs) && endTs < Date.now()) {
+        isTopicExpired = true;
+      }
+    }
+    if (/(计划已结束|培训已结束|活动已结束|学习已结束|项目已结束)/.test(bodyText)) {
+      isTopicExpired = true;
+    }
+
+    if (isTopicExpired) {
+      courses.forEach((c) => {
+        c.completed = true;
+        c.progress = 100;
+      });
+    }
+
     const topicTitle = findTopicTitle();
     const topicProgressMatch = bodyText.match(/学习进度\s*[:：]?\s*(\d+(?:\.\d+)?)%/);
     const countMatch = bodyText.match(/完成任务数\s*(\d+)\s*\/\s*(\d+)/) || bodyText.match(/完成标准\s*(\d+)\s*\/\s*(\d+)/);
-    const completedCount = countMatch ? Number(countMatch[1]) : courses.filter((item) => item.completed).length;
+    const completedCount = isTopicExpired ? courses.length : (countMatch ? Number(countMatch[1]) : courses.filter((item) => item.completed).length);
     const totalCount = countMatch ? Number(countMatch[2]) : courses.length;
     const payload = {
       title: String(topicTitle || "未知专题"),
       url: location.href,
-      progress: topicProgressMatch ? Number(topicProgressMatch[1]) : (totalCount ? completedCount / totalCount * 100 : 0),
+      progress: isTopicExpired ? 100 : (topicProgressMatch ? Number(topicProgressMatch[1]) : (totalCount ? completedCount / totalCount * 100 : 0)),
       totalCount,
       completedCount,
       courses
@@ -1745,12 +1904,7 @@ fn handle_bridge_title(
                 if duration > 0.0 {
                     active.duration = duration;
                 }
-                let is_near_end = duration > 10.0
-                    && (current_time >= duration - 2.5
-                        || (current_time / duration >= 0.95)
-                        || (event == "pause" && current_time / duration >= 0.90));
-
-                if event == "ended" || is_near_end {
+                if event == "ended" {
                     active.phase = "ended".to_string();
                     active.phase_since = now();
                 } else if event == "need_login" {
@@ -2560,6 +2714,37 @@ pub async fn sync_video_topic(
 }
 
 #[tauri::command]
+pub async fn open_video_topic(
+    app: AppHandle,
+    state: tauri::State<'_, VideoTaskState>,
+    topic_id: String,
+) -> Result<(), String> {
+    let conn = Connection::open(state.db_path.as_ref()).map_err(|error| error.to_string())?;
+    let (provider, url): (String, String) = conn
+        .query_row(
+            "SELECT provider,url FROM video_topics WHERE id=?1",
+            params![topic_id],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .map_err(|error| error.to_string())?;
+    drop(conn);
+    let provider = Provider::parse(&provider)?;
+    let window = ensure_browser_window(&app, state.inner(), provider, true).await?;
+    let target_url = if !url.trim().is_empty() {
+        url
+    } else {
+        provider.home().to_string()
+    };
+    if let Ok(parsed) = target_url.parse::<tauri::Url>() {
+        let _ = window.navigate(parsed);
+    }
+    let _ = window.show();
+    let _ = window.unminimize();
+    let _ = window.set_focus();
+    Ok(())
+}
+
+#[tauri::command]
 pub fn update_video_task_settings(
     app: AppHandle,
     state: tauri::State<'_, VideoTaskState>,
@@ -2827,6 +3012,10 @@ pub async fn tick_video_queue(
         .collect::<Vec<_>>();
     for active in active_list {
         if active.phase == "ended" {
+            // 预留 2 秒缓冲时间，确保网课平台完成完播网络上报后再切集
+            if now() - active.phase_since < 2 {
+                continue;
+            }
             let timestamp = now();
             if let Ok(conn) = Connection::open(state.db_path.as_ref()) {
                 let duration_secs = if active.duration > 0.0 {
@@ -3129,6 +3318,40 @@ pub fn retry_video_course(
         params![course_id, next_status, now()],
     )
     .map_err(|error| error.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
+pub fn complete_video_course(
+    state: tauri::State<'_, VideoTaskState>,
+    course_id: String,
+) -> Result<(), String> {
+    let conn = Connection::open(state.db_path.as_ref()).map_err(|error| error.to_string())?;
+    let timestamp = now();
+    let topic_id: String = conn
+        .query_row(
+            "SELECT topic_id FROM video_courses WHERE id=?1",
+            params![course_id],
+            |row| row.get(0),
+        )
+        .map_err(|error| error.to_string())?;
+    conn.execute(
+        "UPDATE video_courses SET status='completed',progress=100.0,last_error=NULL,updated_at=?2 WHERE id=?1",
+        params![course_id, timestamp],
+    )
+    .map_err(|error| error.to_string())?;
+    conn.execute(
+        "UPDATE video_topics SET 
+         completed_count = (SELECT COUNT(*) FROM video_courses WHERE topic_id=?1 AND status='completed'),
+         total_count = (SELECT COUNT(*) FROM video_courses WHERE topic_id=?1),
+         progress = ROUND((CAST((SELECT COUNT(*) FROM video_courses WHERE topic_id=?1 AND status='completed') AS REAL) / MAX(1, (SELECT COUNT(*) FROM video_courses WHERE topic_id=?1))) * 100.0, 1),
+         last_synced_at = ?2
+         WHERE id=?1",
+        params![topic_id, timestamp],
+    )
+    .map_err(|error| error.to_string())?;
+    let mut runtime = state.runtime.lock().unwrap_or_else(|error| error.into_inner());
+    runtime.active.retain(|_, active| active.course_id != course_id);
     Ok(())
 }
 
@@ -3537,4 +3760,25 @@ mod tests {
         assert!(script.contains("scoreTitleCandidate"));
         assert!(script.contains("catalogCourses.length > 0"));
     }
+
+    #[test]
+    fn browser_nav_script_suppresses_autoplay_safely() {
+        let script = browser_nav_script(Provider::Merchant);
+        assert!(script.contains("__MTOOL_BROWSER_NAV_SHIELD__"));
+        assert!(script.contains("window.addEventListener(\"play\""));
+        assert!(script.contains("ensurePaused"));
+        assert!(script.contains("__mtool_nav_toolbar__"));
+        assert!(script.contains(&Provider::Merchant.home()));
+    }
+
+    #[test]
+    fn capture_script_detects_course_kind_accurately_without_survey_false_positive() {
+        let script = capture_script("test_req", Provider::Merchant);
+        assert!(script.contains("detectCourseKind"));
+        assert!(script.contains("软件测试|压力测试|接口测试"));
+        assert!(script.contains("问卷|调查问卷|调研问卷|评价表"));
+        assert!(script.contains("const itemKind = detectCourseKind(title, text, durationSeconds);"));
+        assert!(script.contains("const kind = detectCourseKind(title, text, durationSeconds);"));
+    }
 }
+
