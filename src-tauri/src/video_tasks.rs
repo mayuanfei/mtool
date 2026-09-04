@@ -375,6 +375,18 @@ fn init_db(path: &PathBuf) -> Result<(), String> {
            )",
         [],
     );
+    let _ = conn.execute(
+        "UPDATE video_courses
+         SET kind = 'video'
+         WHERE kind = 'slides' AND duration_seconds >= 120",
+        [],
+    );
+    let _ = conn.execute(
+        "UPDATE video_courses
+         SET status = 'pending'
+         WHERE kind = 'video' AND status = 'manual'",
+        [],
+    );
     Ok(())
 }
 
@@ -1271,20 +1283,26 @@ fn capture_script(request_id: &str, provider: Provider) -> String {
     const isMeta = (s) => /(学习时长|必修学分|选修学分|进度\s*[:：]?|学时\s*[:：]?\s*\d+|学分\s*[:：]?\s*\d+|起止时间|得分|正确率|总分|题数|时长\s*[:：]|考试时长|课程数|浏览人数|学习人数)/i.test(s);
     const isSiteOrUiTitle = (s) => /^(YS学堂|银商学堂|银联乐学|中国银联|乐学|首页|个人中心|学习中心|学习地图|考试中心|赛事中心|全部|培训管理|培训介绍|培训内容|专题介绍|课程大纲|乐学圈|我的学习|我的课程|课程详情|专题详情|全部课程|培训项目|学习任务|登录|加入自学|已加入)$/i.test(s);
 
-    const detectCourseKind = (title, text, durationSeconds) => {
+    const detectCourseKind = (title, text, durationSeconds, container) => {
       const cleanTitle = String(title || "").trim();
       const cleanText = String(text || "").trim();
 
-      if (/ppt|课件|幻灯片|演示/i.test(cleanTitle) || /(^|\s)(ppt|课件|幻灯片)(\s|$)/i.test(cleanText)) {
-        return "slides";
-      }
-      if (/(文档|阅读材料|参考资料|资料|pdf|手册)/i.test(cleanTitle) || /(^|\s)(文档|资料|pdf)(\s|$)/i.test(cleanText)) {
-        return "material";
-      }
-      if (/线下课|面授|签到|打卡/.test(cleanTitle) || /(^|\s)(线下课|面授)(\s|$)/.test(cleanText)) {
-        return "material";
+      // 1. 【DOM 元素与播放特征检测 - 最高优先级】
+      if (container && container.querySelector) {
+        // 直接挂载了 video/audio 标签
+        if (container.querySelector("video, audio") || (container.matches && container.matches("video, audio"))) {
+          return "video";
+        }
+        // 包含播放相关图标、类名或属性
+        const hasVideoFeature = container.querySelector(
+          "[class*='video'], [class*='player'], [class*='play-btn'], [class*='play_btn'], [class*='play-icon'], [class*='play_icon'], [data-type*='video'], svg[class*='play'], i[class*='play'], [class*='icon-play']"
+        );
+        if (hasVideoFeature) {
+          return "video";
+        }
       }
 
+      // 2. 考试与测验检测
       // 排除 IT/软件工程等纯技术课程词汇误伤
       const isTechTesting = /(软件测试|压力测试|接口测试|性能测试|自动化测试|测试用例|测试开发|单元测试|测试方法|测试体系|测试流程|测试实战|测试理论)/.test(cleanTitle);
 
@@ -1302,6 +1320,41 @@ fn capture_script(request_id: &str, provider: Provider) -> String {
 
       if (hasSurveyBadge || hasSurveyTitle) {
         return "exam";
+      }
+
+      // 3. 【真实时长特征保护】
+      // 在学习平台中，静态课件/PPT通常标称 0 或固定 1 分钟（或纯按页数统计）。
+      // 凡是具有明确真实视频时长（如 >= 120 秒，即 >= 2 分钟，例如 12分钟）的课程，绝不可单纯因为标题含有“做PPT”就误认为课件！
+      const hasRealisticDuration = Number(durationSeconds) >= 120;
+
+      // 4. 精确收窄 PPT/课件判定
+      // 严禁包含式全词匹配 /ppt/i！《做PPT》、《学PPT》、《职场PPT排版》、《豆包生成PPT》本质全部是视频课！
+      // 仅当标题以明确课件为后缀（如：xxx培训-课件、xxx【课件】、xxx_PPT）或 DOM 中有明确独立的 PPT/课件徽章时才判定为 slides
+      const hasExplicitSlidesBadge = (container && container.querySelector && (
+        Boolean(container.querySelector("[class*='ppt'], [class*='slide']")) ||
+        Array.from(container.querySelectorAll("[class*='tag'], [class*='badge']")).some((el) => /^(ppt|课件|幻灯片)$/i.test(clean(el.innerText)))
+      ));
+
+      const hasSlidesSuffixInTitle = /[-_（(【\[\s](ppt|课件|幻灯片)[)）\]\s]?$/i.test(cleanTitle) ||
+        /^.*[-_]课件$/i.test(cleanTitle);
+
+      if (!hasRealisticDuration && (hasExplicitSlidesBadge || hasSlidesSuffixInTitle)) {
+        return "slides";
+      }
+
+      // 5. 资料/文档检测
+      const hasMaterialBadge = (container && container.querySelector && (
+        Boolean(container.querySelector("[class*='pdf'], [class*='doc']")) ||
+        Array.from(container.querySelectorAll("[class*='tag'], [class*='badge']")).some((el) => /^(文档|阅读材料|参考资料|手册|pdf)$/i.test(clean(el.innerText)))
+      ));
+      const hasMaterialSuffixInTitle = /[-_（(【\[\s](文档|阅读材料|参考资料|资料|pdf|手册)[)）\]\s]?$/i.test(cleanTitle);
+      if (!hasRealisticDuration && (hasMaterialBadge || hasMaterialSuffixInTitle)) {
+        return "material";
+      }
+
+      // 6. 线下课检测
+      if (/线下课|面授|签到|打卡/.test(cleanTitle) || /(^|\s)(线下课|面授)(\s|$)/.test(cleanText)) {
+        return "material";
       }
 
       return "video";
@@ -1698,7 +1751,7 @@ fn capture_script(request_id: &str, provider: Provider) -> String {
         const completed = /(已完成|已学完|已学)/.test(text) || (progressMatch ? Number(progressMatch[1]) >= 100 : false) || item.matches("[class*='complete'], [class*='finish'], [class*='learned']");
         const progress = completed ? 100 : (progressMatch ? Number(progressMatch[1]) : 0);
 
-        const itemKind = detectCourseKind(title, text, durationSeconds);
+        const itemKind = detectCourseKind(title, text, durationSeconds, item);
 
         parsed.push({
           externalId,
@@ -1761,7 +1814,7 @@ fn capture_script(request_id: &str, provider: Provider) -> String {
           }
         }
 
-        const kind = detectCourseKind(title, text, durationSeconds);
+        const kind = detectCourseKind(title, text, durationSeconds, container);
 
         courses.push({
           externalId,
@@ -3904,8 +3957,9 @@ mod tests {
         assert!(script.contains("detectCourseKind"));
         assert!(script.contains("软件测试|压力测试|接口测试"));
         assert!(script.contains("问卷|调查问卷|调研问卷|评价表"));
-        assert!(script.contains("const itemKind = detectCourseKind(title, text, durationSeconds);"));
-        assert!(script.contains("const kind = detectCourseKind(title, text, durationSeconds);"));
+        assert!(script.contains("const itemKind = detectCourseKind(title, text, durationSeconds, item);"));
+        assert!(script.contains("const kind = detectCourseKind(title, text, durationSeconds, container);"));
+        assert!(script.contains("hasRealisticDuration = Number(durationSeconds) >= 120;"));
     }
 
     #[test]
