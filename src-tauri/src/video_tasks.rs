@@ -1392,11 +1392,10 @@ fn capture_script(request_id: &str, provider: Provider) -> String {
         return true;
       }
 
-      // 3. 收集可能展示图标或状态的元素
+      // 3. 收集可能展示图标或状态的元素（严格限定在当前行内部，严禁跨越到前驱兄弟节点）
       const targets = [
         row,
-        element,
-        ...(element.previousElementSibling ? [element.previousElementSibling] : []),
+        ...(element !== row ? [element] : []),
         ...(row.querySelectorAll ? Array.from(row.querySelectorAll("i, span, em, svg, [class*='icon'], [class*='status'], [class*='state'], [class*='badge'], [class*='check'], [class*='finish'], [class*='success']")) : [])
       ];
 
