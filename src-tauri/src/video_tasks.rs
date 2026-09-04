@@ -2039,7 +2039,6 @@ fn decode_capture_buffer(buffer: &CaptureBuffer) -> Result<PageTopicCapture, Str
         .map_err(|error| format!("解析专题页面数据失败: {error}"))
         .and_then(|bytes| String::from_utf8(bytes).map_err(|error| error.to_string()))
         .and_then(|json| {
-            let _ = std::fs::write("/Users/mayuanfei/Desktop/AI-workspace/mtool/capture_dump.json", &json);
             serde_json::from_str::<PageTopicCapture>(&json)
                 .map_err(|error| format!("专题页面数据格式错误: {error}"))
         })
