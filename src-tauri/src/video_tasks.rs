@@ -361,6 +361,20 @@ fn init_db(path: &PathBuf) -> Result<(), String> {
         [],
     )
     .map_err(|error| format!("恢复未完成视频任务失败: {error}"))?;
+    let _ = conn.execute(
+        "DELETE FROM video_courses
+         WHERE status NOT IN ('opening','playing','verifying')
+           AND (
+             title GLOB '[0-9][0-9]第*期*'
+             OR title GLOB '[0-9]第*期*'
+             OR title GLOB '第*期*'
+             OR title GLOB '[0-9][0-9] 第*期*'
+             OR title GLOB '[0-9] 第*期*'
+             OR title GLOB '模块[0-9一二三四五六七八九十]*'
+             OR title GLOB '阶段[0-9一二三四五六七八九十]*'
+           )",
+        [],
+    );
     Ok(())
 }
 
@@ -1293,9 +1307,18 @@ fn capture_script(request_id: &str, provider: Provider) -> String {
       return "video";
     };
 
+    const isPhaseOrSectionHeader = (t) => {
+      const s = clean(t);
+      if (!s) return false;
+      return /^(\d{1,2}\s*)?(第[0-9一二三四五六七八九十百\d]+[期阶段部分步回篇讲节章]|模块\s*[0-9一二三四五六七八九十\d]|阶段\s*[0-9一二三四五六七八九十\d])/.test(s) ||
+             /^\d{1,2}\s+(第[0-9一二三四五六七八九十百\d]+[期阶段部分步回篇讲节章]|模块)/.test(s) ||
+             /^(\d{1,2}\s*)?(第.+[期阶段部分步回篇]|模块\d+)\s*[:：]/.test(s);
+    };
+
     const scoreTitleCandidate = (t) => {
+      if (isPhaseOrSectionHeader(t)) return -100;
       let score = 0;
-      if (/^(\d{1,2}[\s.、-]|第.+[讲节章期步回集课]|模块\d)/.test(t)) score += 15;
+      if (/^(\d{1,2}[\s.、-]|第.+[讲节章步回集课])/.test(t)) score += 15;
       if (t.length >= 4 && t.length <= 60) score += 5;
       if (!/(进度|时长|作者|人看过|人学过)/.test(t)) score += 2;
       return score;
@@ -1314,7 +1337,7 @@ fn capture_script(request_id: &str, provider: Provider) -> String {
             return false;
           }
           const t = clean(el.innerText);
-          return t && t.length >= 2 && !isTagOrBadge(t) && !isMeta(t) && !/^\d{1,2}$/.test(t) && !isSiteOrUiTitle(t);
+          return t && t.length >= 2 && !isTagOrBadge(t) && !isMeta(t) && !/^\d{1,2}$/.test(t) && !isSiteOrUiTitle(t) && !isPhaseOrSectionHeader(t);
         })
         .map((el) => clean(el.innerText));
 
@@ -1328,7 +1351,7 @@ fn capture_script(request_id: &str, provider: Provider) -> String {
         .split(/\n+/)
         .map(clean)
         .filter(Boolean);
-      const validLines = lines.filter((line) => line.length >= 2 && !isTagOrBadge(line) && !isMeta(line) && !isSiteOrUiTitle(line));
+      const validLines = lines.filter((line) => line.length >= 2 && !isTagOrBadge(line) && !isMeta(line) && !isSiteOrUiTitle(line) && !isPhaseOrSectionHeader(line));
       if (validLines.length > 0) {
         validLines.sort((a, b) => scoreTitleCandidate(b) - scoreTitleCandidate(a) || b.length - a.length);
         return validLines[0];
@@ -1349,6 +1372,10 @@ fn capture_script(request_id: &str, provider: Provider) -> String {
       if (/^章节\s*\(\d+\)/.test(text) || /^目录\s*\(/.test(text)) {
         return false;
       }
+      // 必须排除期次/阶段/模块纯层级大标题
+      if (isPhaseOrSectionHeader(text)) {
+        return false;
+      }
 
       // 如果当前元素包含多个子任务（多个学习时长、多个学分或多个完成状态），说明是分组容器而非单门课程
       const selfDurations = countMatches(text, /学习时长\s*[:：]?\s*\d+/g);
@@ -1359,12 +1386,7 @@ fn capture_script(request_id: &str, provider: Provider) -> String {
       }
 
       const title = titleFrom(element);
-      if (!title || isTagOrBadge(title) || isMeta(title)) return false;
-
-      // 如果标题本身是期次/阶段/模块等分组大标题，排除作为单课
-      if (/^(\d{1,2}\s*)?(第.+[期阶段部分步回篇]|模块\d+)\s*[:：]/.test(title)) {
-        return false;
-      }
+      if (!title || isTagOrBadge(title) || isMeta(title) || isPhaseOrSectionHeader(title)) return false;
 
       if (provider === "merchant") {
         const hasMeta = /学习时长|进度|学分|已完成|已考试/.test(text) || /考试/.test(text);
@@ -1386,7 +1408,7 @@ fn capture_script(request_id: &str, provider: Provider) -> String {
             parentTitle &&
             parentTitle.length > title.length &&
             !isTagOrBadge(parentTitle) &&
-            !/^(\d{1,2}\s*)?(第.+[期阶段部分步回篇]|模块\d+)\s*[:：]/.test(parentTitle) &&
+            !isPhaseOrSectionHeader(parentTitle) &&
             parentText.length < 600
           ) {
             return false;
@@ -1447,8 +1469,8 @@ fn capture_script(request_id: &str, provider: Provider) -> String {
         const index = siblings.indexOf(current);
         for (let offset = index - 1; offset >= 0; offset--) {
           const text = clean(siblings[offset].innerText);
-          if (text && text.length <= 80 && (/^\d{1,2}\s/.test(text) || /^第.+期/.test(text) || /^模块\d/.test(text))) {
-            const firstLine = text.split(/\n+/).map(clean).find((l) => /^\d{1,2}\s/.test(l) || /^第.+期/.test(l)) || text;
+          if (text && text.length <= 80 && isPhaseOrSectionHeader(text)) {
+            const firstLine = text.split(/\n+/).map(clean).find(isPhaseOrSectionHeader) || text;
             return firstLine;
           }
         }
@@ -1456,7 +1478,7 @@ fn capture_script(request_id: &str, provider: Provider) -> String {
         for (const h of headers) {
           if (h !== current && !current.contains(h)) {
             const ht = clean(h.innerText);
-            if (ht && ht.length <= 80 && (/^\d{1,2}\s/.test(ht) || /第.+期/.test(ht) || /模块\d/.test(ht))) {
+            if (ht && ht.length <= 80 && isPhaseOrSectionHeader(ht)) {
               return ht;
             }
           }
@@ -1659,7 +1681,7 @@ fn capture_script(request_id: &str, provider: Provider) -> String {
         validLines.sort((a, b) => scoreTitleCandidate(b) - scoreTitleCandidate(a) || b.length - a.length);
         const rawTitle = validLines[0] || lines[0] || "";
         const title = rawTitle.replace(/\s*\d+\s*分钟.*$/, "").replace(/\s*上次学习.*$/, "").trim();
-        if (!title || title.length < 2 || isInvalidTopicTitle(title) || catalogSeen.has(title)) return;
+        if (!title || title.length < 2 || isInvalidTopicTitle(title) || isPhaseOrSectionHeader(title) || catalogSeen.has(title)) return;
         catalogSeen.add(title);
 
         const locator = cssPath(item);
@@ -1716,7 +1738,7 @@ fn capture_script(request_id: &str, provider: Provider) -> String {
         seenElements.add(container);
 
         const title = titleFrom(container);
-        if (!title || isTagOrBadge(title) || isMeta(title) || seenTitles.has(title)) return;
+        if (!title || isTagOrBadge(title) || isMeta(title) || isPhaseOrSectionHeader(title) || seenTitles.has(title)) return;
         seenTitles.add(title);
 
         const text = clean(container.innerText);
@@ -1759,6 +1781,12 @@ fn capture_script(request_id: &str, provider: Provider) -> String {
         courses = parseCatalogCourses(document.body);
       }
     }
+
+    courses = courses.filter((c) => {
+      if (!c.title || isInvalidTopicTitle(c.title)) return false;
+      if (isPhaseOrSectionHeader(c.title)) return false;
+      return true;
+    });
 
     const bodyText = clean(document.body.innerText);
     const expiredMatch = bodyText.match(/起止时间\s*[:：]?\s*\d{4}[-/.]\d{1,2}[-/.]\d{1,2}.*?[~至到-]\s*(\d{4}[-/.]\d{1,2}[-/.]\d{1,2}(?:\s+\d{1,2}:\d{1,2}(?::\d{1,2})?)?)/);
@@ -2306,9 +2334,16 @@ fn import_capture(
         )
         .map_err(|error| error.to_string())?;
 
+    let valid_courses: Vec<_> = capture
+        .courses
+        .into_iter()
+        .filter(|c| !is_phase_or_section_title(&c.title))
+        .collect();
+
+    let mut current_course_ids = Vec::new();
     let mut manual = 0usize;
     let mut completed = 0usize;
-    for (index, course) in capture.courses.iter().enumerate() {
+    for (index, course) in valid_courses.iter().enumerate() {
         let kind = normalize_kind(&course.kind);
         let external_id = if course.external_id.trim().is_empty() {
             format!("{}-{index}", course.title)
@@ -2316,6 +2351,7 @@ fn import_capture(
             course.external_id.clone()
         };
         let course_id = stable_id(&[&topic_id, &external_id]);
+        current_course_ids.push(course_id.clone());
         let status = if course.completed {
             completed += 1;
             "completed"
@@ -2362,14 +2398,40 @@ fn import_capture(
             )
             .map_err(|error| error.to_string())?;
     }
+    if !current_course_ids.is_empty() {
+        let placeholders = current_course_ids.iter().map(|_| "?").collect::<Vec<_>>().join(",");
+        let sql = format!(
+            "DELETE FROM video_courses WHERE topic_id = ?1 AND status NOT IN ('opening', 'playing', 'verifying') AND id NOT IN ({placeholders})"
+        );
+        let mut params_vec: Vec<&dyn rusqlite::ToSql> = Vec::new();
+        params_vec.push(&topic_id);
+        for id in &current_course_ids {
+            params_vec.push(id);
+        }
+        transaction
+            .execute(&sql, rusqlite::params_from_iter(params_vec))
+            .map_err(|error| error.to_string())?;
+    }
     transaction.commit().map_err(|error| error.to_string())?;
     Ok(ImportSummary {
         topic_id,
         topic_title: capture.title,
-        imported: capture.courses.len(),
+        imported: valid_courses.len(),
         completed,
         manual,
     })
+}
+
+fn is_phase_or_section_title(title: &str) -> bool {
+    let t = title.trim();
+    let trimmed = t.trim_start_matches(|c: char| c.is_ascii_digit() || c.is_whitespace() || c == '.' || c == '-' || c == '、');
+    if trimmed.starts_with('第') && (trimmed.contains('期') || trimmed.contains("阶段") || trimmed.contains("部分") || trimmed.contains('篇') || trimmed.contains('讲') || trimmed.contains('节') || trimmed.contains('章')) {
+        return true;
+    }
+    if trimmed.starts_with("模块") || trimmed.starts_with("阶段") {
+        return true;
+    }
+    false
 }
 
 fn load_course(path: &PathBuf, course_id: &str) -> Result<CourseRecord, String> {
@@ -3851,6 +3913,27 @@ mod tests {
         let script = capture_script("test_req", Provider::Merchant);
         assert!(script.contains("selfDurations > 1 || selfStatusCount > 1 || selfCredits > 1"));
         assert!(script.contains("parentDurations > 1 || parentStatusCount > 1 || parentCredits > 1"));
+    }
+
+    #[test]
+    fn test_is_phase_or_section_title() {
+        assert!(is_phase_or_section_title("01第一期：AI背景下的新型网络安全社工攻击"));
+        assert!(is_phase_or_section_title("01 第一期：AI背景下的新型网络安全社工攻击"));
+        assert!(is_phase_or_section_title("第一期：AI背景下的新型网络安全社工攻击"));
+        assert!(is_phase_or_section_title("02第二期：数据安全新态势新要求"));
+        assert!(is_phase_or_section_title("模块一：网络安全法解读"));
+        assert!(is_phase_or_section_title("阶段1 基础知识"));
+
+        assert!(!is_phase_or_section_title("AI背景下的新型网络安全社工攻击"));
+        assert!(!is_phase_or_section_title("AI背景下的新型网络安全社工攻击培训-课件"));
+        assert!(!is_phase_or_section_title("AI背景下的新型网络安全社工攻击考试"));
+    }
+
+    #[test]
+    fn capture_script_filters_phase_headers_completely() {
+        let script = capture_script("test_req", Provider::Merchant);
+        assert!(script.contains("isPhaseOrSectionHeader"));
+        assert!(script.contains("if (isPhaseOrSectionHeader(c.title)) return false;"));
     }
 }
 
