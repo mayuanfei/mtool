@@ -1374,8 +1374,13 @@ fn capture_script(request_id: &str, provider: Provider) -> String {
       const row = (element.closest && element.closest("li, tr, [class*='item'], [class*='chapter'], [class*='section'], [class*='node'], [class*='row']")) || element.parentElement || element;
       const combinedText = clean((row.innerText || "") + " " + (element.innerText || ""));
 
+      // 明确未完成状态：如果带有“上次学习”、“学习中”、“播放中”、“未学习”、“未开始”，且不包含“已完成/100%”，则绝非已完成
+      if (/(上次学习|学习中|播放中|未学习|未开始|待学习)/.test(combinedText) && !/(已完成|已学完|已考合格|100%)/.test(combinedText)) {
+        return false;
+      }
+
       // 1. 文本匹配与对勾字符
-      if (/(已完成|已学完|已学习|已学|已考|考试合格|进度\s*[:：]?\s*100%)/.test(combinedText)) {
+      if (/(已完成|已学完|已考合格|考试合格|已通过|已考试通过|进度\s*[:：]?\s*100%)/.test(combinedText)) {
         return true;
       }
       if (/[✓✔☑✅]/.test(combinedText)) {
@@ -1383,7 +1388,7 @@ fn capture_script(request_id: &str, provider: Provider) -> String {
       }
 
       // 2. 显式属性与无障碍标记
-      if (row.querySelector && row.querySelector("[title*='完成'], [title*='已学'], [title*='通过'], [aria-label*='完成'], [aria-label*='已学'], [aria-label*='通过']")) {
+      if (row.querySelector && row.querySelector("[title*='完成'], [title*='已学完'], [title*='已通过'], [aria-label*='完成'], [aria-label*='已学完'], [aria-label*='已通过']")) {
         return true;
       }
 
@@ -1399,8 +1404,8 @@ fn capture_script(request_id: &str, provider: Provider) -> String {
         if (!el) continue;
         const cls = String((el.className && typeof el.className === "string" ? el.className : (el.getAttribute && el.getAttribute("class"))) || "").toLowerCase();
 
-        // 排除明确未完成/等待/橙色样式的元素
-        if (/(orange|warn|pending|unfinished|unfinish|not-finish)/i.test(cls)) {
+        // 排除明确未完成/等待/橙色样式，以及仅表示选中/激活/当前播放的类名
+        if (/(orange|warn|pending|unfinished|unfinish|not-finish|last-learn|playing|current|active|xuanzhong|select)/i.test(cls)) {
           continue;
         }
         const style = String((el.getAttribute && (el.getAttribute("style") || el.getAttribute("stroke") || el.getAttribute("fill"))) || "").toLowerCase();
@@ -1409,7 +1414,7 @@ fn capture_script(request_id: &str, provider: Provider) -> String {
         }
 
         if (
-          /(^|[\s_-])(check|checked|checkmark|success|succ|finish|finished|completed|complete|learned|done|pass|passed|wancheng|xuanzhong|is-finish|is-complete|status-1|state-1)([\s_-]|$)/i.test(cls) ||
+          /(^|[\s_-])(check|checked|checkmark|success|finish|finished|completed|complete|is-finish|is-complete|status-complete|state-complete)([\s_-]|$)/i.test(cls) ||
           /(circle-check|check-circle|icon-check|icon-success|van-icon-success|el-icon-check|anticon-check)/i.test(cls)
         ) {
           return true;
@@ -1417,7 +1422,8 @@ fn capture_script(request_id: &str, provider: Provider) -> String {
 
         if (el.tagName && el.tagName.toLowerCase() === "svg") {
           const svgHtml = (el.innerHTML || "").toLowerCase();
-          if (/(polyline|check|finish|success|wancheng|xuanzhong)/i.test(svgHtml)) {
+          // 仅匹配明确的对勾/完成语义，切勿匹配通用形状标签 polyline 或选中类名 xuanzhong
+          if (/(check|finish|success|wancheng)/i.test(svgHtml)) {
             return true;
           }
           const useEl = el.querySelector && el.querySelector("use");
@@ -1431,7 +1437,7 @@ fn capture_script(request_id: &str, provider: Provider) -> String {
 
         if (el.getAttribute) {
           const dataStatus = String(el.getAttribute("data-status") || el.getAttribute("data-state") || "").toLowerCase();
-          if (/^(finish|finished|completed|complete|success|done|passed)$/.test(dataStatus)) {
+          if (/^(finish|finished|completed|complete|success|done|passed|2)$/.test(dataStatus)) {
             return true;
           }
         }
@@ -1850,7 +1856,8 @@ fn capture_script(request_id: &str, provider: Provider) -> String {
         }
 
         const progressMatch = text.match(/进度\s*[:：]?\s*(\d+(?:\.\d+)?)%/);
-        const completed = isElementCompleted(item) || (progressMatch ? Number(progressMatch[1]) >= 100 : false);
+        const hasExplicitIncomplete = /(上次学习|学习中|播放中|未学习|未开始|待学习)/.test(text);
+        const completed = !hasExplicitIncomplete && (isElementCompleted(item) || (progressMatch ? Number(progressMatch[1]) >= 100 : false));
         const progress = completed ? 100 : (progressMatch ? Number(progressMatch[1]) : 0);
 
         const itemKind = detectCourseKind(title, text, durationSeconds, item);
@@ -1902,7 +1909,8 @@ fn capture_script(request_id: &str, provider: Provider) -> String {
         const externalId = externalIdFrom(container, url, locator, title);
 
         const progressMatch = text.match(/进度\s*[:：]?\s*(\d+(?:\.\d+)?)%/);
-        const completed = isElementCompleted(container) || (progressMatch ? Number(progressMatch[1]) >= 100 : false);
+        const hasExplicitIncomplete = /(上次学习|学习中|播放中|未学习|未开始|待学习)/.test(text);
+        const completed = !hasExplicitIncomplete && (isElementCompleted(container) || (progressMatch ? Number(progressMatch[1]) >= 100 : false));
         const progress = completed ? 100 : (progressMatch ? Number(progressMatch[1]) : 0);
 
         const durationMatch = text.match(/学习时长\s*[:：]?\s*(\d+)\s*分钟/) || text.match(/学时\s*[:：]?\s*(\d+)/) || text.match(/时长\s*[:：]?\s*(\d+)/);
