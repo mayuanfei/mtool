@@ -378,7 +378,7 @@ fn init_db(path: &PathBuf) -> Result<(), String> {
     let _ = conn.execute(
         "UPDATE video_courses
          SET kind = 'video'
-         WHERE kind = 'slides' AND duration_seconds >= 120",
+         WHERE kind = 'slides' AND (duration_seconds >= 120 OR title NOT LIKE '%课件%')",
         [],
     );
     let _ = conn.execute(
@@ -1287,13 +1287,19 @@ fn capture_script(request_id: &str, provider: Provider) -> String {
       const cleanTitle = String(title || "").trim();
       const cleanText = String(text || "").trim();
 
-      // 1. 【DOM 元素与播放特征检测 - 最高优先级】
+      // 1. 【全局与 DOM 播放器检测 - 最高优先级】
+      // 若当前页面存在视频播放器（<video> 或 .prism-player），或当前条目挂载了视频元素/播放图标
+      if (typeof document !== "undefined" && document.querySelector && document.querySelector("video, .prism-player, [class*='player']")) {
+        const isExamInPlayer = /(期末考试|结业考试|随堂测验|模拟考试|在线考试|阶段测验|课后测验|综合测试|结业测试|试卷)|^.*(考试|测验)$/.test(cleanTitle) ||
+          /(^|\s)(考试|测验|试卷)(\s|$)/.test(cleanText);
+        if (isExamInPlayer) return "exam";
+        return "video";
+      }
+
       if (container && container.querySelector) {
-        // 直接挂载了 video/audio 标签
         if (container.querySelector("video, audio") || (container.matches && container.matches("video, audio"))) {
           return "video";
         }
-        // 包含播放相关图标、类名或属性
         const hasVideoFeature = container.querySelector(
           "[class*='video'], [class*='player'], [class*='play-btn'], [class*='play_btn'], [class*='play-icon'], [class*='play_icon'], [data-type*='video'], svg[class*='play'], i[class*='play'], [class*='icon-play']"
         );
@@ -1303,7 +1309,6 @@ fn capture_script(request_id: &str, provider: Provider) -> String {
       }
 
       // 2. 考试与测验检测
-      // 排除 IT/软件工程等纯技术课程词汇误伤
       const isTechTesting = /(软件测试|压力测试|接口测试|性能测试|自动化测试|测试用例|测试开发|单元测试|测试方法|测试体系|测试流程|测试实战|测试理论)/.test(cleanTitle);
 
       const hasExplicitExamBadge = /(^|\s)(考试|测验|试卷)(\s|$)/.test(cleanText);
@@ -1323,32 +1328,30 @@ fn capture_script(request_id: &str, provider: Provider) -> String {
       }
 
       // 3. 【真实时长特征保护】
-      // 在学习平台中，静态课件/PPT通常标称 0 或固定 1 分钟（或纯按页数统计）。
-      // 凡是具有明确真实视频时长（如 >= 120 秒，即 >= 2 分钟，例如 12分钟）的课程，绝不可单纯因为标题含有“做PPT”就误认为课件！
+      // 凡是具有明确时长（>= 120 秒，即 >= 2 分钟）的课程，绝非静态 PPT，直接判定为视频！
       const hasRealisticDuration = Number(durationSeconds) >= 120;
+      if (hasRealisticDuration) {
+        return "video";
+      }
 
       // 4. 精确收窄 PPT/课件判定
       // 严禁包含式全词匹配 /ppt/i！《做PPT》、《学PPT》、《职场PPT排版》、《豆包生成PPT》本质全部是视频课！
       // 仅当标题以明确课件为后缀（如：xxx培训-课件、xxx【课件】、xxx_PPT）或 DOM 中有明确独立的 PPT/课件徽章时才判定为 slides
-      const hasExplicitSlidesBadge = (container && container.querySelector && (
-        Boolean(container.querySelector("[class*='ppt'], [class*='slide']")) ||
-        Array.from(container.querySelectorAll("[class*='tag'], [class*='badge']")).some((el) => /^(ppt|课件|幻灯片)$/i.test(clean(el.innerText)))
-      ));
+      const hasExplicitSlidesBadge = /(^|\s)(ppt课件|课件|幻灯片)(\s|$)/i.test(cleanText) ||
+        (container && container.querySelectorAll &&
+         Array.from(container.querySelectorAll("[class*='tag'], [class*='badge']")).some((el) => /^(课件|ppt课件|幻灯片)$/i.test(clean(el.innerText))));
 
-      const hasSlidesSuffixInTitle = /[-_（(【\[\s](ppt|课件|幻灯片)[)）\]\s]?$/i.test(cleanTitle) ||
+      const hasSlidesSuffixInTitle = /[-_（(【\[\s](课件|幻灯片|ppt课件)[)）\]\s]?$/i.test(cleanTitle) ||
         /^.*[-_]课件$/i.test(cleanTitle);
 
-      if (!hasRealisticDuration && (hasExplicitSlidesBadge || hasSlidesSuffixInTitle)) {
+      if (hasExplicitSlidesBadge || hasSlidesSuffixInTitle) {
         return "slides";
       }
 
       // 5. 资料/文档检测
-      const hasMaterialBadge = (container && container.querySelector && (
-        Boolean(container.querySelector("[class*='pdf'], [class*='doc']")) ||
-        Array.from(container.querySelectorAll("[class*='tag'], [class*='badge']")).some((el) => /^(文档|阅读材料|参考资料|手册|pdf)$/i.test(clean(el.innerText)))
-      ));
+      const hasMaterialBadge = /(^|\s)(阅读材料|参考资料|手册)(\s|$)/.test(cleanText);
       const hasMaterialSuffixInTitle = /[-_（(【\[\s](文档|阅读材料|参考资料|资料|pdf|手册)[)）\]\s]?$/i.test(cleanTitle);
-      if (!hasRealisticDuration && (hasMaterialBadge || hasMaterialSuffixInTitle)) {
+      if (hasMaterialBadge || hasMaterialSuffixInTitle) {
         return "material";
       }
 
@@ -1709,13 +1712,13 @@ fn capture_script(request_id: &str, provider: Provider) -> String {
         const hasProgressOrStatus = /进度\s*[:：]?\s*\d+(?:\.\d+)?%/.test(text) || /(已完成|未学习|学习中|上次学习)/.test(text);
         if (!hasDuration && !hasChapterMarker && !hasProgressOrStatus) return false;
 
-        // 排除包含多个子条目的父容器
+        // 排除包含多个不同章节大标题的祖先容器（如整个目录列表 ul/div）
         const children = Array.from(el.children);
-        const subItems = children.filter((c) => {
+        const subChapters = children.filter((c) => {
           const ct = clean(c.innerText);
-          return /^(导入|第\d+[期讲节章步回集课]|模块\d+|\d{1,2}[\s.-、])/.test(ct) || /(\d+)\s*分钟/.test(ct);
+          return /^(导入|第\d+[期讲节章步回集课]|模块\d+|\d{1,2}[\s.-、])/.test(ct);
         });
-        if (subItems.length > 1) return false;
+        if (subChapters.length > 1) return false;
         return true;
       });
 
@@ -1741,7 +1744,10 @@ fn capture_script(request_id: &str, provider: Provider) -> String {
         const url = linkFrom(item);
         const externalId = externalIdFrom(item, url, locator, title);
 
-        const durMatch = text.match(/(\d+)\s*分钟/);
+        let durMatch = text.match(/(\d+)\s*分钟/);
+        if (!durMatch && item.parentElement) {
+          durMatch = clean(item.parentElement.innerText).match(/(\d+)\s*分钟/);
+        }
         let durationSeconds = 0;
         if (durMatch) {
           durationSeconds = (Number(durMatch[1]) || 0) * 60;
