@@ -387,6 +387,12 @@ fn init_db(path: &PathBuf) -> Result<(), String> {
          WHERE kind = 'video' AND status = 'manual'",
         [],
     );
+    let _ = conn.execute(
+        "UPDATE video_courses
+         SET status = 'pending'
+         WHERE status IN ('opening', 'playing', 'verifying')",
+        [],
+    );
     Ok(())
 }
 
@@ -1363,6 +1369,70 @@ fn capture_script(request_id: &str, provider: Provider) -> String {
       return "video";
     };
 
+    const isElementCompleted = (element) => {
+      if (!element) return false;
+      const row = (element.closest && element.closest("li, tr, [class*='item'], [class*='chapter'], [class*='section'], [class*='node'], [class*='row']")) || element.parentElement || element;
+      const combinedText = clean((row.innerText || "") + " " + (element.innerText || ""));
+
+      // 1. 文本匹配与对勾字符
+      if (/(已完成|已学完|已学习|已学|已考|考试合格|进度\s*[:：]?\s*100%)/.test(combinedText)) {
+        return true;
+      }
+      if (/[✓✔☑✅]/.test(combinedText)) {
+        return true;
+      }
+
+      // 2. 显式属性与无障碍标记
+      if (row.querySelector && row.querySelector("[title*='完成'], [title*='已学'], [title*='通过'], [aria-label*='完成'], [aria-label*='已学'], [aria-label*='通过']")) {
+        return true;
+      }
+
+      // 3. 收集可能展示图标或状态的元素
+      const targets = [
+        row,
+        element,
+        ...(element.previousElementSibling ? [element.previousElementSibling] : []),
+        ...(row.querySelectorAll ? Array.from(row.querySelectorAll("i, span, em, svg, [class*='icon'], [class*='status'], [class*='state'], [class*='badge'], [class*='check'], [class*='finish'], [class*='success']")) : [])
+      ];
+
+      for (const el of targets) {
+        if (!el) continue;
+        const cls = String((el.className && typeof el.className === "string" ? el.className : (el.getAttribute && el.getAttribute("class"))) || "").toLowerCase();
+        if (
+          /(^|[\s_-])(check|checked|checkmark|success|succ|finish|finished|completed|complete|learned|done|pass|passed|wancheng|xuanzhong|is-finish|is-complete|status-1|state-1)([\s_-]|$)/i.test(cls) ||
+          /(circle-check|check-circle|icon-check|icon-success|van-icon-success|el-icon-check|anticon-check)/i.test(cls)
+        ) {
+          return true;
+        }
+
+        if (el.tagName && el.tagName.toLowerCase() === "svg") {
+          const svgHtml = (el.innerHTML || "").toLowerCase();
+          if (/(polyline|check|finish|success|wancheng|xuanzhong)/i.test(svgHtml)) {
+            return true;
+          }
+          const useEl = el.querySelector && el.querySelector("use");
+          if (useEl) {
+            const href = String(useEl.getAttribute("href") || useEl.getAttribute("xlink:href") || "").toLowerCase();
+            if (/(check|finish|success|wancheng)/.test(href)) {
+              return true;
+            }
+          }
+          const subPaths = el.querySelectorAll ? el.querySelectorAll("path, polyline, polygon") : [];
+          if (subPaths.length >= 2 || ((el.querySelector && el.querySelector("circle")) && subPaths.length >= 1)) {
+            return true;
+          }
+        }
+
+        if (el.getAttribute) {
+          const dataStatus = String(el.getAttribute("data-status") || el.getAttribute("data-state") || el.getAttribute("data-type") || "").toLowerCase();
+          if (/(finish|completed|success|done|1)/.test(dataStatus)) {
+            return true;
+          }
+        }
+      }
+      return false;
+    };
+
     const isPhaseOrSectionHeader = (t) => {
       const s = clean(t);
       if (!s) return false;
@@ -1754,7 +1824,7 @@ fn capture_script(request_id: &str, provider: Provider) -> String {
         }
 
         const progressMatch = text.match(/进度\s*[:：]?\s*(\d+(?:\.\d+)?)%/);
-        const completed = /(已完成|已学完|已学)/.test(text) || (progressMatch ? Number(progressMatch[1]) >= 100 : false) || item.matches("[class*='complete'], [class*='finish'], [class*='learned']");
+        const completed = isElementCompleted(item) || (progressMatch ? Number(progressMatch[1]) >= 100 : false);
         const progress = completed ? 100 : (progressMatch ? Number(progressMatch[1]) : 0);
 
         const itemKind = detectCourseKind(title, text, durationSeconds, item);
@@ -1806,7 +1876,7 @@ fn capture_script(request_id: &str, provider: Provider) -> String {
         const externalId = externalIdFrom(container, url, locator, title);
 
         const progressMatch = text.match(/进度\s*[:：]?\s*(\d+(?:\.\d+)?)%/);
-        const completed = /(已学习|已完成|已考试)/.test(text) || (progressMatch ? Number(progressMatch[1]) >= 100 : false);
+        const completed = isElementCompleted(container) || (progressMatch ? Number(progressMatch[1]) >= 100 : false);
         const progress = completed ? 100 : (progressMatch ? Number(progressMatch[1]) : 0);
 
         const durationMatch = text.match(/学习时长\s*[:：]?\s*(\d+)\s*分钟/) || text.match(/学时\s*[:：]?\s*(\d+)/) || text.match(/时长\s*[:：]?\s*(\d+)/);
@@ -2429,7 +2499,13 @@ fn import_capture(
                  ON CONFLICT(topic_id,external_id) DO UPDATE SET
                    title=excluded.title,url=excluded.url,locator=excluded.locator,
                    section_title=excluded.section_title,kind=excluded.kind,
-                   duration_seconds=excluded.duration_seconds,progress=excluded.progress,
+                   duration_seconds=CASE WHEN excluded.duration_seconds > 0 THEN excluded.duration_seconds ELSE video_courses.duration_seconds END,
+                   progress=CASE
+                     WHEN excluded.status='completed' THEN 100.0
+                     WHEN video_courses.status='completed' THEN 100.0
+                     WHEN excluded.progress > 0.0 THEN excluded.progress
+                     ELSE video_courses.progress
+                   END,
                    status=CASE
                      WHEN excluded.status='completed' THEN 'completed'
                      WHEN video_courses.status IN('opening','playing','verifying') THEN video_courses.status
@@ -2472,6 +2548,22 @@ fn import_capture(
             .map_err(|error| error.to_string())?;
     }
     transaction.commit().map_err(|error| error.to_string())?;
+
+    let mut runtime = state
+        .runtime
+        .lock()
+        .unwrap_or_else(|error| error.into_inner());
+    for (index, course) in valid_courses.iter().enumerate() {
+        if course.completed {
+            let external_id = if course.external_id.trim().is_empty() {
+                format!("{}-{index}", course.title)
+            } else {
+                course.external_id.clone()
+            };
+            let course_id = stable_id(&[&topic_id, &external_id]);
+            runtime.active.retain(|_, active| active.course_id != course_id);
+        }
+    }
     Ok(ImportSummary {
         topic_id,
         topic_title: capture.title,

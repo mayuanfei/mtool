@@ -119,13 +119,13 @@ const KIND_META: Record<CourseKind, { label: string; icon: typeof Video; classes
 };
 
 function resolveCourseKind(course: { kind?: string; title?: string }): CourseKind {
-  const title = (course.title || '').trim();
-  if (/考试|测验|测试/.test(title)) return 'exam';
-  if (/ppt|课件|幻灯片|演示/i.test(title)) return 'slides';
-  if (/文档|阅读材料|参考资料|资料|pdf|手册/i.test(title)) return 'material';
-  if (course.kind === 'exam' || course.kind === 'slides' || course.kind === 'material') {
+  if (course.kind === 'exam' || course.kind === 'slides' || course.kind === 'material' || course.kind === 'video') {
     return course.kind;
   }
+  const title = (course.title || '').trim();
+  if (/考试|测验/.test(title) && !/(软件测试|压力测试|接口测试|性能测试|自动化测试|测试用例|单元测试)/.test(title)) return 'exam';
+  if (/(^|\s)(ppt课件|课件|幻灯片)(\s|$)/i.test(title) || /[-_]课件$/i.test(title)) return 'slides';
+  if (/文档|阅读材料|参考资料|手册/i.test(title)) return 'material';
   return 'video';
 }
 
