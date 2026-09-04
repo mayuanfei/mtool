@@ -1398,6 +1398,16 @@ fn capture_script(request_id: &str, provider: Provider) -> String {
       for (const el of targets) {
         if (!el) continue;
         const cls = String((el.className && typeof el.className === "string" ? el.className : (el.getAttribute && el.getAttribute("class"))) || "").toLowerCase();
+
+        // 排除明确未完成/等待/橙色样式的元素
+        if (/(orange|warn|pending|unfinished|unfinish|not-finish)/i.test(cls)) {
+          continue;
+        }
+        const style = String((el.getAttribute && (el.getAttribute("style") || el.getAttribute("stroke") || el.getAttribute("fill"))) || "").toLowerCase();
+        if (style.includes("rgb(255") || style.includes("rgba(255") || style.includes("#ff") || style.includes("#fa") || style.includes("#f6") || style.includes("#e6a23c") || style.includes("orange")) {
+          continue;
+        }
+
         if (
           /(^|[\s_-])(check|checked|checkmark|success|succ|finish|finished|completed|complete|learned|done|pass|passed|wancheng|xuanzhong|is-finish|is-complete|status-1|state-1)([\s_-]|$)/i.test(cls) ||
           /(circle-check|check-circle|icon-check|icon-success|van-icon-success|el-icon-check|anticon-check)/i.test(cls)
@@ -1417,15 +1427,11 @@ fn capture_script(request_id: &str, provider: Provider) -> String {
               return true;
             }
           }
-          const subPaths = el.querySelectorAll ? el.querySelectorAll("path, polyline, polygon") : [];
-          if (subPaths.length >= 2 || ((el.querySelector && el.querySelector("circle")) && subPaths.length >= 1)) {
-            return true;
-          }
         }
 
         if (el.getAttribute) {
-          const dataStatus = String(el.getAttribute("data-status") || el.getAttribute("data-state") || el.getAttribute("data-type") || "").toLowerCase();
-          if (/(finish|completed|success|done|1)/.test(dataStatus)) {
+          const dataStatus = String(el.getAttribute("data-status") || el.getAttribute("data-state") || "").toLowerCase();
+          if (/^(finish|finished|completed|complete|success|done|passed)$/.test(dataStatus)) {
             return true;
           }
         }
@@ -1767,30 +1773,50 @@ fn capture_script(request_id: &str, provider: Provider) -> String {
 
     const parseCatalogCourses = (panel) => {
       if (!panel) return [];
-      const candidateItems = Array.from(
-        panel.querySelectorAll("li, div, a, [class*='item'], [class*='chapter'], [class*='section'], [class*='node']")
-      ).filter((el) => {
+
+      // 1. 优先查找 ul > li 结构（播放器右侧目录的规范结构，确保每个小节都是完整的 li 行，包含图标、标题和时长）
+      const ulLis = Array.from(panel.querySelectorAll("ul > li")).filter((el) => {
         if (!visible(el) || isNavOrHeader(el)) return false;
-        if (el.closest(".prism-player, [class*='player'], [class*='control-bar'], [class*='controls'], [class*='speed'], [class*='quality'], [class*='intro'], [class*='teacher']")) return false;
         const text = clean(el.innerText);
-        if (text.length < 3 || text.length > 150) return false;
+        if (text.length < 3 || text.length > 250) return false;
         if (/(倍速|标清|高清|超清|人看过|课程介绍|主讲老师|收起目录|展开目录|00:00)/.test(text)) return false;
         if (/^(章节\s*\(?\d+\)?|时长\s*[:：]|\d+\s*分钟$)/.test(text)) return false;
 
         const hasDuration = /(\d+)\s*分钟/.test(text);
         const hasChapterMarker = /^(导入|第\d+[期讲节章步回集课]|模块\d+|\d{1,2}[\s.-、])/.test(text);
         const hasProgressOrStatus = /进度\s*[:：]?\s*\d+(?:\.\d+)?%/.test(text) || /(已完成|未学习|学习中|上次学习)/.test(text);
-        if (!hasDuration && !hasChapterMarker && !hasProgressOrStatus) return false;
-
-        // 排除包含多个不同章节大标题的祖先容器（如整个目录列表 ul/div）
-        const children = Array.from(el.children);
-        const subChapters = children.filter((c) => {
-          const ct = clean(c.innerText);
-          return /^(导入|第\d+[期讲节章步回集课]|模块\d+|\d{1,2}[\s.-、])/.test(ct);
-        });
-        if (subChapters.length > 1) return false;
-        return true;
+        return hasDuration || hasChapterMarker || hasProgressOrStatus;
       });
+
+      let candidateItems = [];
+      if (ulLis.length >= 2) {
+        candidateItems = ulLis;
+      } else {
+        candidateItems = Array.from(
+          panel.querySelectorAll("li, div, a, [class*='item'], [class*='chapter'], [class*='section'], [class*='node']")
+        ).filter((el) => {
+          if (!visible(el) || isNavOrHeader(el)) return false;
+          if (el.closest(".prism-player, [class*='player'], [class*='control-bar'], [class*='controls'], [class*='speed'], [class*='quality'], [class*='intro'], [class*='teacher']")) return false;
+          const text = clean(el.innerText);
+          if (text.length < 3 || text.length > 150) return false;
+          if (/(倍速|标清|高清|超清|人看过|课程介绍|主讲老师|收起目录|展开目录|00:00)/.test(text)) return false;
+          if (/^(章节\s*\(?\d+\)?|时长\s*[:：]|\d+\s*分钟$)/.test(text)) return false;
+
+          const hasDuration = /(\d+)\s*分钟/.test(text);
+          const hasChapterMarker = /^(导入|第\d+[期讲节章步回集课]|模块\d+|\d{1,2}[\s.-、])/.test(text);
+          const hasProgressOrStatus = /进度\s*[:：]?\s*\d+(?:\.\d+)?%/.test(text) || /(已完成|未学习|学习中|上次学习)/.test(text);
+          if (!hasDuration && !hasChapterMarker && !hasProgressOrStatus) return false;
+
+          // 排除包含多个不同章节大标题的祖先容器（如整个目录列表 ul/div）
+          const children = Array.from(el.children);
+          const subChapters = children.filter((c) => {
+            const ct = clean(c.innerText);
+            return /^(导入|第\d+[期讲节章步回集课]|模块\d+|\d{1,2}[\s.-、])/.test(ct);
+          });
+          if (subChapters.length > 1) return false;
+          return true;
+        });
+      }
 
       const catalogSeen = new Set();
       const parsed = [];
@@ -2013,6 +2039,7 @@ fn decode_capture_buffer(buffer: &CaptureBuffer) -> Result<PageTopicCapture, Str
         .map_err(|error| format!("解析专题页面数据失败: {error}"))
         .and_then(|bytes| String::from_utf8(bytes).map_err(|error| error.to_string()))
         .and_then(|json| {
+            let _ = std::fs::write("/Users/mayuanfei/Desktop/AI-workspace/mtool/capture_dump.json", &json);
             serde_json::from_str::<PageTopicCapture>(&json)
                 .map_err(|error| format!("专题页面数据格式错误: {error}"))
         })
@@ -2502,9 +2529,8 @@ fn import_capture(
                    duration_seconds=CASE WHEN excluded.duration_seconds > 0 THEN excluded.duration_seconds ELSE video_courses.duration_seconds END,
                    progress=CASE
                      WHEN excluded.status='completed' THEN 100.0
-                     WHEN video_courses.status='completed' THEN 100.0
-                     WHEN excluded.progress > 0.0 THEN excluded.progress
-                     ELSE video_courses.progress
+                     WHEN video_courses.status IN('opening','playing','verifying') AND video_courses.progress > 0.0 THEN video_courses.progress
+                     ELSE excluded.progress
                    END,
                    status=CASE
                      WHEN excluded.status='completed' THEN 'completed'
