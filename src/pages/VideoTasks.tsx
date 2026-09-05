@@ -479,12 +479,14 @@ export function VideoTasks() {
                   await invoke('start_video_queue');
                   await invoke('tick_video_queue');
                 }, '队列已开始运行。')}
-                disabled={dashboard.stats.pending === 0}
+                disabled={dashboard.stats.pending === 0 || busyKey === 'start'}
                 className="px-4 py-2.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 text-white text-sm font-semibold flex items-center gap-2"
                 title={dashboard.stats.pending === 0 ? '所有课程已全部完成' : '开始自动播放待播放课程'}
               >
-                <Play className="w-4 h-4 fill-current" />
-                开始队列
+                {busyKey === 'start'
+                  ? <Loader2 className="w-4 h-4 animate-spin" />
+                  : <Play className="w-4 h-4 fill-current" />}
+                {busyKey === 'start' ? '正在启动…' : '开始队列'}
               </button>
             )}
           </div>

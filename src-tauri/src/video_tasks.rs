@@ -165,6 +165,7 @@ pub struct VideoTaskState {
     settings: Arc<Mutex<VideoTaskSettings>>,
     captures: Arc<Mutex<CaptureExchange>>,
     runtime: Arc<Mutex<RuntimeState>>,
+    queue_tick: Arc<tokio::sync::Mutex<()>>,
 }
 
 impl Default for VideoTaskState {
@@ -185,6 +186,7 @@ impl Default for VideoTaskState {
             settings: Arc::new(Mutex::new(settings)),
             captures: Arc::new(Mutex::new(CaptureExchange::default())),
             runtime: Arc::new(Mutex::new(RuntimeState::default())),
+            queue_tick: Arc::new(tokio::sync::Mutex::new(())),
         }
     }
 }
@@ -1374,8 +1376,9 @@ fn capture_script(request_id: &str, provider: Provider) -> String {
       const row = (element.closest && element.closest("li, tr, [class*='item'], [class*='chapter'], [class*='section'], [class*='node'], [class*='row']")) || element.parentElement || element;
       const combinedText = clean((row.innerText || "") + " " + (element.innerText || ""));
 
-      // 明确未完成状态：如果带有“上次学习”、“学习中”、“播放中”、“未学习”、“未开始”，且不包含“已完成/100%”，则绝非已完成
-      if (/(上次学习|学习中|播放中|未学习|未开始|待学习)/.test(combinedText) && !/(已完成|已学完|已考合格|100%)/.test(combinedText)) {
+      // “上次学习”仅标记最近访问的章节，已完成课程也会显示，不能据此否定完成图标。
+      // 明确未完成状态仍需排除，避免把待学或学习中的课程识别为已完成。
+      if (/(学习中|播放中|未学习|未开始|待学习)/.test(combinedText) && !/(已完成|已学完|已考合格|100%)/.test(combinedText)) {
         return false;
       }
 
@@ -1403,8 +1406,14 @@ fn capture_script(request_id: &str, provider: Provider) -> String {
         if (!el) continue;
         const cls = String((el.className && typeof el.className === "string" ? el.className : (el.getAttribute && el.getAttribute("class"))) || "").toLowerCase();
 
-        // 排除明确未完成/等待/橙色样式，以及仅表示选中/激活/当前播放的类名
-        if (/(orange|warn|pending|unfinished|unfinish|not-finish|last-learn|playing|current|active|xuanzhong|select)/i.test(cls)) {
+        // 明确未完成/等待/橙色样式仍排除。
+        if (/(orange|warn|pending|unfinished|unfinish|not-finish|playing)/i.test(cls)) {
+          continue;
+        }
+        // YS 当前章节可同时带 active completed；选中状态不能覆盖独立的完成状态。
+        // 只有选中/激活对勾、没有明确完成类名的元素，仍不能据此判定课程完成。
+        const hasCompletionStatus = /(^|[\s_-])(success|finish|finished|completed|complete)([\s_-]|$)/i.test(cls);
+        if (/(last-learn|current|active|xuanzhong|select)/i.test(cls) && !hasCompletionStatus) {
           continue;
         }
         const style = String((el.getAttribute && (el.getAttribute("style") || el.getAttribute("stroke") || el.getAttribute("fill"))) || "").toLowerCase();
@@ -1855,7 +1864,7 @@ fn capture_script(request_id: &str, provider: Provider) -> String {
         }
 
         const progressMatch = text.match(/进度\s*[:：]?\s*(\d+(?:\.\d+)?)%/);
-        const hasExplicitIncomplete = /(上次学习|学习中|播放中|未学习|未开始|待学习)/.test(text);
+        const hasExplicitIncomplete = /(学习中|播放中|未学习|未开始|待学习)/.test(text);
         const completed = !hasExplicitIncomplete && (isElementCompleted(item) || (progressMatch ? Number(progressMatch[1]) >= 100 : false));
         const progress = completed ? 100 : (progressMatch ? Number(progressMatch[1]) : 0);
 
@@ -1908,7 +1917,7 @@ fn capture_script(request_id: &str, provider: Provider) -> String {
         const externalId = externalIdFrom(container, url, locator, title);
 
         const progressMatch = text.match(/进度\s*[:：]?\s*(\d+(?:\.\d+)?)%/);
-        const hasExplicitIncomplete = /(上次学习|学习中|播放中|未学习|未开始|待学习)/.test(text);
+        const hasExplicitIncomplete = /(学习中|播放中|未学习|未开始|待学习)/.test(text);
         const completed = !hasExplicitIncomplete && (isElementCompleted(container) || (progressMatch ? Number(progressMatch[1]) >= 100 : false));
         const progress = completed ? 100 : (progressMatch ? Number(progressMatch[1]) : 0);
 
@@ -2754,10 +2763,7 @@ async fn start_one(
     let Some(course) = next_pending(state.db_path.as_ref(), provider)? else {
         return Ok(false);
     };
-    if app.get_webview_window(&course.provider.label()).is_none() {
-        ensure_window(app, state, course.provider, false).await?;
-        return Ok(false);
-    }
+    // open_course 会按需创建播放窗口；首次启动也必须继续打开课程并登记为 opening。
     open_course(app, state, &course, true).await?;
     let timestamp = now();
     let conn = Connection::open(state.db_path.as_ref()).map_err(|error| error.to_string())?;
@@ -3272,6 +3278,8 @@ pub async fn tick_video_queue(
     app: AppHandle,
     state: tauri::State<'_, VideoTaskState>,
 ) -> Result<(), String> {
+    // 开始按钮和 2.5 秒轮询共用调度锁，避免首次创建窗口时重复启动同一课程。
+    let _tick_guard = state.queue_tick.lock().await;
     let settings = state
         .settings
         .lock()
@@ -3454,17 +3462,20 @@ pub async fn tick_video_queue(
         .cloned()
         .collect::<Vec<_>>();
     let mut any_started = false;
+    let mut startup_errors = Vec::new();
     if settings.cross_site_parallel {
         for provider in [Provider::Ulearn, Provider::Merchant] {
             if !active_providers.iter().any(|key| key == provider.key()) {
-                if let Ok(true) = start_one(&app, state.inner(), Some(provider)).await {
-                    any_started = true;
+                match start_one(&app, state.inner(), Some(provider)).await {
+                    Ok(started) => any_started |= started,
+                    Err(error) => startup_errors.push(format!("{}：{error}", provider.name())),
                 }
             }
         }
     } else if active_providers.is_empty() {
-        if let Ok(true) = start_one(&app, state.inner(), None).await {
-            any_started = true;
+        match start_one(&app, state.inner(), None).await {
+            Ok(started) => any_started = started,
+            Err(error) => startup_errors.push(error),
         }
     }
 
@@ -3484,7 +3495,11 @@ pub async fn tick_video_queue(
             let _ = persist_settings(state.db_path.as_ref(), &settings);
         }
     }
-    Ok(())
+    if startup_errors.is_empty() {
+        Ok(())
+    } else {
+        Err(format!("课程启动失败：{}", startup_errors.join("；")))
+    }
 }
 
 #[tauri::command]
@@ -3945,6 +3960,7 @@ mod tests {
             settings: Arc::new(Mutex::new(VideoTaskSettings::default())),
             captures: Arc::new(Mutex::new(CaptureExchange::default())),
             runtime: Arc::new(Mutex::new(RuntimeState::default())),
+            queue_tick: Arc::new(tokio::sync::Mutex::new(())),
         };
         let domain = decode_obfuscated_url("bHpkeGVkdS5jb20=");
         let course = |id: &str, title: &str, kind: &str, completed: bool| PageCourseCapture {
