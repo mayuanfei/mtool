@@ -157,6 +157,7 @@ struct ActiveCourse {
 #[derive(Default)]
 struct RuntimeState {
     active: HashMap<String, ActiveCourse>,
+    playback_tokens: HashMap<String, u64>,
 }
 
 #[derive(Clone)]
@@ -202,7 +203,6 @@ struct CourseRecord {
     title: String,
     duration_seconds: i64,
     progress: f64,
-    sort_order: i64,
 }
 
 #[derive(Serialize)]
@@ -213,6 +213,18 @@ pub struct SourceStatus {
     home_url: String,
     window_open: bool,
     current_url: Option<String>,
+    blocked_reason: Option<String>,
+}
+
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct QueuePreview {
+    pub provider: String,
+    pub topic_id: String,
+    pub topic_title: String,
+    pub course_id: String,
+    pub title: String,
+    pub paused: bool,
 }
 
 #[derive(Serialize)]
@@ -249,6 +261,8 @@ pub struct QueueStats {
     total: usize,
     completed: usize,
     pending: usize,
+    paused: usize,
+    skipped: usize,
     running: usize,
     manual: usize,
     attention: usize,
@@ -261,6 +275,7 @@ pub struct VideoTaskDashboard {
     sources: Vec<SourceStatus>,
     topics: Vec<TopicItem>,
     stats: QueueStats,
+    next_courses: Vec<QueuePreview>,
 }
 
 #[derive(Serialize)]
@@ -353,13 +368,18 @@ fn init_db(path: &PathBuf) -> Result<(), String> {
            UNIQUE(topic_id, external_id)
          );
          CREATE INDEX IF NOT EXISTS idx_video_courses_queue
-           ON video_courses(status, provider, sort_order);",
+           ON video_courses(status, provider, sort_order);
+         CREATE TABLE IF NOT EXISTS video_queue_lanes (
+           provider TEXT PRIMARY KEY,
+           topic_id TEXT,
+           blocked_reason TEXT
+         );",
     )
     .map_err(|error| format!("初始化视频任务数据库失败: {error}"))?;
     conn.execute(
         "UPDATE video_courses
-         SET status='pending',last_error=NULL
-         WHERE kind='video' AND status IN('opening','playing','verifying')",
+         SET status='paused',last_error=NULL
+         WHERE status IN('opening','playing','verifying')",
         [],
     )
     .map_err(|error| format!("恢复未完成视频任务失败: {error}"))?;
@@ -387,12 +407,6 @@ fn init_db(path: &PathBuf) -> Result<(), String> {
         "UPDATE video_courses
          SET status = 'pending'
          WHERE kind = 'video' AND status = 'manual'",
-        [],
-    );
-    let _ = conn.execute(
-        "UPDATE video_courses
-         SET status = 'pending'
-         WHERE status IN ('opening', 'playing', 'verifying')",
         [],
     );
     Ok(())
@@ -2544,12 +2558,12 @@ fn import_capture(
                    duration_seconds=CASE WHEN excluded.duration_seconds > 0 THEN excluded.duration_seconds ELSE video_courses.duration_seconds END,
                    progress=CASE
                      WHEN excluded.status='completed' THEN 100.0
-                     WHEN video_courses.status IN('opening','playing','verifying') AND video_courses.progress > 0.0 THEN video_courses.progress
+                     WHEN video_courses.status IN('opening','playing','verifying','paused','skipped','attention') AND video_courses.progress > 0.0 THEN video_courses.progress
                      ELSE excluded.progress
                    END,
                    status=CASE
                      WHEN excluded.status='completed' THEN 'completed'
-                     WHEN video_courses.status IN('opening','playing','verifying') THEN video_courses.status
+                     WHEN video_courses.status IN('opening','playing','verifying','paused','skipped','attention') THEN video_courses.status
                      ELSE excluded.status
                    END,
                    sort_order=excluded.sort_order,
@@ -2577,7 +2591,7 @@ fn import_capture(
     if !current_course_ids.is_empty() {
         let placeholders = current_course_ids.iter().map(|_| "?").collect::<Vec<_>>().join(",");
         let sql = format!(
-            "DELETE FROM video_courses WHERE topic_id = ?1 AND status NOT IN ('opening', 'playing', 'verifying') AND id NOT IN ({placeholders})"
+            "DELETE FROM video_courses WHERE topic_id = ?1 AND status NOT IN ('opening', 'playing', 'verifying', 'paused', 'skipped', 'attention') AND id NOT IN ({placeholders})"
         );
         let mut params_vec: Vec<&dyn rusqlite::ToSql> = Vec::new();
         params_vec.push(&topic_id);
@@ -2616,8 +2630,18 @@ fn import_capture(
 
 fn is_phase_or_section_title(title: &str) -> bool {
     let t = title.trim();
-    let trimmed = t.trim_start_matches(|c: char| c.is_ascii_digit() || c.is_whitespace() || c == '.' || c == '-' || c == '、');
-    if trimmed.starts_with('第') && (trimmed.contains('期') || trimmed.contains("阶段") || trimmed.contains("部分") || trimmed.contains('篇') || trimmed.contains('讲') || trimmed.contains('节') || trimmed.contains('章')) {
+    let trimmed = t.trim_start_matches(|c: char| {
+        c.is_ascii_digit() || c.is_whitespace() || c == '.' || c == '-' || c == '、'
+    });
+    if trimmed.starts_with('第')
+        && (trimmed.contains('期')
+            || trimmed.contains("阶段")
+            || trimmed.contains("部分")
+            || trimmed.contains('篇')
+            || trimmed.contains('讲')
+            || trimmed.contains('节')
+            || trimmed.contains('章'))
+    {
         return true;
     }
     if trimmed.starts_with("模块") || trimmed.starts_with("阶段") {
@@ -2629,7 +2653,7 @@ fn is_phase_or_section_title(title: &str) -> bool {
 fn load_course(path: &PathBuf, course_id: &str) -> Result<CourseRecord, String> {
     let conn = Connection::open(path).map_err(|error| error.to_string())?;
     conn.query_row(
-        "SELECT id,topic_id,provider,url,locator,kind,title,duration_seconds,progress,sort_order FROM video_courses WHERE id=?1",
+        "SELECT id,topic_id,provider,url,locator,kind,title,duration_seconds,progress FROM video_courses WHERE id=?1",
         params![course_id],
         |row| {
             let provider: String = row.get(2)?;
@@ -2643,7 +2667,6 @@ fn load_course(path: &PathBuf, course_id: &str) -> Result<CourseRecord, String> 
                 title: row.get(6)?,
                 duration_seconds: row.get(7)?,
                 progress: row.get(8)?,
-                sort_order: row.get(9)?,
             })
         },
     )
@@ -2671,6 +2694,13 @@ async fn open_course(
     if auto_play {
         let _ = window.hide();
     }
+    let token = CAPTURE_COUNTER.fetch_add(1, Ordering::Relaxed);
+    state
+        .runtime
+        .lock()
+        .unwrap_or_else(|error| error.into_inner())
+        .playback_tokens
+        .insert(course.provider.key().to_string(), token);
     if !course.url.is_empty() {
         let url = course
             .url
@@ -2689,9 +2719,13 @@ async fn open_course(
         let click_script = course_click_script(&course.title, &course.locator);
         let click_window = window.clone();
         let click_provider = course.provider;
+        let click_state = state.clone();
         tauri::async_runtime::spawn(async move {
             for delay in [1200, 2500, 4500, 8000] {
                 tokio::time::sleep(Duration::from_millis(delay)).await;
+                if !playback_token_matches(&click_state, click_provider, token) {
+                    break;
+                }
                 let current_url = click_window.url().ok();
                 if current_url.as_ref().is_some_and(|current| {
                     current.as_str() != topic_url && provider_accepts_url(click_provider, current)
@@ -2710,20 +2744,28 @@ async fn open_course(
                     }
                     tokio::time::sleep(Duration::from_millis(1500)).await;
                 }
+                if !playback_token_matches(&click_state, click_provider, token) {
+                    break;
+                }
                 let _ = click_window.eval(&click_script);
             }
         });
     }
     if auto_play {
-        let settings = state
-            .settings
-            .lock()
-            .unwrap_or_else(|error| error.into_inner())
-            .clone();
         let play_window = window.clone();
+        let play_state = state.clone();
+        let play_provider = course.provider;
         tauri::async_runtime::spawn(async move {
             for delay in [1000, 2200, 4000, 6500] {
                 tokio::time::sleep(Duration::from_millis(delay)).await;
+                if !playback_token_matches(&play_state, play_provider, token) {
+                    break;
+                }
+                let settings = play_state
+                    .settings
+                    .lock()
+                    .unwrap_or_else(|error| error.into_inner())
+                    .clone();
                 let _ = play_window.eval(update_media_script(settings.speed, settings.muted, true));
             }
         });
@@ -2731,28 +2773,113 @@ async fn open_course(
     Ok(())
 }
 
+fn remember_queue_topic(conn: &Connection, course: &CourseRecord) -> Result<(), String> {
+    for key in [course.provider.key(), "all"] {
+        conn.execute(
+            "INSERT INTO video_queue_lanes(provider,topic_id) VALUES(?1,?2)
+             ON CONFLICT(provider) DO UPDATE SET topic_id=excluded.topic_id",
+            params![key, course.topic_id],
+        )
+        .map_err(|error| error.to_string())?;
+    }
+    Ok(())
+}
+
+// 预览与实际调度共用只读查询；仅真正开始课程时更新专题位置。
 fn next_pending(
     path: &PathBuf,
     provider: Option<Provider>,
 ) -> Result<Option<CourseRecord>, String> {
     let conn = Connection::open(path).map_err(|error| error.to_string())?;
-    let sql = if provider.is_some() {
-        "SELECT id FROM video_courses WHERE status='pending' AND kind IN ('video', 'slides') AND provider=?1
-         ORDER BY sort_order,updated_at LIMIT 1"
-    } else {
-        "SELECT id FROM video_courses WHERE status='pending' AND kind IN ('video', 'slides')
-         ORDER BY updated_at,sort_order LIMIT 1"
-    };
-    let id: Option<String> = if let Some(provider) = provider {
-        conn.query_row(sql, params![provider.key()], |row| row.get(0))
-            .optional()
-            .map_err(|error| error.to_string())?
-    } else {
-        conn.query_row(sql, [], |row| row.get(0))
-            .optional()
-            .map_err(|error| error.to_string())?
-    };
+    let id: Option<String> = conn
+        .query_row(
+            "SELECT c.id FROM video_courses c
+         JOIN video_topics t ON t.id=c.topic_id
+         LEFT JOIN video_queue_lanes lane ON lane.provider=COALESCE(?1, 'all')
+         LEFT JOIN video_queue_lanes platform ON platform.provider=c.provider
+         WHERE c.status IN ('pending','paused') AND c.kind IN ('video','slides')
+           AND (?1 IS NULL OR c.provider=?1) AND platform.blocked_reason IS NULL
+         ORDER BY CASE WHEN c.topic_id=lane.topic_id THEN 0 ELSE 1 END,
+                  CASE WHEN c.status='paused' THEN 0 ELSE 1 END,
+                  t.rowid,c.sort_order,c.title,c.id LIMIT 1",
+            params![provider.map(Provider::key)],
+            |row| row.get(0),
+        )
+        .optional()
+        .map_err(|error| error.to_string())?;
     id.map(|id| load_course(path, &id)).transpose()
+}
+
+fn pause_player(app: &AppHandle, state: &VideoTaskState, provider: Provider) {
+    state
+        .runtime
+        .lock()
+        .unwrap_or_else(|error| error.into_inner())
+        .playback_tokens
+        .remove(provider.key());
+    if let Some(window) = app.get_webview_window(&provider.player_label()) {
+        let _ = window.eval(r#"(() => {
+            const pause = (win) => {
+                try {
+                    win.__MTOOL_LEARNING_BRIDGE__?.update(1, true, false);
+                    win.document.querySelectorAll('video,audio').forEach(media => media.pause());
+                    win.document.querySelectorAll('iframe').forEach(frame => pause(frame.contentWindow));
+                } catch (_) {}
+            };
+            pause(window);
+        })();"#);
+    }
+}
+
+fn persist_stopped_course(
+    path: &PathBuf,
+    active: &ActiveCourse,
+    status: &str,
+    reason: Option<&str>,
+) -> Result<(), String> {
+    let conn = Connection::open(path).map_err(|error| error.to_string())?;
+    let progress = if active.duration > 0.0 && active.current_time > 0.0 {
+        Some(((active.current_time / active.duration) * 100.0).clamp(0.0, 100.0))
+    } else {
+        None
+    };
+    conn.execute(
+        "UPDATE video_courses SET status=?2,progress=COALESCE(?3,progress),
+         duration_seconds=CASE WHEN ?4>0 THEN ?4 ELSE duration_seconds END,
+         last_error=?5,updated_at=?6 WHERE id=?1 AND status!='completed'",
+        params![
+            active.course_id,
+            status,
+            progress,
+            active.duration as i64,
+            reason,
+            now()
+        ],
+    )
+    .map_err(|error| error.to_string())?;
+    Ok(())
+}
+
+fn block_platform(path: &PathBuf, active: &ActiveCourse) -> Result<(), String> {
+    let reason = "登录已失效，请打开登录，完成后点击“登录后继续”";
+    persist_stopped_course(path, active, "paused", Some(reason))?;
+    let conn = Connection::open(path).map_err(|error| error.to_string())?;
+    conn.execute(
+        "INSERT INTO video_queue_lanes(provider,topic_id,blocked_reason) VALUES(?1,?2,?3)
+         ON CONFLICT(provider) DO UPDATE SET topic_id=excluded.topic_id,blocked_reason=excluded.blocked_reason",
+        params![active.provider.key(),active.topic_id,reason],
+    ).map_err(|error| error.to_string())?;
+    Ok(())
+}
+
+fn playback_token_matches(state: &VideoTaskState, provider: Provider, token: u64) -> bool {
+    state
+        .runtime
+        .lock()
+        .unwrap_or_else(|error| error.into_inner())
+        .playback_tokens
+        .get(provider.key())
+        == Some(&token)
 }
 
 async fn start_one(
@@ -2764,11 +2891,21 @@ async fn start_one(
         return Ok(false);
     };
     // open_course 会按需创建播放窗口；首次启动也必须继续打开课程并登记为 opening。
-    open_course(app, state, &course, true).await?;
+    if let Err(error) = open_course(app, state, &course, true).await {
+        pause_player(app, state, course.provider);
+        let conn = Connection::open(state.db_path.as_ref()).map_err(|error| error.to_string())?;
+        conn.execute(
+            "UPDATE video_courses SET status='attention',last_error=?2,updated_at=?3 WHERE id=?1",
+            params![course.id, error, now()],
+        )
+        .map_err(|error| error.to_string())?;
+        return Err(error);
+    }
     let timestamp = now();
     let conn = Connection::open(state.db_path.as_ref()).map_err(|error| error.to_string())?;
+    remember_queue_topic(&conn, &course)?;
     let _ = conn.execute(
-        "UPDATE video_courses SET status='pending',updated_at=?2 WHERE provider=?1 AND id != ?3 AND status IN ('opening','playing','verifying')",
+        "UPDATE video_courses SET status='paused',updated_at=?2 WHERE provider=?1 AND id != ?3 AND status IN ('opening','playing','verifying')",
         params![course.provider.key(), timestamp, course.id],
     );
     conn.execute(
@@ -2805,13 +2942,12 @@ async fn start_one(
     Ok(true)
 }
 
-
-
 #[tauri::command]
-pub fn get_video_task_dashboard(
+pub async fn get_video_task_dashboard(
     app: AppHandle,
     state: tauri::State<'_, VideoTaskState>,
 ) -> Result<VideoTaskDashboard, String> {
+    let _guard = state.queue_tick.lock().await;
     let conn = Connection::open(state.db_path.as_ref()).map_err(|error| error.to_string())?;
     let runtime_active = state
         .runtime
@@ -2852,7 +2988,7 @@ pub fn get_video_task_dashboard(
         let mut course_stmt = conn
             .prepare(
                 "SELECT id,title,url,section_title,kind,duration_seconds,progress,status,last_error
-                 FROM video_courses WHERE topic_id=?1 ORDER BY sort_order,title",
+                 FROM video_courses WHERE topic_id=?1 ORDER BY sort_order,title,id",
             )
             .map_err(|error| error.to_string())?;
         let courses = course_stmt
@@ -2876,22 +3012,28 @@ pub fn get_video_task_dashboard(
         let mut mapped_courses = Vec::new();
         for mut course in courses {
             if let Some(active) = runtime_active.values().find(|a| a.course_id == course.id) {
-                course.status = active.phase.clone();
+                course.status = match active.phase.as_str() {
+                    "ended" => "verifying".to_string(),
+                    "need_login" | "error" => "attention".to_string(),
+                    _ => active.phase.clone(),
+                };
                 if active.duration > 0.0 {
                     course.duration_seconds = active.duration as i64;
                     course.progress =
                         ((active.current_time / active.duration) * 100.0).clamp(0.0, 100.0);
                 }
             } else if matches!(course.status.as_str(), "opening" | "playing" | "verifying") {
-                course.status = "pending".to_string();
+                course.status = "paused".to_string();
             }
-            if course.status != "attention" {
+            if !matches!(course.status.as_str(), "attention" | "paused" | "skipped") {
                 course.last_error = None;
             }
             stats.total += 1;
             match course.status.as_str() {
                 "completed" => stats.completed += 1,
                 "pending" => stats.pending += 1,
+                "paused" => stats.paused += 1,
+                "skipped" => stats.skipped += 1,
                 "opening" | "playing" | "verifying" => stats.running += 1,
                 "manual" => stats.manual += 1,
                 "attention" => stats.attention += 1,
@@ -2917,32 +3059,69 @@ pub fn get_video_task_dashboard(
             let browser_win = app.get_webview_window(&provider.browser_label());
             let player_win = app.get_webview_window(&provider.player_label());
             let window = browser_win.as_ref().or(player_win.as_ref());
+            let blocked_reason: Option<String> = conn
+                .query_row(
+                    "SELECT blocked_reason FROM video_queue_lanes WHERE provider=?1",
+                    params![provider.key()],
+                    |row| row.get(0),
+                )
+                .optional()
+                .unwrap_or(None)
+                .flatten();
             SourceStatus {
                 provider: provider.key().to_string(),
                 name: provider.name().to_string(),
                 home_url: provider.home().to_string(),
                 window_open: browser_win.is_some() || player_win.is_some(),
                 current_url: window.and_then(|window| window.url().ok().map(|url| url.to_string())),
+                blocked_reason,
             }
         })
         .collect();
-    let mut settings = state
+    let settings = state
         .settings
         .lock()
         .unwrap_or_else(|error| error.into_inner())
         .clone();
-    if stats.running == 0 && stats.pending == 0 && settings.running {
-        settings.running = false;
-        if let Ok(mut lock) = state.settings.lock() {
-            lock.running = false;
+    let mut next_courses = Vec::new();
+    let providers_to_check = if settings.cross_site_parallel {
+        vec![Some(Provider::Ulearn), Some(Provider::Merchant)]
+    } else {
+        vec![None]
+    };
+    for p in providers_to_check {
+        if let Some(course) = next_pending(state.db_path.as_ref(), p)? {
+            let topic_title: String = conn
+                .query_row(
+                    "SELECT title FROM video_topics WHERE id=?1",
+                    params![course.topic_id],
+                    |row| row.get(0),
+                )
+                .unwrap_or_else(|_| "".to_string());
+            let is_paused = conn
+                .query_row(
+                    "SELECT status FROM video_courses WHERE id=?1",
+                    params![course.id],
+                    |row| row.get::<_, String>(0),
+                )
+                .map(|st| st == "paused")
+                .unwrap_or(false);
+            next_courses.push(QueuePreview {
+                provider: course.provider.key().to_string(),
+                topic_id: course.topic_id,
+                topic_title,
+                course_id: course.id,
+                title: course.title,
+                paused: is_paused,
+            });
         }
-        let _ = persist_settings(state.db_path.as_ref(), &settings);
     }
     Ok(VideoTaskDashboard {
         settings,
         sources,
         topics,
         stats,
+        next_courses,
     })
 }
 
@@ -2966,6 +3145,7 @@ pub async fn import_current_video_topic(
 ) -> Result<ImportSummary, String> {
     let provider = Provider::parse(&provider)?;
     let capture = capture_current(&app, state.inner(), provider).await?;
+    let _guard = state.queue_tick.lock().await;
     import_capture(state.inner(), provider, capture)
 }
 
@@ -2994,6 +3174,7 @@ pub async fn sync_video_topic(
         .map_err(|error| error.to_string())?;
     tokio::time::sleep(Duration::from_millis(2200)).await;
     let capture = capture_current(&app, state.inner(), provider).await?;
+    let _guard = state.queue_tick.lock().await;
     import_capture(state.inner(), provider, capture)
 }
 
@@ -3029,11 +3210,21 @@ pub async fn open_video_topic(
 }
 
 #[tauri::command]
-pub fn update_video_task_settings(
+pub async fn update_video_task_settings(
     app: AppHandle,
     state: tauri::State<'_, VideoTaskState>,
     mut settings: VideoTaskSettings,
 ) -> Result<(), String> {
+    let _guard = state.queue_tick.lock().await;
+    let previous = state
+        .settings
+        .lock()
+        .unwrap_or_else(|error| error.into_inner())
+        .clone();
+    settings.running = previous.running;
+    if previous.cross_site_parallel && !settings.cross_site_parallel {
+        pause_queue(&app, state.inner())?;
+    }
     settings.speed = clamp_speed(settings.speed);
     *state
         .settings
@@ -3051,23 +3242,14 @@ pub fn update_video_task_settings(
 }
 
 #[tauri::command]
-pub fn start_video_queue(
-    app: AppHandle,
-    state: tauri::State<'_, VideoTaskState>,
-) -> Result<(), String> {
+pub async fn start_video_queue(state: tauri::State<'_, VideoTaskState>) -> Result<(), String> {
+    let _guard = state.queue_tick.lock().await;
     let mut settings = state
         .settings
         .lock()
         .unwrap_or_else(|error| error.into_inner());
     settings.running = true;
-    persist_settings(state.db_path.as_ref(), &settings)?;
-    for provider in [Provider::Ulearn, Provider::Merchant] {
-        if let Some(window) = app.get_webview_window(&provider.player_label()) {
-            let _ = window.hide();
-            let _ = window.eval(update_media_script(settings.speed, settings.muted, true));
-        }
-    }
-    Ok(())
+    persist_settings(state.db_path.as_ref(), &settings)
 }
 
 #[tauri::command]
@@ -3090,54 +3272,41 @@ pub fn hide_video_learning_window(app: AppHandle, provider: String) -> Result<()
     Ok(())
 }
 
+fn pause_queue(app: &AppHandle, state: &VideoTaskState) -> Result<(), String> {
+    {
+        let mut settings = state
+            .settings
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        settings.running = false;
+        persist_settings(state.db_path.as_ref(), &settings)?;
+    }
+    let active_courses = state
+        .runtime
+        .lock()
+        .unwrap_or_else(|error| error.into_inner())
+        .active
+        .clone();
+    for active in active_courses.values() {
+        pause_player(app, state, active.provider);
+        persist_stopped_course(state.db_path.as_ref(), active, "paused", None)?;
+        state
+            .runtime
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .active
+            .remove(active.provider.key());
+    }
+    Ok(())
+}
+
 #[tauri::command]
-pub fn pause_video_queue(
+pub async fn pause_video_queue(
     app: AppHandle,
     state: tauri::State<'_, VideoTaskState>,
 ) -> Result<(), String> {
-    let mut settings = state
-        .settings
-        .lock()
-        .unwrap_or_else(|error| error.into_inner());
-    settings.running = false;
-    persist_settings(state.db_path.as_ref(), &settings)?;
-
-    for provider in [Provider::Ulearn, Provider::Merchant] {
-        if let Some(window) = app.get_webview_window(&provider.label()) {
-            let _ = window.eval(update_media_script(settings.speed, settings.muted, false));
-            let _ = window.eval(
-                "if (window.__MTOOL_LEARNING_BRIDGE__) { window.__MTOOL_LEARNING_BRIDGE__.update(1, true, false); }
-                 document.querySelectorAll('video,audio').forEach((media)=>{ try { media.pause(); } catch(_) {} });"
-            );
-        }
-    }
-
-    let active_courses = {
-        let mut runtime = state
-            .runtime
-            .lock()
-            .unwrap_or_else(|error| error.into_inner());
-        std::mem::take(&mut runtime.active)
-    };
-
-    if let Ok(conn) = Connection::open(state.db_path.as_ref()) {
-        for (_key, active) in active_courses {
-            if active.duration > 0.0 && active.current_time > 0.0 {
-                let progress = ((active.current_time / active.duration) * 100.0).clamp(0.0, 100.0);
-                let _ = conn.execute(
-                    "UPDATE video_courses SET status='pending',progress=?2,duration_seconds=?3,updated_at=?4 WHERE id=?1 AND status IN('opening','playing','verifying')",
-                    params![active.course_id, progress, active.duration as i64, now()],
-                );
-            } else {
-                let _ = conn.execute(
-                    "UPDATE video_courses SET status='pending',updated_at=?2 WHERE id=?1 AND status IN('opening','playing','verifying')",
-                    params![active.course_id, now()],
-                );
-            }
-        }
-    }
-
-    Ok(())
+    let _guard = state.queue_tick.lock().await;
+    pause_queue(&app, state.inner())
 }
 
 #[tauri::command]
@@ -3146,131 +3315,72 @@ pub async fn pause_video_course(
     state: tauri::State<'_, VideoTaskState>,
     course_id: String,
 ) -> Result<(), String> {
-    let course = load_course(state.db_path.as_ref(), &course_id)?;
-    let timestamp = now();
-
-    // 1. 停止当前窗口内的视频播放
-    if let Some(window) = app.get_webview_window(&course.provider.label()) {
-        let _ = window.eval(
-            "if (window.__MTOOL_LEARNING_BRIDGE__) { window.__MTOOL_LEARNING_BRIDGE__.update(1, true, false); }
-             document.querySelectorAll('video,audio').forEach((media)=>{ try { media.pause(); } catch(_) {} });"
-        );
+    let _guard = state.queue_tick.lock().await;
+    let is_active = state
+        .runtime
+        .lock()
+        .unwrap_or_else(|error| error.into_inner())
+        .active
+        .values()
+        .any(|active| active.course_id == course_id);
+    if is_active {
+        pause_queue(&app, state.inner())?;
     }
+    Ok(())
+}
 
-    // 2. 从 active 中获取播放进度并移除 active
-    let (current_time, duration) = {
-        let mut runtime = state
-            .runtime
-            .lock()
-            .unwrap_or_else(|error| error.into_inner());
-        if let Some(active) = runtime.active.get(course.provider.key()) {
-            if active.course_id == course_id {
-                let time_and_dur = (active.current_time, active.duration);
-                runtime.active.remove(course.provider.key());
-                time_and_dur
-            } else {
-                (0.0, 0.0)
-            }
-        } else {
-            (0.0, 0.0)
-        }
-    };
-
-    // 3. 更新数据库：将当前课程设为 pending 并记录当前进度
-    let conn = Connection::open(state.db_path.as_ref()).map_err(|error| error.to_string())?;
-    if duration > 0.0 && current_time > 0.0 {
-        let progress = ((current_time / duration) * 100.0).clamp(0.0, 100.0);
-        let _ = conn.execute(
-            "UPDATE video_courses SET status='pending',progress=?2,duration_seconds=?3,updated_at=?4 WHERE id=?1",
-            params![course.id, progress, duration as i64, timestamp],
-        );
-    } else {
-        let _ = conn.execute(
-            "UPDATE video_courses SET status='pending',updated_at=?2 WHERE id=?1",
-            params![course.id, timestamp],
-        );
-    }
-
-    // 4. 确保全局队列处于运行状态，自动播放下一个视频
-    {
-        let mut settings = state
-            .settings
-            .lock()
-            .unwrap_or_else(|error| error.into_inner());
-        settings.running = true;
-        let _ = persist_settings(state.db_path.as_ref(), &settings);
-    }
-
-    // 5. 优先寻找同专题下 sort_order > current.sort_order 的下一个待播放课程
-    let next_course_id: Option<String> = conn
-        .query_row(
-            "SELECT id FROM video_courses
-             WHERE status='pending' AND kind IN ('video', 'slides') AND provider=?1 AND topic_id=?2 AND sort_order > ?3
-             ORDER BY sort_order ASC LIMIT 1",
-            params![course.provider.key(), course.topic_id, course.sort_order],
-            |row| row.get(0),
-        )
-        .optional()
-        .map_err(|error| error.to_string())?
-        .or_else(|| {
-            conn.query_row(
-                "SELECT id FROM video_courses
-                 WHERE status='pending' AND kind IN ('video', 'slides') AND provider=?1 AND id != ?2
-                 ORDER BY sort_order, updated_at LIMIT 1",
-                params![course.provider.key(), course.id],
-                |row| row.get(0),
-            )
-            .optional()
-            .ok()
-            .flatten()
-        });
-
-    drop(conn);
-
-    // 6. 如果有下一门待播放视频，立即开启播放下一门
-    if let Some(next_id) = next_course_id {
-        let next_course = load_course(state.db_path.as_ref(), &next_id)?;
-        open_course(&app, state.inner(), &next_course, true).await?;
-        let next_ts = now();
-        let conn2 = Connection::open(state.db_path.as_ref()).map_err(|error| error.to_string())?;
-        let _ = conn2.execute(
-            "UPDATE video_courses SET status='pending',updated_at=?2 WHERE provider=?1 AND id != ?3 AND status IN ('opening','playing','verifying')",
-            params![next_course.provider.key(), next_ts, next_course.id],
-        );
-        conn2.execute(
-            "UPDATE video_courses SET status='opening',last_error=NULL,updated_at=?2 WHERE id=?1",
-            params![next_course.id, next_ts],
-        )
-        .map_err(|error| error.to_string())?;
-        let next_duration = next_course.duration_seconds as f64;
-        let next_time = if next_duration > 0.0 && next_course.progress > 0.0 {
-            (next_course.progress / 100.0) * next_duration
-        } else {
-            0.0
-        };
+#[tauri::command]
+pub async fn skip_video_course(
+    app: AppHandle,
+    state: tauri::State<'_, VideoTaskState>,
+    course_id: String,
+) -> Result<(), String> {
+    let _guard = state.queue_tick.lock().await;
+    let active = state
+        .runtime
+        .lock()
+        .unwrap_or_else(|error| error.into_inner())
+        .active
+        .values()
+        .find(|active| active.course_id == course_id)
+        .cloned();
+    if let Some(active) = active {
+        pause_player(&app, state.inner(), active.provider);
+        persist_stopped_course(
+            state.db_path.as_ref(),
+            &active,
+            "skipped",
+            Some("已手动跳过，需要时点击重试"),
+        )?;
         state
             .runtime
             .lock()
             .unwrap_or_else(|error| error.into_inner())
             .active
-            .insert(
-                next_course.provider.key().to_string(),
-                ActiveCourse {
-                    course_id: next_course.id,
-                    topic_id: next_course.topic_id,
-                    provider: next_course.provider,
-                    phase: "opening".to_string(),
-                    phase_since: next_ts,
-                    last_media_at: next_ts,
-                    last_progress_at: next_ts,
-                    last_advanced_time: next_time,
-                    current_time: next_time,
-                    duration: next_duration,
-                },
-            );
+            .remove(active.provider.key());
     }
-
     Ok(())
+}
+
+#[tauri::command]
+pub async fn resume_video_platform(
+    state: tauri::State<'_, VideoTaskState>,
+    provider: String,
+) -> Result<(), String> {
+    let _guard = state.queue_tick.lock().await;
+    let provider = Provider::parse(&provider)?;
+    let conn = Connection::open(state.db_path.as_ref()).map_err(|error| error.to_string())?;
+    conn.execute(
+        "UPDATE video_queue_lanes SET blocked_reason=NULL WHERE provider=?1",
+        params![provider.key()],
+    )
+    .map_err(|error| error.to_string())?;
+    let mut settings = state
+        .settings
+        .lock()
+        .unwrap_or_else(|error| error.into_inner());
+    settings.running = true;
+    persist_settings(state.db_path.as_ref(), &settings)
 }
 
 #[tauri::command]
@@ -3345,6 +3455,7 @@ pub async fn tick_video_queue(
             // 1. 播放卡住检测：如果进度停滞（包括 0% 状态）超过 5 分钟（300 秒），自动跳过并播放下一门
             let stall_duration = now() - active.last_progress_at;
             if stall_duration >= 300 {
+                pause_player(&app, state.inner(), active.provider);
                 let conn =
                     Connection::open(state.db_path.as_ref()).map_err(|error| error.to_string())?;
                 let last_error = if active.current_time <= 0.1 {
@@ -3406,11 +3517,16 @@ pub async fn tick_video_queue(
                         .map(|_| "未检测到可持续播放的视频，请打开课程检查")
                         .unwrap_or("课程页面未成功打开或已进入空白页，请重试后检查")
                 };
-                conn.execute(
-                    "UPDATE video_courses SET status='attention',last_error=?2 WHERE id=?1",
-                    params![active.course_id, last_error],
-                )
-                .map_err(|error| error.to_string())?;
+                pause_player(&app, state.inner(), active.provider);
+                if is_login_url {
+                    block_platform(state.db_path.as_ref(), &active)?;
+                } else {
+                    conn.execute(
+                        "UPDATE video_courses SET status='attention',last_error=?2 WHERE id=?1",
+                        params![active.course_id, last_error],
+                    )
+                    .map_err(|error| error.to_string())?;
+                }
                 state
                     .runtime
                     .lock()
@@ -3419,13 +3535,8 @@ pub async fn tick_video_queue(
                     .remove(active.provider.key());
             }
         } else if active.phase == "need_login" {
-            let conn =
-                Connection::open(state.db_path.as_ref()).map_err(|error| error.to_string())?;
-            conn.execute(
-                "UPDATE video_courses SET status='attention',last_error='平台登录已失效或需要扫码登录，请点击“打开登录”完成登录' WHERE id=?1",
-                params![active.course_id],
-            )
-            .map_err(|error| error.to_string())?;
+            pause_player(&app, state.inner(), active.provider);
+            block_platform(state.db_path.as_ref(), &active)?;
             if let Some(window) = app.get_webview_window(&active.provider.label()) {
                 let _ = window.show();
                 let _ = window.unminimize();
@@ -3438,6 +3549,7 @@ pub async fn tick_video_queue(
                 .active
                 .remove(active.provider.key());
         } else if active.phase == "error" {
+            pause_player(&app, state.inner(), active.provider);
             let conn =
                 Connection::open(state.db_path.as_ref()).map_err(|error| error.to_string())?;
             conn.execute(
@@ -3485,7 +3597,7 @@ pub async fn tick_video_queue(
         .unwrap_or_else(|error| error.into_inner())
         .active
         .len();
-    if active_count == 0 && !any_started {
+    if active_count == 0 && !any_started && next_pending(state.db_path.as_ref(), None)?.is_none() {
         let mut settings = state
             .settings
             .lock()
@@ -3508,6 +3620,7 @@ pub async fn open_video_course(
     state: tauri::State<'_, VideoTaskState>,
     course_id: String,
 ) -> Result<(), String> {
+    let _guard = state.queue_tick.lock().await;
     let course = load_course(state.db_path.as_ref(), &course_id)?;
     if course.kind != "video" {
         // 课件、考试、资料属于用户手动交互内容，在前台选专题/浏览窗口打开，完全不打扰后台视频播放队列
@@ -3569,16 +3682,17 @@ pub async fn open_video_course(
             runtime.active.remove(course.provider.key())
         };
         if let Some(old) = old_active {
+            pause_player(&app, state.inner(), old.provider);
             if let Ok(conn) = Connection::open(state.db_path.as_ref()) {
                 if old.duration > 0.0 && old.current_time > 0.0 {
                     let progress = ((old.current_time / old.duration) * 100.0).clamp(0.0, 100.0);
                     let _ = conn.execute(
-                        "UPDATE video_courses SET status='pending',progress=?2,duration_seconds=?3,updated_at=?4 WHERE id=?1",
+                        "UPDATE video_courses SET status='paused',progress=?2,duration_seconds=?3,updated_at=?4 WHERE id=?1",
                         params![old.course_id, progress, old.duration as i64, now()],
                     );
                 } else {
                     let _ = conn.execute(
-                        "UPDATE video_courses SET status='pending',updated_at=?2 WHERE id=?1",
+                        "UPDATE video_courses SET status='paused',updated_at=?2 WHERE id=?1",
                         params![old.course_id, now()],
                     );
                 }
@@ -3588,8 +3702,9 @@ pub async fn open_video_course(
     open_course(&app, state.inner(), &course, false).await?;
     let timestamp = now();
     let conn = Connection::open(state.db_path.as_ref()).map_err(|error| error.to_string())?;
+    let _ = remember_queue_topic(&conn, &course);
     let _ = conn.execute(
-        "UPDATE video_courses SET status='pending',updated_at=?2 WHERE provider=?1 AND id != ?3 AND status IN ('opening','playing','verifying')",
+        "UPDATE video_courses SET status='paused',updated_at=?2 WHERE provider=?1 AND id != ?3 AND status IN ('opening','playing','verifying')",
         params![course.provider.key(), timestamp, course.id],
     );
     conn.execute(
@@ -3627,10 +3742,11 @@ pub async fn open_video_course(
 }
 
 #[tauri::command]
-pub fn retry_video_course(
+pub async fn retry_video_course(
     state: tauri::State<'_, VideoTaskState>,
     course_id: String,
 ) -> Result<(), String> {
+    let _guard = state.queue_tick.lock().await;
     let course = load_course(state.db_path.as_ref(), &course_id)?;
     let next_status = if course.kind == "video" || course.kind == "slides" {
         "pending"
@@ -3647,11 +3763,31 @@ pub fn retry_video_course(
 }
 
 #[tauri::command]
-pub fn complete_video_course(
+pub async fn complete_video_course(
+    app: AppHandle,
     state: tauri::State<'_, VideoTaskState>,
     course_id: String,
 ) -> Result<(), String> {
+    let _guard = state.queue_tick.lock().await;
     let conn = Connection::open(state.db_path.as_ref()).map_err(|error| error.to_string())?;
+    let active_courses = state
+        .runtime
+        .lock()
+        .unwrap_or_else(|error| error.into_inner())
+        .active
+        .clone();
+    for active in active_courses
+        .values()
+        .filter(|active| active.course_id == course_id)
+    {
+        pause_player(&app, state.inner(), active.provider);
+        state
+            .runtime
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .active
+            .remove(active.provider.key());
+    }
     let timestamp = now();
     let topic_id: String = conn
         .query_row(
@@ -3681,11 +3817,31 @@ pub fn complete_video_course(
 }
 
 #[tauri::command]
-pub fn remove_video_topic(
+pub async fn remove_video_topic(
+    app: AppHandle,
     state: tauri::State<'_, VideoTaskState>,
     topic_id: String,
 ) -> Result<(), String> {
+    let _guard = state.queue_tick.lock().await;
     let conn = Connection::open(state.db_path.as_ref()).map_err(|error| error.to_string())?;
+    let active_courses = state
+        .runtime
+        .lock()
+        .unwrap_or_else(|error| error.into_inner())
+        .active
+        .clone();
+    for active in active_courses
+        .values()
+        .filter(|active| active.topic_id == topic_id)
+    {
+        pause_player(&app, state.inner(), active.provider);
+        state
+            .runtime
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .active
+            .remove(active.provider.key());
+    }
     conn.execute("PRAGMA foreign_keys=ON", []).ok();
     conn.execute("DELETE FROM video_topics WHERE id=?1", params![topic_id])
         .map_err(|error| error.to_string())?;
@@ -3693,11 +3849,31 @@ pub fn remove_video_topic(
 }
 
 #[tauri::command]
-pub fn reset_video_topic(
+pub async fn reset_video_topic(
+    app: AppHandle,
     state: tauri::State<'_, VideoTaskState>,
     topic_id: String,
 ) -> Result<(), String> {
+    let _guard = state.queue_tick.lock().await;
     let conn = Connection::open(state.db_path.as_ref()).map_err(|error| error.to_string())?;
+    let active_courses = state
+        .runtime
+        .lock()
+        .unwrap_or_else(|error| error.into_inner())
+        .active
+        .clone();
+    for active in active_courses
+        .values()
+        .filter(|active| active.topic_id == topic_id)
+    {
+        pause_player(&app, state.inner(), active.provider);
+        state
+            .runtime
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .active
+            .remove(active.provider.key());
+    }
     conn.execute(
         "UPDATE video_courses SET status='pending',progress=0,last_error=NULL,updated_at=?2
          WHERE topic_id=?1 AND kind IN ('video', 'slides')",
@@ -3713,10 +3889,11 @@ pub fn reset_video_topic(
 }
 
 #[tauri::command]
-pub fn reset_video_course(
+pub async fn reset_video_course(
     state: tauri::State<'_, VideoTaskState>,
     course_id: String,
 ) -> Result<(), String> {
+    let _guard = state.queue_tick.lock().await;
     let course = load_course(state.db_path.as_ref(), &course_id)?;
     let next_status = if course.kind == "video" || course.kind == "slides" {
         "pending"
@@ -4135,5 +4312,425 @@ mod tests {
         assert!(script.contains("isPhaseOrSectionHeader"));
         assert!(script.contains("if (isPhaseOrSectionHeader(c.title)) return false;"));
     }
-}
 
+    #[test]
+    fn sequential_topic_scheduling_locks_current_topic_until_done() {
+        let path = std::env::temp_dir().join(format!(
+            "mtool-video-task-test-{}.db",
+            CAPTURE_COUNTER.fetch_add(1, Ordering::Relaxed)
+        ));
+        init_db(&path).expect("init test database");
+        let conn = Connection::open(&path).expect("open test database");
+
+        conn.execute(
+            "INSERT INTO video_topics (id, provider, title, url, progress, total_count, completed_count, last_synced_at)
+             VALUES ('topic-1', 'merchant', '专题一', 'https://example.com/1', 0, 2, 0, ?1)",
+            params![now()],
+        ).expect("insert topic-1");
+
+        conn.execute(
+            "INSERT INTO video_topics (id, provider, title, url, progress, total_count, completed_count, last_synced_at)
+             VALUES ('topic-2', 'merchant', '专题二', 'https://example.com/2', 0, 1, 0, ?1)",
+            params![now()],
+        ).expect("insert topic-2");
+
+        conn.execute(
+            "INSERT INTO video_courses (id, topic_id, provider, external_id, title, status, sort_order, updated_at)
+             VALUES ('c-1-1', 'topic-1', 'merchant', 'ext-1-1', '专题一第1节', 'pending', 1, ?1)",
+            params![now()],
+        ).expect("insert c-1-1");
+
+        conn.execute(
+            "INSERT INTO video_courses (id, topic_id, provider, external_id, title, status, sort_order, updated_at)
+             VALUES ('c-1-2', 'topic-1', 'merchant', 'ext-1-2', '专题一第2节', 'pending', 2, ?1)",
+            params![now()],
+        ).expect("insert c-1-2");
+
+        conn.execute(
+            "INSERT INTO video_courses (id, topic_id, provider, external_id, title, status, sort_order, updated_at)
+             VALUES ('c-2-1', 'topic-2', 'merchant', 'ext-2-1', '专题二第1节', 'pending', 1, ?1)",
+            params![now()],
+        ).expect("insert c-2-1");
+
+        let next1 = next_pending(&path, Some(Provider::Merchant))
+            .expect("query next_pending")
+            .expect("found course");
+        assert_eq!(next1.id, "c-1-1");
+        assert_eq!(next1.topic_id, "topic-1");
+
+        remember_queue_topic(&conn, &next1).expect("activate first course");
+        let lane_topic: String = conn
+            .query_row(
+                "SELECT topic_id FROM video_queue_lanes WHERE provider='merchant'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("lane topic");
+        assert_eq!(lane_topic, "topic-1");
+
+        conn.execute(
+            "UPDATE video_courses SET status='completed' WHERE id='c-1-1'",
+            [],
+        )
+        .expect("update c-1-1");
+        let next2 = next_pending(&path, Some(Provider::Merchant))
+            .expect("query next_pending")
+            .expect("found course");
+        assert_eq!(next2.id, "c-1-2");
+        assert_eq!(next2.topic_id, "topic-1");
+
+        conn.execute(
+            "UPDATE video_courses SET status='completed' WHERE id='c-1-2'",
+            [],
+        )
+        .expect("update c-1-2");
+        let next3 = next_pending(&path, Some(Provider::Merchant))
+            .expect("query next_pending")
+            .expect("found course");
+        assert_eq!(next3.id, "c-2-1");
+        assert_eq!(next3.topic_id, "topic-2");
+
+        remember_queue_topic(&conn, &next3).expect("activate next topic");
+        let lane_topic2: String = conn
+            .query_row(
+                "SELECT topic_id FROM video_queue_lanes WHERE provider='merchant'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("lane topic 2");
+        assert_eq!(lane_topic2, "topic-2");
+
+        drop(conn);
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn next_pending_prefers_paused_course_over_pending() {
+        let path = std::env::temp_dir().join(format!(
+            "mtool-video-task-test-{}.db",
+            CAPTURE_COUNTER.fetch_add(1, Ordering::Relaxed)
+        ));
+        init_db(&path).expect("init test database");
+        let conn = Connection::open(&path).expect("open test database");
+
+        conn.execute(
+            "INSERT INTO video_topics (id, provider, title, url, progress, total_count, completed_count, last_synced_at)
+             VALUES ('topic-1', 'merchant', '专题一', 'https://example.com/1', 0, 2, 0, ?1)",
+            params![now()],
+        ).expect("insert topic-1");
+
+        conn.execute(
+            "INSERT INTO video_courses (id, topic_id, provider, external_id, title, status, sort_order, updated_at)
+             VALUES ('c-1', 'topic-1', 'merchant', 'ext-1', '课程1', 'pending', 1, ?1)",
+            params![now()],
+        ).expect("insert c-1");
+
+        conn.execute(
+            "INSERT INTO video_courses (id, topic_id, provider, external_id, title, status, progress, sort_order, updated_at)
+             VALUES ('c-2', 'topic-1', 'merchant', 'ext-2', '课程2', 'paused', 45.0, 2, ?1)",
+            params![now()],
+        ).expect("insert c-2");
+
+        let next = next_pending(&path, Some(Provider::Merchant))
+            .expect("query next_pending")
+            .expect("found course");
+        assert_eq!(next.id, "c-2");
+
+        drop(conn);
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn next_pending_ignores_skipped_and_honors_blocked_reason() {
+        let path = std::env::temp_dir().join(format!(
+            "mtool-video-task-test-{}.db",
+            CAPTURE_COUNTER.fetch_add(1, Ordering::Relaxed)
+        ));
+        init_db(&path).expect("init test database");
+        let conn = Connection::open(&path).expect("open test database");
+
+        conn.execute(
+            "INSERT INTO video_topics (id, provider, title, url, progress, total_count, completed_count, last_synced_at)
+             VALUES ('topic-1', 'merchant', '专题一', 'https://example.com/1', 0, 2, 0, ?1)",
+            params![now()],
+        ).expect("insert topic-1");
+
+        conn.execute(
+            "INSERT INTO video_courses (id, topic_id, provider, external_id, title, status, sort_order, updated_at)
+             VALUES ('c-1', 'topic-1', 'merchant', 'ext-1', '跳过的课程', 'skipped', 1, ?1)",
+            params![now()],
+        ).expect("insert c-1");
+
+        conn.execute(
+            "INSERT INTO video_courses (id, topic_id, provider, external_id, title, status, sort_order, updated_at)
+             VALUES ('c-2', 'topic-1', 'merchant', 'ext-2', '待播课程', 'pending', 2, ?1)",
+            params![now()],
+        ).expect("insert c-2");
+
+        let next = next_pending(&path, Some(Provider::Merchant))
+            .expect("query next_pending")
+            .expect("found course");
+        assert_eq!(next.id, "c-2");
+
+        conn.execute(
+            "INSERT INTO video_queue_lanes (provider, blocked_reason) VALUES ('merchant', 'session_expired')
+             ON CONFLICT(provider) DO UPDATE SET blocked_reason='session_expired'",
+            [],
+        ).expect("block lane");
+
+        let blocked_result =
+            next_pending(&path, Some(Provider::Merchant)).expect("query next_pending");
+        assert!(blocked_result.is_none());
+
+        conn.execute(
+            "UPDATE video_queue_lanes SET blocked_reason=NULL WHERE provider='merchant'",
+            [],
+        )
+        .expect("unblock lane");
+
+        let unblocked_result =
+            next_pending(&path, Some(Provider::Merchant)).expect("query next_pending");
+        assert!(unblocked_result.is_some());
+        assert_eq!(unblocked_result.unwrap().id, "c-2");
+
+        drop(conn);
+        let _ = std::fs::remove_file(path);
+    }
+    struct QueueFixture {
+        path: PathBuf,
+        state: VideoTaskState,
+    }
+    impl QueueFixture {
+        fn new() -> Self {
+            let path = std::env::temp_dir().join(format!(
+                "mtool-queue-{}-{}.db",
+                std::process::id(),
+                CAPTURE_COUNTER.fetch_add(1, Ordering::Relaxed)
+            ));
+            init_db(&path).unwrap();
+            let state = VideoTaskState {
+                db_path: Arc::new(path.clone()),
+                settings: Arc::new(Mutex::new(VideoTaskSettings::default())),
+                captures: Arc::new(Mutex::new(CaptureExchange::default())),
+                runtime: Arc::new(Mutex::new(RuntimeState::default())),
+                queue_tick: Arc::new(tokio::sync::Mutex::new(())),
+            };
+            let conn = Connection::open(&path).unwrap();
+            conn.execute_batch("INSERT INTO video_topics(id,provider,title,url,last_synced_at) VALUES
+                ('a','merchant','专题A','https://example.com/a',1),
+                ('b','merchant','专题B','https://example.com/b',2),
+                ('u','ulearn','专题U','https://example.com/u',3);
+                INSERT INTO video_courses(id,topic_id,provider,external_id,title,status,sort_order,updated_at) VALUES
+                ('a1','a','merchant','a1','A1','pending',0,900),
+                ('a2','a','merchant','a2','A2','pending',1,800),
+                ('b1','b','merchant','b1','B1','pending',0,1),
+                ('u1','u','ulearn','u1','U1','pending',0,0);").unwrap();
+            Self { path, state }
+        }
+        fn active(&self, id: &str) -> ActiveCourse {
+            let c = load_course(&self.path, id).unwrap();
+            ActiveCourse {
+                course_id: c.id,
+                topic_id: c.topic_id,
+                provider: c.provider,
+                phase: "playing".into(),
+                phase_since: now(),
+                last_media_at: now(),
+                last_progress_at: now(),
+                last_advanced_time: 45.0,
+                current_time: 45.0,
+                duration: 100.0,
+            }
+        }
+    }
+    impl Drop for QueueFixture {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_file(&self.path);
+        }
+    }
+
+    #[test]
+    fn queue_preview_is_read_only_and_update_times_do_not_reorder_topics() {
+        let f = QueueFixture::new();
+        let conn = Connection::open(&f.path).unwrap();
+        for provider in [None, Some(Provider::Merchant)] {
+            assert_eq!(next_pending(&f.path, provider).unwrap().unwrap().id, "a1");
+            assert_eq!(next_pending(&f.path, provider).unwrap().unwrap().id, "a1");
+        }
+        assert_eq!(
+            conn.query_row("SELECT COUNT(*) FROM video_queue_lanes", [], |row| row
+                .get::<_, i64>(0))
+                .unwrap(),
+            0
+        );
+        remember_queue_topic(&conn, &load_course(&f.path, "a1").unwrap()).unwrap();
+        conn.execute(
+            "UPDATE video_courses SET status='completed',updated_at=1000 WHERE id='a1'",
+            [],
+        )
+        .unwrap();
+        assert_eq!(next_pending(&f.path, None).unwrap().unwrap().id, "a2");
+        // Viewing the last course's preview must not switch the remembered topic to B.
+        conn.execute(
+            "UPDATE video_courses SET status='opening' WHERE id='a2'",
+            [],
+        )
+        .unwrap();
+        assert_eq!(next_pending(&f.path, None).unwrap().unwrap().id, "b1");
+        assert_eq!(
+            conn.query_row(
+                "SELECT topic_id FROM video_queue_lanes WHERE provider='all'",
+                [],
+                |row| row.get::<_, String>(0)
+            )
+            .unwrap(),
+            "a"
+        );
+        persist_stopped_course(&f.path, &f.active("a2"), "paused", None).unwrap();
+        assert_eq!(next_pending(&f.path, None).unwrap().unwrap().id, "a2");
+    }
+
+    #[test]
+    fn locked_topic_login_failure_blocks_both_serial_and_parallel_selection() {
+        let f = QueueFixture::new();
+        let conn = Connection::open(&f.path).unwrap();
+        remember_queue_topic(&conn, &load_course(&f.path, "a1").unwrap()).unwrap();
+        block_platform(&f.path, &f.active("a1")).unwrap();
+        assert!(next_pending(&f.path, Some(Provider::Merchant))
+            .unwrap()
+            .is_none());
+        assert_eq!(next_pending(&f.path, None).unwrap().unwrap().id, "u1");
+        assert_eq!(
+            next_pending(&f.path, Some(Provider::Ulearn))
+                .unwrap()
+                .unwrap()
+                .id,
+            "u1"
+        );
+        assert_eq!(
+            conn.query_row(
+                "SELECT status FROM video_courses WHERE id='a2'",
+                [],
+                |row| row.get::<_, String>(0)
+            )
+            .unwrap(),
+            "pending"
+        );
+        conn.execute(
+            "UPDATE video_queue_lanes SET blocked_reason=NULL WHERE provider='merchant'",
+            [],
+        )
+        .unwrap();
+        let next = next_pending(&f.path, Some(Provider::Merchant))
+            .unwrap()
+            .unwrap();
+        assert_eq!(next.id, "a1");
+        assert_eq!(next.progress, 45.0);
+    }
+
+    #[test]
+    fn restart_preserves_paused_skipped_progress_and_topic_position() {
+        let f = QueueFixture::new();
+        let conn = Connection::open(&f.path).unwrap();
+        remember_queue_topic(&conn, &load_course(&f.path, "b1").unwrap()).unwrap();
+        persist_stopped_course(&f.path, &f.active("a1"), "skipped", Some("手动跳过")).unwrap();
+        conn.execute("UPDATE video_courses SET status='opening',progress=42,duration_seconds=100,kind='slides' WHERE id='b1'",[]).unwrap();
+        init_db(&f.path).unwrap();
+        let next = next_pending(&f.path, None).unwrap().unwrap();
+        assert_eq!(next.id, "b1");
+        assert_eq!(next.progress, 42.0);
+        assert_eq!(
+            conn.query_row(
+                "SELECT status FROM video_courses WHERE id='b1'",
+                [],
+                |row| row.get::<_, String>(0)
+            )
+            .unwrap(),
+            "paused"
+        );
+        assert_eq!(
+            conn.query_row(
+                "SELECT status FROM video_courses WHERE id='a1'",
+                [],
+                |row| row.get::<_, String>(0)
+            )
+            .unwrap(),
+            "skipped"
+        );
+    }
+
+    #[test]
+    fn sync_preserves_skipped_paused_and_attention_until_platform_completes() {
+        let f = QueueFixture::new();
+        let capture = |completed: bool| PageTopicCapture {
+            title: "同步专题".into(),
+            url: "https://example.com/sync".into(),
+            progress: 0.0,
+            total_count: 3,
+            completed_count: 0,
+            courses: ["one", "two", "three"]
+                .iter()
+                .map(|id| PageCourseCapture {
+                    external_id: (*id).into(),
+                    title: (*id).into(),
+                    url: format!("https://example.com/{id}"),
+                    locator: String::new(),
+                    section_title: String::new(),
+                    kind: "video".into(),
+                    duration_seconds: 100,
+                    progress: 0.0,
+                    completed,
+                })
+                .collect(),
+        };
+        let topic = import_capture(&f.state, Provider::Merchant, capture(false))
+            .unwrap()
+            .topic_id;
+        let conn = Connection::open(&f.path).unwrap();
+        for (external_id, status) in [
+            ("one", "skipped"),
+            ("two", "paused"),
+            ("three", "attention"),
+        ] {
+            conn.execute("UPDATE video_courses SET status=?1,progress=45,last_error='保留原因' WHERE topic_id=?2 AND external_id=?3",params![status,topic,external_id]).unwrap();
+        }
+        import_capture(&f.state, Provider::Merchant, capture(false)).unwrap();
+        for (external_id, status) in [
+            ("one", "skipped"),
+            ("two", "paused"),
+            ("three", "attention"),
+        ] {
+            let result:(String,f64)=conn.query_row("SELECT status,progress FROM video_courses WHERE topic_id=?1 AND external_id=?2",params![topic,external_id],|row|Ok((row.get(0)?,row.get(1)?))).unwrap();
+            assert_eq!(result, (status.into(), 45.0));
+        }
+        import_capture(&f.state, Provider::Merchant, capture(true)).unwrap();
+        assert_eq!(conn.query_row("SELECT COUNT(*) FROM video_courses WHERE topic_id=?1 AND status='completed' AND progress=100 AND last_error IS NULL",params![topic],|row|row.get::<_,i64>(0)).unwrap(),3);
+    }
+
+    #[test]
+    fn cancelled_playback_tokens_cannot_control_a_later_course() {
+        let f = QueueFixture::new();
+        f.state
+            .runtime
+            .lock()
+            .unwrap()
+            .playback_tokens
+            .insert("merchant".into(), 1);
+        assert!(playback_token_matches(&f.state, Provider::Merchant, 1));
+        f.state
+            .runtime
+            .lock()
+            .unwrap()
+            .playback_tokens
+            .remove("merchant");
+        assert!(!playback_token_matches(&f.state, Provider::Merchant, 1));
+        f.state
+            .runtime
+            .lock()
+            .unwrap()
+            .playback_tokens
+            .insert("merchant".into(), 2);
+        assert!(!playback_token_matches(&f.state, Provider::Merchant, 1));
+        assert!(playback_token_matches(&f.state, Provider::Merchant, 2));
+    }
+}

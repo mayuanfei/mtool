@@ -9,7 +9,7 @@ import {
 
 type Provider = 'ulearn' | 'merchant';
 type CourseKind = 'video' | 'exam' | 'slides' | 'material';
-type CourseStatus = 'completed' | 'pending' | 'opening' | 'playing' | 'verifying' | 'manual' | 'attention';
+type CourseStatus = 'completed' | 'pending' | 'opening' | 'playing' | 'verifying' | 'manual' | 'attention' | 'paused' | 'skipped';
 
 interface VideoTaskSettings {
   speed: number;
@@ -24,6 +24,16 @@ interface SourceStatus {
   homeUrl: string;
   windowOpen: boolean;
   currentUrl: string | null;
+  blockedReason?: string | null;
+}
+
+interface QueuePreview {
+  provider: Provider;
+  topicId: string;
+  topicTitle: string;
+  courseId: string;
+  title: string;
+  paused: boolean;
 }
 
 interface CourseItem {
@@ -54,6 +64,8 @@ interface QueueStats {
   total: number;
   completed: number;
   pending: number;
+  paused: number;
+  skipped: number;
   running: number;
   manual: number;
   attention: number;
@@ -64,6 +76,7 @@ interface VideoTaskDashboard {
   sources: SourceStatus[];
   topics: TopicItem[];
   stats: QueueStats;
+  nextCourses: QueuePreview[];
 }
 
 interface ImportSummary {
@@ -78,7 +91,8 @@ const EMPTY_DASHBOARD: VideoTaskDashboard = {
   settings: { speed: 2, muted: true, crossSiteParallel: false, running: false },
   sources: [],
   topics: [],
-  stats: { total: 0, completed: 0, pending: 0, running: 0, manual: 0, attention: 0 },
+  stats: { total: 0, completed: 0, pending: 0, paused: 0, skipped: 0, running: 0, manual: 0, attention: 0 },
+  nextCourses: [],
 };
 
 const STATUS_META: Record<CourseStatus, { label: string; classes: string }> = {
@@ -87,6 +101,8 @@ const STATUS_META: Record<CourseStatus, { label: string; classes: string }> = {
   opening: { label: '正在打开', classes: 'text-sky-400 bg-sky-500/10 border-sky-500/25' },
   playing: { label: '正在播放', classes: 'text-indigo-400 bg-indigo-500/10 border-indigo-500/25' },
   verifying: { label: '完成核验中', classes: 'text-amber-400 bg-amber-500/10 border-amber-500/25' },
+  paused: { label: '已暂停', classes: 'text-amber-400 bg-amber-500/10 border-amber-500/25' },
+  skipped: { label: '已跳过', classes: 'text-slate-400 bg-slate-500/10 border-slate-500/25' },
   manual: { label: '需本人处理', classes: 'text-orange-400 bg-orange-500/10 border-orange-500/25' },
   attention: { label: '需要处理', classes: 'text-rose-400 bg-rose-500/10 border-rose-500/25' },
 };
@@ -354,7 +370,9 @@ export function VideoTasks() {
               </div>
               <span className={cx(
                 'text-[11px] px-2 py-1 rounded-md border',
-                source.currentUrl?.toLowerCase().includes('/login') || source.currentUrl?.toLowerCase().includes('/sso')
+                source.blockedReason
+                  ? 'text-rose-400 border-rose-500/25 bg-rose-500/10'
+                  : source.currentUrl?.toLowerCase().includes('/login') || source.currentUrl?.toLowerCase().includes('/sso')
                   ? 'text-amber-400 border-amber-500/25 bg-amber-500/10'
                   : dashboard.settings.running && source.windowOpen
                   ? 'text-indigo-400 border-indigo-500/25 bg-indigo-500/10'
@@ -362,7 +380,9 @@ export function VideoTasks() {
                   ? 'text-emerald-400 border-emerald-500/25 bg-emerald-500/10'
                   : 'th-text-muted th-border',
               )}>
-                {source.currentUrl?.toLowerCase().includes('/login') || source.currentUrl?.toLowerCase().includes('/sso')
+                {source.blockedReason
+                  ? '等待登录'
+                  : source.currentUrl?.toLowerCase().includes('/login') || source.currentUrl?.toLowerCase().includes('/sso')
                   ? '需扫码/登录'
                   : dashboard.settings.running && source.windowOpen
                   ? '静默运行中'
@@ -371,6 +391,27 @@ export function VideoTasks() {
                   : '未连接'}
               </span>
             </div>
+            {source.blockedReason && (
+              <div className="mt-3 px-3 py-2 rounded-lg bg-rose-500/10 border border-rose-500/30 flex items-center justify-between gap-3 text-xs text-rose-300">
+                <span className="flex items-center gap-1.5 min-w-0 truncate">
+                  <AlertTriangle className="w-4 h-4 text-rose-400 shrink-0" />
+                  <span className="truncate">{source.blockedReason}</span>
+                </span>
+                <button
+                  onClick={() => void runAction(
+                    'resume-' + source.provider,
+                    async () => {
+                      await invoke('resume_video_platform', { provider: source.provider });
+                      await invoke('tick_video_queue');
+                    },
+                    '已恢复该平台队列播放。',
+                  )}
+                  className="px-2.5 py-1 rounded bg-rose-500/20 hover:bg-rose-500/30 text-rose-200 border border-rose-500/40 text-[11px] font-semibold shrink-0"
+                >
+                  登录后继续
+                </button>
+              </div>
+            )}
             <div className="mt-4 flex flex-wrap gap-2">
               <button
                 onClick={() => void openSite(source.provider)}
@@ -404,14 +445,15 @@ export function VideoTasks() {
         ))}
       </section>
 
-      <section className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-3 mb-5">
+      <section className="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-7 gap-3 mb-5">
         {[
           { label: '整体进度', value: String(overallProgress) + '%', color: 'text-indigo-400' },
           { label: '课程总数', value: dashboard.stats.total, color: 'th-text' },
           { label: '已完成', value: dashboard.stats.completed, color: 'text-emerald-400' },
           { label: '待播放', value: dashboard.stats.pending, color: 'text-sky-400' },
-          { label: '需本人处理', value: dashboard.stats.manual, color: 'text-orange-400' },
-          { label: '异常', value: dashboard.stats.attention, color: 'text-rose-400' },
+          { label: '已暂停', value: dashboard.stats.paused, color: 'text-amber-400' },
+          { label: '已跳过', value: dashboard.stats.skipped, color: 'text-slate-400' },
+          { label: '异常处理', value: dashboard.stats.attention + dashboard.stats.manual, color: 'text-rose-400' },
         ].map((item) => (
           <div key={item.label} className="th-bg-card border th-border rounded-xl px-4 py-3">
             <div className="text-[11px] th-text-muted">{item.label}</div>
@@ -427,7 +469,7 @@ export function VideoTasks() {
               <Gauge className="w-4 h-4 text-indigo-400" />
               <h2 className="text-sm font-semibold th-text-2">队列运行策略</h2>
             </div>
-            <p className="text-xs th-text-muted">同一平台始终只运行一门课程；跨站并行开启后，两个平台可各运行一门。</p>
+            <p className="text-xs th-text-muted">按专题列表顺序播放，播完当前专题再进入下一个；跨站并行时，每个平台各播一门。</p>
           </div>
           <div className="flex flex-wrap items-center gap-4">
             <div className="flex items-center gap-1 p-1 rounded-lg th-bg-input border th-border-subtle">
@@ -465,7 +507,7 @@ export function VideoTasks() {
               />
               跨站并行（最多 2 路）
             </label>
-            {dashboard.settings.running && (dashboard.stats.running > 0 || dashboard.stats.pending > 0) ? (
+            {dashboard.settings.running && (dashboard.stats.running > 0 || dashboard.stats.pending > 0 || dashboard.stats.paused > 0) ? (
               <button
                 onClick={() => void runAction('pause', () => invoke('pause_video_queue'), '队列已暂停。')}
                 className="px-4 py-2.5 rounded-lg border border-amber-500/30 bg-amber-500/10 text-amber-300 text-sm font-semibold flex items-center gap-2"
@@ -479,9 +521,9 @@ export function VideoTasks() {
                   await invoke('start_video_queue');
                   await invoke('tick_video_queue');
                 }, '队列已开始运行。')}
-                disabled={dashboard.stats.pending === 0 || busyKey === 'start'}
+                disabled={dashboard.nextCourses.length === 0 || busyKey !== null}
                 className="px-4 py-2.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 text-white text-sm font-semibold flex items-center gap-2"
-                title={dashboard.stats.pending === 0 ? '所有课程已全部完成' : '开始自动播放待播放课程'}
+                title={dashboard.nextCourses.length === 0 ? '暂无可播放课程；需要登录、跳过或异常的课程请先处理' : '按专题顺序播放，优先续播暂停的课程'}
               >
                 {busyKey === 'start'
                   ? <Loader2 className="w-4 h-4 animate-spin" />
@@ -513,6 +555,33 @@ export function VideoTasks() {
                 <span className="text-indigo-400 font-semibold">【{topicTitle}】</span>
                 <span className="th-text-2 font-medium truncate max-w-xs">{course.title}</span>
                 <span className="text-emerald-400 font-bold tabular-nums">{Math.round(course.progress)}%</span>
+              </button>
+            ))}
+          </div>
+        )}
+        {dashboard.nextCourses && dashboard.nextCourses.length > 0 && (
+          <div className="mt-3 pt-3 border-t th-border flex flex-wrap items-center gap-3">
+            <span className="text-xs font-semibold th-text-muted flex items-center gap-2 shrink-0">
+              <Clock3 className="w-3.5 h-3.5 text-sky-400" />
+              下一节：
+            </span>
+            {dashboard.nextCourses.map((next) => (
+              <button
+                key={next.courseId}
+                onClick={() => {
+                  setExpandedTopics((prev) => new Set(prev).add(next.topicId));
+                  document.getElementById('topic-' + next.topicId)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                }}
+                className="px-3 py-1 rounded-lg bg-sky-500/10 border border-sky-500/25 text-xs flex items-center gap-2 hover:bg-sky-500/20 transition-colors text-left"
+                title="点击定位到该课程"
+              >
+                <span className="text-sky-400 font-semibold">【{next.topicTitle}】</span>
+                <span className="th-text-2 font-medium truncate max-w-xs">{next.title}</span>
+                {next.paused ? (
+                  <span className="text-[10px] px-1.5 py-0.5 rounded border text-amber-400 bg-amber-500/10 border-amber-500/25 font-semibold">优先续播</span>
+                ) : (
+                  <span className="text-[10px] px-1.5 py-0.5 rounded border text-sky-400 bg-sky-500/10 border-sky-500/25">排队中</span>
+                )}
               </button>
             ))}
           </div>
@@ -646,7 +715,7 @@ export function VideoTasks() {
                         const kind = KIND_META[kindKey] || KIND_META.video;
                         const status = STATUS_META[course.status] || STATUS_META.pending;
                         const KindIcon = kind.icon;
-                        const isLoginError = course.status === 'attention' && Boolean(course.lastError?.includes('登录'));
+                        const isLoginError = (course.status === 'attention' || course.status === 'paused') && Boolean(course.lastError?.includes('登录'));
                         const isSkipped = course.status === 'attention' && Boolean(course.lastError?.includes('跳过'));
                         const statusLabel = isLoginError
                           ? '需要登录'
@@ -693,7 +762,7 @@ export function VideoTasks() {
                                 ) : (
                                   <span>平台进度 {Math.round(course.progress)}%</span>
                                 )}
-                                {course.status === 'attention' && course.lastError && (
+                                {(course.status === 'attention' || course.status === 'skipped' || course.status === 'paused') && course.lastError && (
                                    <span className={cx('flex items-center gap-1', (isLoginError || isSkipped) ? 'text-amber-400 font-medium' : 'text-rose-400')}>
                                     <AlertTriangle className="w-3 h-3" />{course.lastError}
                                   </span>
@@ -702,11 +771,13 @@ export function VideoTasks() {
                             </div>
                             <div className="flex items-center gap-2 shrink-0">
                               {/* 仅正在播放中的视频，需要人工处理的考试/课件，或者需要登录/处理的异常课程，展示打开按钮 */}
-                              {(course.status === 'opening' || course.status === 'playing' || course.status === 'attention' || kindKey !== 'video') && (
+                              {(course.status === 'opening' || course.status === 'playing' || course.status === 'attention' || isLoginError || kindKey !== 'video') && (
                                 <button
                                   onClick={() => void runAction(
                                     'open-course-' + course.id,
-                                    () => invoke('open_video_course', { courseId: course.id }),
+                                    () => isLoginError
+                                      ? invoke('open_video_learning_site', { provider: topic.provider })
+                                      : invoke('open_video_course', { courseId: course.id }),
                                   )}
                                   className={cx(
                                     'px-3 py-1.5 rounded-md border text-xs font-semibold flex items-center gap-1.5 th-hover-surface',
@@ -721,30 +792,64 @@ export function VideoTasks() {
                                 </button>
                               )}
                               {(course.status === 'opening' || course.status === 'playing') && (
+                                <>
+                                  <button
+                                    onClick={() => void runAction(
+                                      'pause-course-' + course.id,
+                                      () => invoke('pause_video_course', { courseId: course.id }),
+                                      '队列已暂停，再次开始时优先续播暂停的课程。',
+                                    )}
+                                    disabled={busyKey === 'pause-course-' + course.id}
+                                    className="px-3 py-1.5 rounded-md border border-amber-500/30 bg-amber-500/10 text-amber-300 text-xs font-semibold flex items-center gap-1.5 hover:bg-amber-500/20 disabled:opacity-50"
+                                    title="暂停队列并保留当前进度"
+                                  >
+                                    {busyKey === 'pause-course-' + course.id
+                                      ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                                      : <Pause className="w-3.5 h-3.5" />}
+                                    暂停
+                                  </button>
+                                  <button
+                                    onClick={() => void runAction(
+                                      'skip-course-' + course.id,
+                                      async () => {
+                                        await invoke('skip_video_course', { courseId: course.id });
+                                        await invoke('tick_video_queue');
+                                      },
+                                      '已跳过当前课程；如需重新学习，请点击重试。',
+                                    )}
+                                    disabled={busyKey === 'skip-course-' + course.id}
+                                    className="px-3 py-1.5 rounded-md border border-slate-500/30 bg-slate-500/10 text-slate-300 text-xs font-semibold flex items-center gap-1.5 hover:bg-slate-500/20 disabled:opacity-50"
+                                    title="跳过当前视频，开始播放下一个"
+                                  >
+                                    {busyKey === 'skip-course-' + course.id
+                                      ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                                      : <SkipForward className="w-3.5 h-3.5" />}
+                                    跳过
+                                  </button>
+                                </>
+                              )}
+                              {course.status === 'paused' && !isLoginError && (kindKey === 'video' || kindKey === 'slides') && (
                                 <button
-                                  onClick={() => void runAction(
-                                    'pause-course-' + course.id,
-                                    () => invoke('pause_video_course', { courseId: course.id }),
-                                    '已跳过当前课程，开始播放下一门。',
-                                  )}
-                                  disabled={busyKey === 'pause-course-' + course.id}
+                                  onClick={() => void runAction('start', async () => {
+                                    await invoke('start_video_queue');
+                                    await invoke('tick_video_queue');
+                                  }, '队列已继续，优先续播暂停的课程。')}
+                                  disabled={busyKey !== null}
                                   className="px-3 py-1.5 rounded-md border border-amber-500/30 bg-amber-500/10 text-amber-300 text-xs font-semibold flex items-center gap-1.5 hover:bg-amber-500/20 disabled:opacity-50"
-                                  title="跳过当前视频，开始播放下一个"
+                                  title="继续队列，播放进度以平台保存的断点为准"
                                 >
-                                  {busyKey === 'pause-course-' + course.id
-                                    ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                                    : <SkipForward className="w-3.5 h-3.5" />}
-                                  跳过
+                                  <Play className="w-3.5 h-3.5 fill-current" />继续队列
                                 </button>
                               )}
-                              {course.status === 'attention' && (kindKey === 'video' || kindKey === 'slides') && (
+                              {(course.status === 'skipped' || course.status === 'attention') && (kindKey === 'video' || kindKey === 'slides') && (
                                 <button
                                   onClick={() => void runAction(
                                     'retry-' + course.id,
                                     () => invoke('retry_video_course', { courseId: course.id }),
-                                    '已重新加入待播放队列，当前视频播放完毕后将自动播放。',
+                                    '已按专题顺序重新加入队列；队列暂停时请点击开始队列。',
                                   )}
-                                  className="px-3 py-1.5 rounded-md border border-indigo-500/25 bg-indigo-500/10 text-indigo-400 text-xs font-semibold"
+                                  className="px-3 py-1.5 rounded-md border border-indigo-500/25 bg-indigo-500/10 text-indigo-400 text-xs font-semibold hover:bg-indigo-500/20"
+                                  title="重新加入待播放队列"
                                 >
                                   重试
                                 </button>
