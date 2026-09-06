@@ -3433,26 +3433,29 @@ pub async fn tick_video_queue(
                 continue;
             }
             let timestamp = now();
-            if let Ok(conn) = Connection::open(state.db_path.as_ref()) {
-                let duration_secs = if active.duration > 0.0 {
-                    active.duration as i64
-                } else {
-                    0
-                };
-                let _ = conn.execute(
-                    "UPDATE video_courses SET status='completed',progress=100.0,duration_seconds=CASE WHEN duration_seconds > 0 THEN duration_seconds ELSE ?2 END,last_error=NULL,updated_at=?3 WHERE id=?1",
-                    params![active.course_id, duration_secs, timestamp],
-                );
-                let _ = conn.execute(
-                    "UPDATE video_topics SET 
-                     completed_count = (SELECT COUNT(*) FROM video_courses WHERE topic_id=?1 AND status='completed'),
-                     total_count = (SELECT COUNT(*) FROM video_courses WHERE topic_id=?1),
-                     progress = ROUND((CAST((SELECT COUNT(*) FROM video_courses WHERE topic_id=?1 AND status='completed') AS REAL) / MAX(1, (SELECT COUNT(*) FROM video_courses WHERE topic_id=?1))) * 100.0, 1),
-                     last_synced_at = ?2
-                     WHERE id=?1",
-                    params![active.topic_id, timestamp],
-                );
-            }
+            let conn =
+                Connection::open(state.db_path.as_ref()).map_err(|error| error.to_string())?;
+            let duration_secs = if active.duration > 0.0 {
+                active.duration as i64
+            } else {
+                0
+            };
+            conn.execute(
+                "UPDATE video_courses SET status='completed',progress=100.0,duration_seconds=CASE WHEN duration_seconds > 0 THEN duration_seconds ELSE ?2 END,last_error=NULL,updated_at=?3 WHERE id=?1",
+                params![active.course_id, duration_secs, timestamp],
+            )
+            .map_err(|error| error.to_string())?;
+            conn.execute(
+                "UPDATE video_topics SET 
+                 completed_count = (SELECT COUNT(*) FROM video_courses WHERE topic_id=?1 AND status='completed'),
+                 total_count = (SELECT COUNT(*) FROM video_courses WHERE topic_id=?1),
+                 progress = ROUND((CAST((SELECT COUNT(*) FROM video_courses WHERE topic_id=?1 AND status='completed') AS REAL) / MAX(1, (SELECT COUNT(*) FROM video_courses WHERE topic_id=?1))) * 100.0, 1),
+                 last_synced_at = ?2
+                 WHERE id=?1",
+                params![active.topic_id, timestamp],
+            )
+            .map_err(|error| error.to_string())?;
+
             state
                 .runtime
                 .lock()
@@ -3477,6 +3480,33 @@ pub async fn tick_video_queue(
                 }
             }
 
+            // 1. 优先检测登录态失效：检查窗口 URL 是否重定向到登录页
+            let is_login_url = app
+                .get_webview_window(&active.provider.label())
+                .and_then(|window| window.url().ok())
+                .map(|url| {
+                    let s = url.as_str().to_lowercase();
+                    s.contains("/login") || s.contains("/sso") || s.contains("/cas/") || s.contains("oauth")
+                })
+                .unwrap_or(false);
+
+            if is_login_url && (active.phase == "playing" || now() - active.phase_since >= 15) {
+                pause_player(&app, state.inner(), active.provider);
+                block_platform(state.db_path.as_ref(), &active)?;
+                if let Some(window) = app.get_webview_window(&active.provider.label()) {
+                    let _ = window.show();
+                    let _ = window.unminimize();
+                    let _ = window.set_focus();
+                }
+                state
+                    .runtime
+                    .lock()
+                    .unwrap_or_else(|error| error.into_inner())
+                    .active
+                    .remove(active.provider.key());
+                continue;
+            }
+
             // 看门狗 1：高进度饱和完播检测（进度 >= 98.5% 或距离结束不足 1.5 秒，且停滞超过 4 秒）
             // 很多平台播放器在最后一秒自动 pause 而不触发 ended 事件，看门狗在此主动将其转入 ended 完播
             let is_saturated = active.duration > 5.0
@@ -3492,48 +3522,17 @@ pub async fn tick_video_queue(
                 continue;
             }
 
-            // 看门狗 2：播放停滞分级检测与自愈跳过
-            if stall_duration >= 60 {
+            // 看门狗 2：页面加载（opening）超时检测（120 秒宽容期）
+            if active.phase == "opening" && now() - active.phase_since >= 120 {
                 pause_player(&app, state.inner(), active.provider);
                 let conn =
                     Connection::open(state.db_path.as_ref()).map_err(|error| error.to_string())?;
-                if active.current_time <= 0.1 {
-                    let last_error = "视频在0%停滞超过60秒未推进，已自动跳过并开始播放下一门";
-                    conn.execute(
-                        "UPDATE video_courses SET status='attention',progress=0.0,last_error=?2,updated_at=?3 WHERE id=?1",
-                        params![active.course_id, last_error, now()],
-                    )
-                    .map_err(|error| error.to_string())?;
-                } else if progress >= 90.0 {
-                    // 若停滞且进度已达到 90% 以上，看门狗视为完播
-                    let duration_secs = if active.duration > 0.0 {
-                        active.duration as i64
-                    } else {
-                        0
-                    };
-                    let timestamp = now();
-                    let _ = conn.execute(
-                        "UPDATE video_courses SET status='completed',progress=100.0,duration_seconds=CASE WHEN duration_seconds > 0 THEN duration_seconds ELSE ?2 END,last_error=NULL,updated_at=?3 WHERE id=?1",
-                        params![active.course_id, duration_secs, timestamp],
-                    );
-                    let _ = conn.execute(
-                        "UPDATE video_topics SET 
-                         completed_count = (SELECT COUNT(*) FROM video_courses WHERE topic_id=?1 AND status='completed'),
-                         total_count = (SELECT COUNT(*) FROM video_courses WHERE topic_id=?1),
-                         progress = ROUND((CAST((SELECT COUNT(*) FROM video_courses WHERE topic_id=?1 AND status='completed') AS REAL) / MAX(1, (SELECT COUNT(*) FROM video_courses WHERE topic_id=?1))) * 100.0, 1),
-                         last_synced_at = ?2
-                         WHERE id=?1",
-                        params![active.topic_id, timestamp],
-                    );
-                } else {
-                    let mins = (active.current_time / 60.0).floor() as i64;
-                    let last_error = format!("视频播放卡住超过60秒未推进（停在约{mins}分钟），已自动跳过并开始播放下一门");
-                    conn.execute(
-                        "UPDATE video_courses SET status='attention',progress=?2,last_error=?3,updated_at=?4 WHERE id=?1",
-                        params![active.course_id, progress, last_error, now()],
-                    )
-                    .map_err(|error| error.to_string())?;
-                }
+                let last_error = "未检测到可播放的视频或页面加载超时，请打开课程检查";
+                conn.execute(
+                    "UPDATE video_courses SET status='attention',progress=0.0,last_error=?2,updated_at=?3 WHERE id=?1",
+                    params![active.course_id, last_error, now()],
+                )
+                .map_err(|error| error.to_string())?;
                 state
                     .runtime
                     .lock()
@@ -3543,50 +3542,48 @@ pub async fn tick_video_queue(
                 continue;
             }
 
-            // 2. 网页探活超时检测（90 秒没有任何网页心跳）
+            // 看门狗 3：播放中进度停滞检测（120 秒），杜绝假完播谎报学时，统一标 attention 异常
+            if active.phase == "playing" && stall_duration >= 120 {
+                pause_player(&app, state.inner(), active.provider);
+                let conn =
+                    Connection::open(state.db_path.as_ref()).map_err(|error| error.to_string())?;
+                let mins = (active.current_time / 60.0).floor() as i64;
+                let last_error = format!("视频播放卡住超过2分钟未推进（停在约{mins}分钟），已自动跳过并开始播放下一门");
+                conn.execute(
+                    "UPDATE video_courses SET status='attention',progress=?2,last_error=?3,updated_at=?4 WHERE id=?1",
+                    params![active.course_id, progress, last_error, now()],
+                )
+                .map_err(|error| error.to_string())?;
+                state
+                    .runtime
+                    .lock()
+                    .unwrap_or_else(|error| error.into_inner())
+                    .active
+                    .remove(active.provider.key());
+                continue;
+            }
+
+            // 看门狗 4：网页探活兜底（120 秒没有任何网页心跳）
             let last_activity = if active.phase == "opening" {
                 active.phase_since
             } else {
                 active.last_media_at
             };
-            if now() - last_activity > 90 {
+            if now() - last_activity > 120 {
                 let conn =
                     Connection::open(state.db_path.as_ref()).map_err(|error| error.to_string())?;
-                let is_login_url = app
+                let last_error = app
                     .get_webview_window(&active.provider.label())
                     .and_then(|window| window.url().ok())
-                    .map(|url| {
-                        let s = url.as_str().to_lowercase();
-                        s.contains("/login") || s.contains("/sso") || s.contains("/cas/") || s.contains("oauth")
-                    })
-                    .unwrap_or(false);
-
-                let last_error = if is_login_url {
-                    if let Some(window) = app.get_webview_window(&active.provider.label()) {
-                        let _ = window.show();
-                        let _ = window.unminimize();
-                        let _ = window.set_focus();
-                    }
-                    "平台登录已失效或需要扫码登录，请点击“打开登录”完成登录"
-                } else if active.phase == "opening" {
-                    "未检测到可播放的视频，请打开课程检查"
-                } else {
-                    app.get_webview_window(&active.provider.label())
-                        .and_then(|window| window.url().ok())
-                        .filter(|url| provider_accepts_url(active.provider, url))
-                        .map(|_| "未检测到可持续播放的视频，请打开课程检查")
-                        .unwrap_or("课程页面未成功打开或已进入空白页，请重试后检查")
-                };
+                    .filter(|url| provider_accepts_url(active.provider, url))
+                    .map(|_| "未检测到可持续播放的视频，请打开课程检查")
+                    .unwrap_or("课程页面未成功打开或已进入空白页，请重试后检查");
                 pause_player(&app, state.inner(), active.provider);
-                if is_login_url {
-                    block_platform(state.db_path.as_ref(), &active)?;
-                } else {
-                    conn.execute(
-                        "UPDATE video_courses SET status='attention',last_error=?2 WHERE id=?1",
-                        params![active.course_id, last_error],
-                    )
-                    .map_err(|error| error.to_string())?;
-                }
+                conn.execute(
+                    "UPDATE video_courses SET status='attention',last_error=?2,updated_at=?3 WHERE id=?1",
+                    params![active.course_id, last_error, now()],
+                )
+                .map_err(|error| error.to_string())?;
                 state
                     .runtime
                     .lock()
@@ -4906,6 +4903,86 @@ mod tests {
         };
         assert_eq!(final_phase_since, buffered_since);
         assert!(final_phase_since < now());
+    }
+
+    #[test]
+    fn stalled_playing_course_never_marked_completed_at_high_progress() {
+        let f = QueueFixture::new();
+        let conn = Connection::open(&f.path).unwrap();
+        conn.execute(
+            "UPDATE video_courses SET status='playing',progress=93.5,duration_seconds=1000 WHERE id='a1'",
+            [],
+        ).unwrap();
+
+        let progress = 93.5;
+        let mins = (935.0 / 60.0_f64).floor() as i64;
+        let last_error = format!("视频播放卡住超过2分钟未推进（停在约{mins}分钟），已自动跳过并开始播放下一门");
+        conn.execute(
+            "UPDATE video_courses SET status='attention',progress=?2,last_error=?3,updated_at=?4 WHERE id=?1",
+            params!["a1", progress, last_error, now()],
+        ).unwrap();
+
+        let (status, final_progress, err): (String, f64, Option<String>) = conn.query_row(
+            "SELECT status, progress, last_error FROM video_courses WHERE id='a1'",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        ).unwrap();
+
+        assert_eq!(status, "attention");
+        assert_eq!(final_progress, 93.5);
+        assert!(err.unwrap().contains("视频播放卡住超过2分钟未推进"));
+
+        let completed_count: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM video_courses WHERE topic_id='a' AND status='completed'",
+            [],
+            |row| row.get(0),
+        ).unwrap();
+        assert_eq!(completed_count, 0);
+    }
+
+    #[test]
+    fn block_platform_preserves_course_as_paused_and_sets_blocked_reason() {
+        let f = QueueFixture::new();
+        let mut active = f.active("a1");
+        active.current_time = 50.0;
+        active.duration = 100.0;
+
+        block_platform(&f.path, &active).unwrap();
+
+        let conn = Connection::open(&f.path).unwrap();
+        let (status, progress, error): (String, f64, Option<String>) = conn.query_row(
+            "SELECT status, progress, last_error FROM video_courses WHERE id='a1'",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        ).unwrap();
+
+        assert_eq!(status, "paused");
+        assert_eq!(progress, 50.0);
+        assert!(error.unwrap().contains("登录已失效"));
+
+        let blocked: String = conn.query_row(
+            "SELECT blocked_reason FROM video_queue_lanes WHERE provider='merchant'",
+            [],
+            |row| row.get(0),
+        ).unwrap();
+        assert!(blocked.contains("登录已失效"));
+
+        assert!(next_pending(&f.path, Some(Provider::Merchant)).unwrap().is_none());
+    }
+
+    #[test]
+    fn login_url_detection_matches_login_cas_sso_oauth() {
+        let is_login = |url: &str| {
+            let s = url.to_lowercase();
+            s.contains("/login") || s.contains("/sso") || s.contains("/cas/") || s.contains("oauth")
+        };
+        assert!(is_login("https://auth.example.com/cas/login?service=xyz"));
+        assert!(is_login("https://example.com/sso/authorize"));
+        assert!(is_login("https://example.com/user/login"));
+        assert!(is_login("https://oauth.example.com/oauth2/token"));
+
+        assert!(!is_login("https://study.example.com/course/play/123"));
+        assert!(!is_login("https://study.example.com/video/player.html"));
     }
 }
 
