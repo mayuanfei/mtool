@@ -177,6 +177,7 @@ export function VideoTasks() {
   const [deleteConfirmTopic, setDeleteConfirmTopic] = useState<TopicItem | null>(null);
   const [message, setMessage] = useState<{ text: string; error: boolean } | null>(null);
   const tickRunning = useRef(false);
+  const tickStartedAt = useRef(0);
   const initialLoadedRef = useRef(false);
 
   const showMessage = useCallback((text: string, error = false) => {
@@ -202,8 +203,17 @@ export function VideoTasks() {
   }, [showMessage]);
 
   const tickAndRefresh = useCallback(async () => {
-    if (tickRunning.current) return;
+    const nowTs = Date.now();
+    // 看门狗保护：若上一次调度超过 10 秒未释放锁（可能因 IPC 挂起），强制解锁恢复轮询
+    if (tickRunning.current) {
+      if (nowTs - tickStartedAt.current > 10000) {
+        tickRunning.current = false;
+      } else {
+        return;
+      }
+    }
     tickRunning.current = true;
+    tickStartedAt.current = nowTs;
     try {
       await invoke('tick_video_queue');
       await refreshDashboard();
@@ -392,9 +402,9 @@ export function VideoTasks() {
               </span>
             </div>
             {source.blockedReason && (
-              <div className="mt-3 px-3 py-2 rounded-lg bg-rose-500/10 border border-rose-500/30 flex items-center justify-between gap-3 text-xs text-rose-300">
+              <div className="mt-3 px-3 py-2 rounded-lg bg-rose-500/10 border border-rose-500/30 flex items-center justify-between gap-3 text-xs text-rose-800 dark:text-rose-300">
                 <span className="flex items-center gap-1.5 min-w-0 truncate">
-                  <AlertTriangle className="w-4 h-4 text-rose-400 shrink-0" />
+                  <AlertTriangle className="w-4 h-4 text-rose-600 dark:text-rose-400 shrink-0" />
                   <span className="truncate">{source.blockedReason}</span>
                 </span>
                 <button
@@ -406,7 +416,7 @@ export function VideoTasks() {
                     },
                     '已恢复该平台队列播放。',
                   )}
-                  className="px-2.5 py-1 rounded bg-rose-500/20 hover:bg-rose-500/30 text-rose-200 border border-rose-500/40 text-[11px] font-semibold shrink-0"
+                  className="px-2.5 py-1 rounded bg-rose-500/20 hover:bg-rose-500/30 text-rose-800 dark:text-rose-200 border border-rose-500/40 text-[11px] font-semibold shrink-0"
                 >
                   登录后继续
                 </button>
@@ -510,7 +520,7 @@ export function VideoTasks() {
             {dashboard.settings.running && (dashboard.stats.running > 0 || dashboard.stats.pending > 0 || dashboard.stats.paused > 0) ? (
               <button
                 onClick={() => void runAction('pause', () => invoke('pause_video_queue'), '队列已暂停。')}
-                className="px-4 py-2.5 rounded-lg border border-amber-500/30 bg-amber-500/10 text-amber-300 text-sm font-semibold flex items-center gap-2"
+                className="px-4 py-2.5 rounded-lg border border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-300 text-sm font-semibold flex items-center gap-2"
               >
                 <Pause className="w-4 h-4" />
                 暂停队列
@@ -590,11 +600,21 @@ export function VideoTasks() {
 
       <section className="mb-5 rounded-xl border border-orange-500/25 bg-orange-500/10 px-5 py-4">
         <div className="flex items-start gap-3">
-          <ShieldCheck className="w-5 h-5 text-orange-400 shrink-0 mt-0.5" />
-          <div>
-            <h3 className="text-sm font-semibold text-orange-300">本人处理边界</h3>
-            <p className="text-xs text-orange-200/70 mt-1 leading-relaxed">
-              考试不会自动答题；翻页课件与知识材料本期不会自动点击。它们会保留在专题进度中，完成后使用“同步专题”读取平台的“已考试 / 已完成 / 100%”状态。
+          <ShieldCheck className="w-5 h-5 text-orange-600 dark:text-orange-400 shrink-0 mt-0.5" />
+          <div className="text-xs text-orange-950/85 dark:text-orange-200/80 leading-relaxed">
+            <h3 className="text-sm font-semibold text-orange-900 dark:text-orange-300 mb-1.5">学习与处理说明</h3>
+            <div className="space-y-1">
+              <div className="flex items-start gap-1.5">
+                <span className="inline-block w-1.5 h-1.5 rounded-full bg-orange-600 dark:bg-orange-400/80 mt-1.5 shrink-0" />
+                <span><strong className="text-orange-950 dark:text-orange-200 font-semibold">需本人处理</strong>：考试、测验与问卷（需人工选择答案并提交）。</span>
+              </div>
+              <div className="flex items-start gap-1.5">
+                <span className="inline-block w-1.5 h-1.5 rounded-full bg-orange-600 dark:bg-orange-400/80 mt-1.5 shrink-0" />
+                <span><strong className="text-orange-950 dark:text-orange-200 font-semibold">自动学习支持</strong>：视频与 PPT/PDF 课件（页面停留满足平台时长即可累计学时）。</span>
+              </div>
+            </div>
+            <p className="mt-2 text-orange-900/70 dark:text-orange-200/60">
+              答题完成后，点击“同步专题”即可更新平台完成状态。
             </p>
           </div>
         </div>
@@ -782,7 +802,7 @@ export function VideoTasks() {
                                   className={cx(
                                     'px-3 py-1.5 rounded-md border text-xs font-semibold flex items-center gap-1.5 th-hover-surface',
                                     isLoginError
-                                      ? 'border-amber-500/30 bg-amber-500/10 text-amber-300 hover:bg-amber-500/20'
+                                      ? 'border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-300 hover:bg-amber-500/20'
                                       : 'th-border-subtle th-bg-input-alt th-text-2'
                                   )}
                                   title={isLoginError ? '打开窗口完成扫码/账号登录' : '打开网页窗口查看内容'}
@@ -800,7 +820,7 @@ export function VideoTasks() {
                                       '队列已暂停，再次开始时优先续播暂停的课程。',
                                     )}
                                     disabled={busyKey === 'pause-course-' + course.id}
-                                    className="px-3 py-1.5 rounded-md border border-amber-500/30 bg-amber-500/10 text-amber-300 text-xs font-semibold flex items-center gap-1.5 hover:bg-amber-500/20 disabled:opacity-50"
+                                    className="px-3 py-1.5 rounded-md border border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-300 text-xs font-semibold flex items-center gap-1.5 hover:bg-amber-500/20 disabled:opacity-50"
                                     title="暂停队列并保留当前进度"
                                   >
                                     {busyKey === 'pause-course-' + course.id
@@ -818,7 +838,7 @@ export function VideoTasks() {
                                       '已跳过当前课程；如需重新学习，请点击重试。',
                                     )}
                                     disabled={busyKey === 'skip-course-' + course.id}
-                                    className="px-3 py-1.5 rounded-md border border-slate-500/30 bg-slate-500/10 text-slate-300 text-xs font-semibold flex items-center gap-1.5 hover:bg-slate-500/20 disabled:opacity-50"
+                                    className="px-3 py-1.5 rounded-md border border-slate-500/30 bg-slate-500/10 text-slate-700 dark:text-slate-300 text-xs font-semibold flex items-center gap-1.5 hover:bg-slate-500/20 disabled:opacity-50"
                                     title="跳过当前视频，开始播放下一个"
                                   >
                                     {busyKey === 'skip-course-' + course.id
@@ -835,7 +855,7 @@ export function VideoTasks() {
                                     await invoke('tick_video_queue');
                                   }, '队列已继续，优先续播暂停的课程。')}
                                   disabled={busyKey !== null}
-                                  className="px-3 py-1.5 rounded-md border border-amber-500/30 bg-amber-500/10 text-amber-300 text-xs font-semibold flex items-center gap-1.5 hover:bg-amber-500/20 disabled:opacity-50"
+                                  className="px-3 py-1.5 rounded-md border border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-300 text-xs font-semibold flex items-center gap-1.5 hover:bg-amber-500/20 disabled:opacity-50"
                                   title="继续队列，播放进度以平台保存的断点为准"
                                 >
                                   <Play className="w-3.5 h-3.5 fill-current" />继续队列

@@ -524,7 +524,7 @@ fn bridge_script(provider: Provider, speed: f64, muted: bool) -> String {
         media.__mtoolLastReport = Date.now();
         report("timeupdate", media);
       }
-      if (media.ended) {
+      if (media.ended || (media.duration > 5 && media.currentTime >= media.duration - 0.8)) {
         report("ended", media);
       }
     }, true);
@@ -893,6 +893,16 @@ fn bridge_script(provider: Provider, speed: f64, muted: bool) -> String {
       // 仅当弹出明确的模态完成对话框时，才上报完播；绝不在常规播放中提前截断
       if (hasVisibleCompletionModal()) {
         report("ended", { currentTime: 100, duration: 100 });
+        return;
+      }
+      // 看门狗增强：若视频已播放到末尾（距离结束不足0.8秒，或已暂停且进度达到99%以上），主动上报完播
+      const finishedMedia = allMedias.find((m) =>
+        m.ended ||
+        (m.duration > 5 && m.currentTime >= m.duration - 0.8) ||
+        (m.duration > 10 && m.paused && (m.currentTime / m.duration) >= 0.99)
+      );
+      if (finishedMedia) {
+        report("ended", finishedMedia);
         return;
       }
     } else {
@@ -1387,14 +1397,19 @@ fn capture_script(request_id: &str, provider: Provider) -> String {
 
     const isElementCompleted = (element) => {
       if (!element) return false;
-      const row = (element.closest && element.closest("li, tr, [class*='item'], [class*='chapter'], [class*='section'], [class*='node'], [class*='row']")) || element.parentElement || element;
-      const combinedText = clean((row.innerText || "") + " " + (element.innerText || ""));
+      // 调用方已定位单课容器；再次向上查找会读到分组内其他课程的完成标记。
+      const row = element;
+      const combinedText = clean(row.innerText);
 
       // “上次学习”仅标记最近访问的章节，已完成课程也会显示，不能据此否定完成图标。
       // 明确未完成状态仍需排除，避免把待学或学习中的课程识别为已完成。
       if (/(学习中|播放中|未学习|未开始|待学习)/.test(combinedText) && !/(已完成|已学完|已考合格|100%)/.test(combinedText)) {
         return false;
       }
+
+      // 单课明确的进度优先于文本、类名和图标，部分进度不能被强制改为 100%。
+      const rowProgress = combinedText.match(/进度\s*[:：]?\s*(\d+(?:\.\d+)?)%/);
+      if (rowProgress) return Number(rowProgress[1]) >= 100;
 
       // 1. 文本匹配与对勾字符
       if (/(已完成|已学完|已考合格|考试合格|已通过|已考试通过|进度\s*[:：]?\s*100%)/.test(combinedText)) {
@@ -1412,7 +1427,6 @@ fn capture_script(request_id: &str, provider: Provider) -> String {
       // 3. 收集可能展示图标或状态的元素（严格限定在当前行内部，严禁跨越到前驱兄弟节点）
       const targets = [
         row,
-        ...(element !== row ? [element] : []),
         ...(row.querySelectorAll ? Array.from(row.querySelectorAll("i, span, em, svg, [class*='icon'], [class*='status'], [class*='state'], [class*='badge'], [class*='check'], [class*='finish'], [class*='success']")) : [])
       ];
 
@@ -2151,14 +2165,20 @@ fn handle_bridge_title(
                     active.duration = duration;
                 }
                 if event == "ended" {
-                    active.phase = "ended".to_string();
-                    active.phase_since = now();
+                    if active.phase != "ended" {
+                        active.phase = "ended".to_string();
+                        active.phase_since = now();
+                    }
                 } else if event == "need_login" {
-                    active.phase = "need_login".to_string();
-                    active.phase_since = now();
+                    if active.phase != "need_login" {
+                        active.phase = "need_login".to_string();
+                        active.phase_since = now();
+                    }
                 } else if event == "error" {
-                    active.phase = "error".to_string();
-                    active.phase_since = now();
+                    if active.phase != "error" {
+                        active.phase = "error".to_string();
+                        active.phase_since = now();
+                    }
                 } else if active.phase == "opening"
                     && matches!(event, "play" | "playing" | "timeupdate")
                 {
@@ -3443,8 +3463,12 @@ pub async fn tick_video_queue(
             if let Some(window) = app.get_webview_window(&active.provider.label()) {
                 let _ = window.eval(update_media_script(settings.speed, settings.muted, true));
             }
+            let progress = if active.duration > 0.0 {
+                ((active.current_time / active.duration) * 100.0).clamp(0.0, 100.0)
+            } else {
+                0.0
+            };
             if active.phase == "playing" && active.duration > 0.0 {
-                let progress = ((active.current_time / active.duration) * 100.0).clamp(0.0, 100.0);
                 if let Ok(conn) = Connection::open(state.db_path.as_ref()) {
                     let _ = conn.execute(
                         "UPDATE video_courses SET progress=?2,duration_seconds=?3,updated_at=?4 WHERE id=?1",
@@ -3452,28 +3476,64 @@ pub async fn tick_video_queue(
                     );
                 }
             }
-            // 1. 播放卡住检测：如果进度停滞（包括 0% 状态）超过 5 分钟（300 秒），自动跳过并播放下一门
+
+            // 看门狗 1：高进度饱和完播检测（进度 >= 98.5% 或距离结束不足 1.5 秒，且停滞超过 4 秒）
+            // 很多平台播放器在最后一秒自动 pause 而不触发 ended 事件，看门狗在此主动将其转入 ended 完播
+            let is_saturated = active.duration > 5.0
+                && (active.current_time >= active.duration - 1.5 || progress >= 98.5);
             let stall_duration = now() - active.last_progress_at;
-            if stall_duration >= 300 {
+            if is_saturated && stall_duration >= 4 {
+                let mut runtime = state.runtime.lock().unwrap_or_else(|error| error.into_inner());
+                if let Some(act) = runtime.active.get_mut(active.provider.key()) {
+                    act.phase = "ended".to_string();
+                    act.phase_since = now();
+                    act.current_time = act.duration;
+                }
+                continue;
+            }
+
+            // 看门狗 2：播放停滞分级检测与自愈跳过
+            if stall_duration >= 60 {
                 pause_player(&app, state.inner(), active.provider);
                 let conn =
                     Connection::open(state.db_path.as_ref()).map_err(|error| error.to_string())?;
-                let last_error = if active.current_time <= 0.1 {
-                    "视频卡在0%超过5分钟，已自动跳过并开始播放下一门".to_string()
+                if active.current_time <= 0.1 {
+                    let last_error = "视频在0%停滞超过60秒未推进，已自动跳过并开始播放下一门";
+                    conn.execute(
+                        "UPDATE video_courses SET status='attention',progress=0.0,last_error=?2,updated_at=?3 WHERE id=?1",
+                        params![active.course_id, last_error, now()],
+                    )
+                    .map_err(|error| error.to_string())?;
+                } else if progress >= 90.0 {
+                    // 若停滞且进度已达到 90% 以上，看门狗视为完播
+                    let duration_secs = if active.duration > 0.0 {
+                        active.duration as i64
+                    } else {
+                        0
+                    };
+                    let timestamp = now();
+                    let _ = conn.execute(
+                        "UPDATE video_courses SET status='completed',progress=100.0,duration_seconds=CASE WHEN duration_seconds > 0 THEN duration_seconds ELSE ?2 END,last_error=NULL,updated_at=?3 WHERE id=?1",
+                        params![active.course_id, duration_secs, timestamp],
+                    );
+                    let _ = conn.execute(
+                        "UPDATE video_topics SET 
+                         completed_count = (SELECT COUNT(*) FROM video_courses WHERE topic_id=?1 AND status='completed'),
+                         total_count = (SELECT COUNT(*) FROM video_courses WHERE topic_id=?1),
+                         progress = ROUND((CAST((SELECT COUNT(*) FROM video_courses WHERE topic_id=?1 AND status='completed') AS REAL) / MAX(1, (SELECT COUNT(*) FROM video_courses WHERE topic_id=?1))) * 100.0, 1),
+                         last_synced_at = ?2
+                         WHERE id=?1",
+                        params![active.topic_id, timestamp],
+                    );
                 } else {
                     let mins = (active.current_time / 60.0).floor() as i64;
-                    format!("视频播放卡住超过5分钟未推进（停在约{mins}分钟），已自动跳过并开始播放下一门")
-                };
-                let progress = if active.duration > 0.0 && active.current_time > 0.0 {
-                    ((active.current_time / active.duration) * 100.0).clamp(0.0, 100.0)
-                } else {
-                    0.0
-                };
-                conn.execute(
-                    "UPDATE video_courses SET status='attention',progress=?2,last_error=?3,updated_at=?4 WHERE id=?1",
-                    params![active.course_id, progress, last_error, now()],
-                )
-                .map_err(|error| error.to_string())?;
+                    let last_error = format!("视频播放卡住超过60秒未推进（停在约{mins}分钟），已自动跳过并开始播放下一门");
+                    conn.execute(
+                        "UPDATE video_courses SET status='attention',progress=?2,last_error=?3,updated_at=?4 WHERE id=?1",
+                        params![active.course_id, progress, last_error, now()],
+                    )
+                    .map_err(|error| error.to_string())?;
+                }
                 state
                     .runtime
                     .lock()
@@ -4708,6 +4768,50 @@ mod tests {
     }
 
     #[test]
+    fn sync_corrects_previously_misclassified_completed_courses() {
+        let f = QueueFixture::new();
+        // 对应用户截图：12 门课程中只有 3 门完成，其余保留实际的部分进度或零进度。
+        let progress_values = [100.0, 66.38, 100.0, 100.0, 93.62, 93.95, 94.57, 0.0, 0.0, 15.73, 33.18, 26.66];
+        let capture = |misclassified: bool| PageTopicCapture {
+            title: "银杏数智赋能专项培训（2026）".into(),
+            url: "https://example.com/completion-regression".into(),
+            progress: 20.22,
+            total_count: 12,
+            completed_count: 3,
+            courses: progress_values.iter().enumerate().map(|(index, progress)| PageCourseCapture {
+                external_id: format!("lesson-{index}"),
+                title: format!("课程 {}", index + 1),
+                url: format!("https://example.com/lesson/{index}"),
+                locator: format!("#lesson-{index}"),
+                section_title: String::new(),
+                kind: "video".into(),
+                duration_seconds: 960,
+                progress: if misclassified { 100.0 } else { *progress },
+                completed: misclassified || *progress >= 100.0,
+            }).collect(),
+        };
+        let topic_id = import_capture(&f.state, Provider::Merchant, capture(true)).unwrap().topic_id;
+        let summary = import_capture(&f.state, Provider::Merchant, capture(false)).unwrap();
+        assert_eq!(summary.imported, 12);
+        assert_eq!(summary.completed, 3);
+        let conn = Connection::open(&f.path).unwrap();
+        let mut stmt = conn.prepare("SELECT status,progress FROM video_courses WHERE topic_id=?1 ORDER BY sort_order").unwrap();
+        let courses = stmt.query_map(params![topic_id], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, f64>(1)?))
+        }).unwrap().collect::<Result<Vec<_>, _>>().unwrap();
+        assert_eq!(courses.len(), 12);
+        for ((status, progress), expected) in courses.iter().zip(progress_values) {
+            assert_eq!(*progress, expected);
+            assert_eq!(status, if expected >= 100.0 { "completed" } else { "pending" });
+        }
+        let topic: (i64, i64, f64) = conn.query_row(
+            "SELECT completed_count,total_count,progress FROM video_topics WHERE id=?1",
+            params![topic_id], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        ).unwrap();
+        assert_eq!(topic, (3, 12, 20.22));
+    }
+
+    #[test]
     fn cancelled_playback_tokens_cannot_control_a_later_course() {
         let f = QueueFixture::new();
         f.state
@@ -4733,4 +4837,75 @@ mod tests {
         assert!(!playback_token_matches(&f.state, Provider::Merchant, 1));
         assert!(playback_token_matches(&f.state, Provider::Merchant, 2));
     }
+
+    #[test]
+    fn repeated_ended_events_do_not_reset_phase_since() {
+        let captures = Arc::new(Mutex::new(CaptureExchange::default()));
+        let runtime = Arc::new(Mutex::new(RuntimeState::default()));
+        let initial_time = now() - 10;
+        runtime
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .active
+            .insert(
+                "merchant".to_string(),
+                ActiveCourse {
+                    course_id: "course-1".to_string(),
+                    topic_id: "topic-1".to_string(),
+                    provider: Provider::Merchant,
+                    phase: "playing".to_string(),
+                    phase_since: initial_time,
+                    last_media_at: initial_time,
+                    last_progress_at: initial_time,
+                    last_advanced_time: 100.0,
+                    current_time: 100.0,
+                    duration: 100.0,
+                },
+            );
+
+        // 第一次收到 ended 事件，phase 变为 ended，phase_since 被记录
+        assert!(handle_bridge_title(
+            "MTOOL_MEDIA|merchant|ended|100|100",
+            Provider::Merchant,
+            &captures,
+            &runtime,
+        ));
+        let first_phase_since = {
+            let state = runtime.lock().unwrap_or_else(|error| error.into_inner());
+            let active = state.active.get("merchant").expect("active course exists");
+            assert_eq!(active.phase, "ended");
+            active.phase_since
+        };
+        assert!(first_phase_since <= now());
+
+        // 人为将 phase_since 设为 3 秒前（模拟缓冲等待）
+        {
+            let mut state = runtime.lock().unwrap_or_else(|error| error.into_inner());
+            let active = state.active.get_mut("merchant").unwrap();
+            active.phase_since = now() - 3;
+        }
+        let buffered_since = {
+            let state = runtime.lock().unwrap_or_else(|error| error.into_inner());
+            state.active.get("merchant").unwrap().phase_since
+        };
+
+        // 第二次收到 ended 事件（模拟 setInterval 1.5 秒重复上报）
+        assert!(handle_bridge_title(
+            "MTOOL_MEDIA|merchant|ended|100|100",
+            Provider::Merchant,
+            &captures,
+            &runtime,
+        ));
+
+        // 关键断言：phase_since 绝不能被刷新成 now()，必须维持不变以避免核验死锁！
+        let final_phase_since = {
+            let state = runtime.lock().unwrap_or_else(|error| error.into_inner());
+            let active = state.active.get("merchant").expect("active course exists");
+            assert_eq!(active.phase, "ended");
+            active.phase_since
+        };
+        assert_eq!(final_phase_since, buffered_since);
+        assert!(final_phase_since < now());
+    }
 }
+

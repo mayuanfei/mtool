@@ -62,6 +62,9 @@ const cases = [
   ['未学习仍然不能完成', { label: '未学习 上次学习', iconClass: 'icon-check-circle' }, false, 0],
   ['学习中仍然不能完成', { label: '学习中 上次学习', iconClass: 'icon-check-circle' }, false, 0],
   ['橙色待学图标不能完成', { label: '上次学习', iconClass: 'icon-check-circle', iconStyle: 'color: orange' }, false, 0],
+  ['部分进度优先于完成类名', { label: '进度：66.38%', rowClass: 'active completed' }, false, 66.38],
+  ['零进度优先于完成图标', { label: '进度：0%', iconClass: 'icon-check-circle' }, false, 0],
+  ['部分进度优先于完成文本', { label: '进度：93.62% 已完成' }, false, 93.62],
 ];
 
 for (const [readerName, read] of readers) {
@@ -83,5 +86,43 @@ for (const [readerName, read] of readers.slice(1)) {
     const result = read(courseRow({ label: '进度：42% 上次学习' }));
     assert.equal(result.completed, false);
     assert.equal(result.progress, 42);
+  });
+}
+
+// 模拟普通专题页：单课 div 位于分组及外层 ant-row 中，祖先包含其他已完成课程。
+// 覆盖 closest 命中外层容器和找不到匹配时回退父节点两种路径。
+for (const [readerName, read] of readers) {
+  for (const ancestorMatch of [true, false]) {
+    test(`${readerName}：多课程嵌套不继承父级完成状态（closest=${ancestorMatch}）`, () => {
+      const progressValues = [100, 66.38, 100, 100, 93.62, 93.95, 94.57, 0, 0, 15.73, 33.18, 26.66];
+      const rows = progressValues.map((progress) => courseRow({
+        label: `进度：${progress}%${progress === 100 ? ' 已完成' : ''}`,
+      }));
+      const ancestor = {
+        ...courseRow({ rowClass: 'ant-row' }),
+        innerText: rows.map((row) => row.innerText).join('\n'),
+        children: rows,
+      };
+      for (const [index, row] of rows.entries()) {
+        row.tagName = 'div';
+        row.parentElement = ancestor;
+        row.closest = () => ancestorMatch ? ancestor : null;
+        const result = read(row);
+        const completed = progressValues[index] === 100;
+        if (typeof result === 'boolean') {
+          assert.equal(result, completed, `课程 ${index + 1}`);
+        } else {
+          assert.equal(result.completed, completed, `课程 ${index + 1}`);
+          assert.equal(result.progress, progressValues[index], `课程 ${index + 1} 的进度`);
+        }
+      }
+    });
+  }
+  test(`${readerName}：无进度的课程不继承父级对勾`, () => {
+    const row = courseRow();
+    row.parentElement = courseRow({ iconClass: 'icon-check-circle' });
+    row.closest = () => row.parentElement;
+    const result = read(row);
+    assert.equal(typeof result === 'boolean' ? result : result.completed, false);
   });
 }
