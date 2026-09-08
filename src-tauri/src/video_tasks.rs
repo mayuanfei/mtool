@@ -409,6 +409,18 @@ fn init_db(path: &PathBuf) -> Result<(), String> {
          WHERE kind = 'video' AND status = 'manual'",
         [],
     );
+    let _ = conn.execute(
+        "UPDATE video_courses
+         SET status = 'pending'
+         WHERE kind = 'material' AND status = 'manual'",
+        [],
+    );
+    let _ = conn.execute(
+        "UPDATE video_courses
+         SET kind = 'material'
+         WHERE (title LIKE '%手册' OR title LIKE '%文档' OR title LIKE '%手册%' OR title LIKE '%阅读材料%' OR title LIKE '%参考资料%') AND kind = 'video'",
+        [],
+    );
     Ok(())
 }
 
@@ -907,18 +919,110 @@ fn bridge_script(provider: Provider, speed: f64, muted: bool) -> String {
       }
     } else {
       // 1.2 若页面中未找到原生 video/audio 标签（如 PPT/课件/文档/阅读型课件）：
-      // 必须严格在页面真实驻留满 60 秒以上！绝不允许 1~2 秒就判定完成！
-      const staySeconds = Math.floor((Date.now() - state.pageLoadedAt) / 1000);
-      const targetDuration = 60;
-      report("timeupdate", { currentTime: Math.min(targetDuration, staySeconds), duration: targetDuration });
-      // 驻留满 60 秒以上，如果弹出了完成弹窗，或者驻留超过 75 秒，正常上报完成
-      if (staySeconds >= 60 && hasVisibleCompletionModal()) {
-        report("ended", { currentTime: targetDuration, duration: targetDuration });
-        return;
+      // 优先探测页面上动态变化的学习进度（如 "学习进度: 68%"、进度条等）
+      const detectDocLearningProgress = () => {
+        if (hasVisibleCompletionModal()) return 100;
+        for (const doc of docs) {
+          try {
+            // 1. 扫描叶子或浅层 DOM 文本中的 "学习进度: XX%"、"阅读进度: XX%"、"当前进度: XX%" 等
+            const allEls = doc.querySelectorAll("body *");
+            for (const el of allEls) {
+              if (el.children && el.children.length > 5) continue;
+              const text = (el.innerText || el.textContent || "").replace(/\s+/g, " ").trim();
+              if (text.length > 60) continue;
+              const m = text.match(/(?:学习进度|阅读进度|当前进度|完成进度|任务进度|课程进度)\s*[:：]?\s*(\d+(?:\.\d+)?)%/i);
+              if (m) {
+                const val = Number(m[1]);
+                if (!isNaN(val) && val >= 0 && val <= 100) return val;
+              }
+            }
+
+            // 2. 检查 Ant Design / 通用进度条组件 (.ant-progress, [role='progressbar'])
+            const progressBars = doc.querySelectorAll("[role='progressbar'], .ant-progress, [class*='progress-bar'], [class*='progressBar'], [class*='progress_bar']");
+            for (const pb of progressBars) {
+              if (pb.closest(".prism-player, [class*='player']")) continue;
+              const ariaVal = pb.getAttribute("aria-valuenow");
+              if (ariaVal !== null) {
+                const val = Number(ariaVal);
+                if (!isNaN(val) && val >= 0 && val <= 100) return val;
+              }
+              const pbText = (pb.innerText || "").replace(/\s+/g, "");
+              const tm = pbText.match(/(\d+(?:\.\d+)?)%/);
+              if (tm) {
+                const val = Number(tm[1]);
+                if (!isNaN(val) && val >= 0 && val <= 100) return val;
+              }
+              const innerBg = pb.querySelector("[class*='bg'], [class*='inner'], div") || pb;
+              const style = innerBg.getAttribute("style") || "";
+              const sm = style.match(/width\s*:\s*(\d+(?:\.\d+)?)%/);
+              if (sm) {
+                const val = Number(sm[1]);
+                if (!isNaN(val) && val >= 0 && val <= 100) return val;
+              }
+            }
+
+            // 3. 次优：简略的 "进度: XX%"（需确保长度较短，排除列表大卡片）
+            for (const el of allEls) {
+              if (el.children && el.children.length > 3) continue;
+              const text = (el.innerText || "").replace(/\s+/g, " ").trim();
+              if (text.length > 30) continue;
+              const m = text.match(/^进度\s*[:：]?\s*(\d+(?:\.\d+)?)%/i);
+              if (m) {
+                const val = Number(m[1]);
+                if (!isNaN(val) && val >= 0 && val <= 100) return val;
+              }
+            }
+          } catch (_) {}
+        }
+        return null;
+      };
+
+      // 微交互保活：每隔 6 秒自动向下轻微滚动正文内容并派发鼠标事件，防止平台挂机监测中断计时
+      const nowTs = Date.now();
+      if (!state.lastDocScrollAt || nowTs - state.lastDocScrollAt >= 6000) {
+        state.lastDocScrollAt = nowTs;
+        try {
+          const scrollable = Array.from(document.querySelectorAll("body, div, section, main, article")).find((el) => {
+            return el.scrollHeight > el.clientHeight + 80 && el.clientHeight > 200;
+          }) || window;
+          if (scrollable === window) {
+            window.scrollBy({ top: 35, behavior: "smooth" });
+            if (window.innerHeight + window.scrollY >= (document.body.scrollHeight || 1000) - 50) {
+              window.scrollTo({ top: 0, behavior: "smooth" });
+            }
+          } else {
+            scrollable.scrollTop = (scrollable.scrollTop + 35) % Math.max(1, scrollable.scrollHeight - scrollable.clientHeight);
+          }
+          document.dispatchEvent(new MouseEvent("mousemove", { clientX: 120, clientY: 120, bubbles: true }));
+        } catch (_) {}
       }
-      if (staySeconds >= 75) {
-        report("ended", { currentTime: targetDuration, duration: targetDuration });
-        return;
+
+      const docProgress = detectDocLearningProgress();
+      const staySeconds = Math.floor((Date.now() - state.pageLoadedAt) / 1000);
+
+      if (docProgress !== null) {
+        // 发现明确的页面进度（例如 "学习进度: 68%"）
+        const currentP = Math.max(docProgress, state.lastDocProgress || 0);
+        state.lastDocProgress = currentP;
+        report("timeupdate", { currentTime: currentP, duration: 100 });
+
+        // 仅当进度达到 100% 或弹出完成模态对话框时，才上报完播；未到 100% 坚决持续驻留！
+        if (currentP >= 100 || hasVisibleCompletionModal()) {
+          report("ended", { currentTime: 100, duration: 100 });
+          return;
+        }
+      } else {
+        // 未检测到明确进度（如纯静态课件），按时间驻留兜底
+        const targetDuration = 60;
+        report("timeupdate", { currentTime: Math.min(targetDuration, staySeconds), duration: targetDuration });
+        if (staySeconds >= 60 && hasVisibleCompletionModal()) {
+          report("ended", { currentTime: targetDuration, duration: targetDuration });
+          return;
+        }
+        if (staySeconds >= 90) {
+          report("ended", { currentTime: targetDuration, duration: targetDuration });
+          return;
+        }
       }
     }
 
@@ -1330,20 +1434,21 @@ fn merchant_course_click_script(title: &str, locator: &str) -> String {
             ));
             let expandedAny = false;
             for (const h of stageHeaders) {{
-              const parent = h.closest("[class*='stage'], [class*='chapter'], .ant-collapse-item, [class*='collapse-item']") || h.parentElement;
+              const parent = (h.parentElement ? h.parentElement.closest("[class*='stage'], [class*='chapter'], .ant-collapse-item, [class*='collapse-item']") : null) || h.parentElement;
               const hasContentItems = !!parent && !!parent.querySelector(".course-content-item, [class*='content-item']");
+              if (hasContentItems) continue;
               const arrow = h.querySelector(".anticon, svg, [class*='arrow'], [class*='icon']");
               const arrowStyle = (arrow ? arrow.getAttribute("style") || "" : "") + (arrow && arrow.parentElement ? arrow.parentElement.getAttribute("style") || "" : "");
               const isRotated = /rotate\(-?90deg\)/i.test(arrowStyle);
               const isAriaClosed = h.getAttribute("aria-expanded") === "false";
-              if (!hasContentItems || isRotated || isAriaClosed) {{
+              if (isRotated || isAriaClosed || !arrow) {{
                 try {{ h.click(); }} catch (_) {{}}
                 try {{ h.dispatchEvent(new MouseEvent("click", {{ bubbles: true, cancelable: true, view: window }})); }} catch (_) {{}}
                 if (arrow) {{
                   try {{ arrow.click(); }} catch (_) {{}}
                   try {{ arrow.dispatchEvent(new MouseEvent("click", {{ bubbles: true, cancelable: true, view: window }})); }} catch (_) {{}}
                 }}
-                const innerSpan = h.querySelector(".course-stage-caption, span, [role='button']");
+                const innerSpan = h.querySelector(".course-stage-index, span, [role='button']");
                 if (innerSpan && innerSpan !== h) {{
                   try {{ innerSpan.click(); }} catch (_) {{}}
                 }}
@@ -1786,27 +1891,76 @@ fn merchant_capture_script(request_id: &str) -> String {
       if (!t) return true;
       return /^(?:(?:知识|课程|考试|测验|测试|课件|文档|资料|手册|阅读材料|参考资料|视频|音频|图文|直播|ppt|pptx|pdf|word|excel|问卷|调查问卷|评价表|满意度评价|未完成|已完成|已学完|已学习|未学习|学习中|已考试|已通过|未通过|进行中|上次学习|试看|播放中|去学习|立即学习|开始学习|重新学习|继续学习|必修|选修|需本人处理)\s*)+$/i.test(t);
     };
-    const isMeta = (s) => /(学习时长|必修学分|选修学分|进度\s*[:：]?|学时\s*[:：]?\s*\d+|学分\s*[:：]?\s*\d+|起止时间|得分|正确率|总分|题数|时长\s*[:：]|考试时长|课程数|浏览人数|学习人数)/i.test(s);
+    const isMeta = (s) => {
+      const t = clean(s);
+      if (!t) return false;
+      return (
+        /^(学习时长|必修学分|选修学分|学习进度|学时|学分|起止时间|得分|正确率|总分|题数|时长|考试时长|课程数|浏览人数|学习人数)\s*[:：]/.test(t) ||
+        /^(学习时长|必修学分|选修学分|学习进度|学时|学分|起止时间|得分|正确率|总分|题数|时长|考试时长|课程数|浏览人数|学习人数)$/.test(t) ||
+        /(?:进度|学习进度)\s*[:：]?\s*\d+(?:\.\d+)?%/.test(t) ||
+        /(?:学时|学分|题数|总分|得分)\s*[:：]?\s*\d+/.test(t) ||
+        /(?:浏览人数|学习人数|课程数)\s*[:：]?\s*\d+/.test(t) ||
+        /正确率\s*[:：]?\s*\d+(?:\.\d+)?%/.test(t)
+      );
+    };
     const isSiteOrUiTitle = (s) => /^(YS学堂|银商学堂|银联乐学|中国银联|乐学|首页|个人中心|学习中心|学习地图|考试中心|赛事中心|全部|培训管理|培训介绍|培训内容|专题介绍|课程大纲|乐学圈|我的学习|我的课程|课程详情|专题详情|全部课程|培训项目|学习任务|登录|加入自学|已加入)$/i.test(s);
 
     const detectCourseKind = (title, text, durationSeconds, container) => {
       const cleanTitle = String(title || "").trim();
       const cleanText = String(text || "").trim();
+      const card = container ? (container.closest?.(".course-content-item, [class*='content-item'], li, tr, [class*='card'], [class*='item']") || container) : null;
+      const combinedText = card ? clean(cleanText + " " + (card.innerText || "")) : cleanText;
 
-      // 1. 【全局与 DOM 播放器检测 - 最高优先级】
-      // 若当前页面存在视频播放器（<video> 或 .prism-player），或当前条目挂载了视频元素/播放图标
-      if (typeof document !== "undefined" && document.querySelector && document.querySelector("video, .prism-player, [class*='player']")) {
-        const isExamInPlayer = /(期末考试|结业考试|随堂测验|模拟考试|在线考试|阶段测验|课后测验|综合测试|结业测试|试卷)|^.*(考试|测验)$/.test(cleanTitle) ||
-          /(^|\s)(考试|测验|试卷)(\s|$)/.test(cleanText);
-        if (isExamInPlayer) return "exam";
+      // 1. 【最高优先级：条目自身明确的类型徽章/Tag 与标题后缀】
+      // 必须优先以当前小节自身的徽章为准，绝不能被同一页面左侧的视频播放器一刀切误判！
+      const hasExplicitMaterialBadge = /(^|\s)(文档|资料|阅读材料|参考资料|手册|pdf|word)(\s|$)/i.test(combinedText) ||
+        /[-_（(【\[\s](文档|阅读材料|参考资料|资料|pdf|手册)[)）\]\s]?$/i.test(cleanTitle) ||
+        (card && card.querySelectorAll &&
+         Array.from(card.querySelectorAll("[class*='tag'], [class*='badge'], span, em, i")).some((el) => /^(文档|资料|阅读材料|参考资料|手册|pdf)$/i.test(clean(el.innerText))));
+
+      if (hasExplicitMaterialBadge) {
+        return "material";
+      }
+
+      // 2. 精确收窄 PPT/课件判定
+      const hasExplicitSlidesBadge = /(^|\s)(ppt课件|课件|幻灯片)(\s|$)/i.test(combinedText) ||
+        /[-_（(【\[\s](课件|幻灯片|ppt课件)[)）\]\s]?$/i.test(cleanTitle) ||
+        /^.*[-_]课件$/i.test(cleanTitle) ||
+        (card && card.querySelectorAll &&
+         Array.from(card.querySelectorAll("[class*='tag'], [class*='badge'], span, em, i")).some((el) => /^(课件|ppt课件|幻灯片)$/i.test(clean(el.innerText))));
+
+      if (hasExplicitSlidesBadge) {
+        return "slides";
+      }
+
+      // 3. 考试与测验检测
+      const isTechTesting = /(软件测试|压力测试|接口测试|性能测试|自动化测试|测试用例|测试开发|单元测试|测试方法|测试体系|测试流程|测试实战|测试理论)/.test(cleanTitle);
+      const hasExplicitExamBadge = /(^|\s)(考试|测验|试卷|问卷|调查问卷|调研问卷|评价表|满意度评价)(\s|$)/.test(combinedText);
+      const hasExamKeywordInTitle = /(期末考试|结业考试|随堂测验|模拟考试|在线考试|阶段测验|课后测验|综合测试|结业测试|试卷|问卷|调查问卷|调研问卷|评价表|满意度评价)|^.*(考试|测验)$/.test(cleanTitle) ||
+        (!isTechTesting && /(考试|测验)/.test(cleanTitle));
+
+      if (hasExplicitExamBadge || hasExamKeywordInTitle) {
+        return "exam";
+      }
+
+      // 4. 线下课检测
+      if (/线下课|面授|签到|打卡/.test(cleanTitle) || /(^|\s)(线下课|面授)(\s|$)/.test(combinedText)) {
+        return "material";
+      }
+
+      // 5. 【条目自身挂载的视频特征】
+      const hasExplicitVideoBadge = /(^|\s)(视频|视频课)(\s|$)/.test(combinedText) ||
+        (card && card.querySelectorAll &&
+         Array.from(card.querySelectorAll("[class*='tag'], [class*='badge'], span, em, i")).some((el) => /^(视频|视频课)$/i.test(clean(el.innerText))));
+      if (hasExplicitVideoBadge) {
         return "video";
       }
 
-      if (container && container.querySelector) {
-        if (container.querySelector("video, audio") || (container.matches && container.matches("video, audio"))) {
+      if (card && card.querySelector) {
+        if (card.querySelector("video, audio") || (card.matches && card.matches("video, audio"))) {
           return "video";
         }
-        const hasVideoFeature = container.querySelector(
+        const hasVideoFeature = card.querySelector(
           "[class*='video'], [class*='player'], [class*='play-btn'], [class*='play_btn'], [class*='play-icon'], [class*='play_icon'], [data-type*='video'], svg[class*='play'], i[class*='play'], [class*='icon-play']"
         );
         if (hasVideoFeature) {
@@ -1814,56 +1968,16 @@ fn merchant_capture_script(request_id: &str) -> String {
         }
       }
 
-      // 2. 考试与测验检测
-      const isTechTesting = /(软件测试|压力测试|接口测试|性能测试|自动化测试|测试用例|测试开发|单元测试|测试方法|测试体系|测试流程|测试实战|测试理论)/.test(cleanTitle);
-
-      const hasExplicitExamBadge = /(^|\s)(考试|测验|试卷)(\s|$)/.test(cleanText);
-      const hasExamKeywordInTitle = /(期末考试|结业考试|随堂测验|模拟考试|在线考试|阶段测验|课后测验|综合测试|结业测试|试卷)|^.*(考试|测验)$/.test(cleanTitle) ||
-        (!isTechTesting && /(考试|测验)/.test(cleanTitle));
-
-      if (hasExplicitExamBadge || hasExamKeywordInTitle) {
-        return "exam";
-      }
-
-      // 问卷/评价：仅匹配明确的问卷词汇，严禁单独匹配“调研”或“调查”误伤普通课题（如“市场调研”、“社会调查”）
-      const hasSurveyBadge = /(^|\s)(问卷|调查问卷|调研问卷|评价表|满意度评价)(\s|$)/.test(cleanText);
-      const hasSurveyTitle = /(问卷|调查问卷|调研问卷|满意度调查|评价表|满意度评价|课后评价|教学评价)/.test(cleanTitle);
-
-      if (hasSurveyBadge || hasSurveyTitle) {
-        return "exam";
-      }
-
-      // 3. 【真实时长特征保护】
-      // 凡是具有明确时长（>= 120 秒，即 >= 2 分钟）的课程，绝非静态 PPT，直接判定为视频！
+      // 6. 【真实时长特征保护】
+      // 凡是具有明确时长（>= 120 秒，即 >= 2 分钟）的课程，绝非静态课件，判定为视频！
       const hasRealisticDuration = Number(durationSeconds) >= 120;
       if (hasRealisticDuration) {
         return "video";
       }
 
-      // 4. 精确收窄 PPT/课件判定
-      // 严禁包含式全词匹配 /ppt/i！《做PPT》、《学PPT》、《职场PPT排版》、《豆包生成PPT》本质全部是视频课！
-      // 仅当标题以明确课件为后缀（如：xxx培训-课件、xxx【课件】、xxx_PPT）或 DOM 中有明确独立的 PPT/课件徽章时才判定为 slides
-      const hasExplicitSlidesBadge = /(^|\s)(ppt课件|课件|幻灯片)(\s|$)/i.test(cleanText) ||
-        (container && container.querySelectorAll &&
-         Array.from(container.querySelectorAll("[class*='tag'], [class*='badge']")).some((el) => /^(课件|ppt课件|幻灯片)$/i.test(clean(el.innerText))));
-
-      const hasSlidesSuffixInTitle = /[-_（(【\[\s](课件|幻灯片|ppt课件)[)）\]\s]?$/i.test(cleanTitle) ||
-        /^.*[-_]课件$/i.test(cleanTitle);
-
-      if (hasExplicitSlidesBadge || hasSlidesSuffixInTitle) {
-        return "slides";
-      }
-
-      // 5. 资料/文档检测
-      const hasMaterialBadge = /(^|\s)(阅读材料|参考资料|手册)(\s|$)/.test(cleanText);
-      const hasMaterialSuffixInTitle = /[-_（(【\[\s](文档|阅读材料|参考资料|资料|pdf|手册)[)）\]\s]?$/i.test(cleanTitle);
-      if (hasMaterialBadge || hasMaterialSuffixInTitle) {
-        return "material";
-      }
-
-      // 6. 线下课检测
-      if (/线下课|面授|签到|打卡/.test(cleanTitle) || /(^|\s)(线下课|面授)(\s|$)/.test(cleanText)) {
-        return "material";
+      // 7. 【全局播放器回退】：仅在无任何特殊标识时，若页面存在播放器才作为视频
+      if (typeof document !== "undefined" && document.querySelector && document.querySelector("video, .prism-player, [class*='player']")) {
+        return "video";
       }
 
       return "video";
@@ -2016,8 +2130,8 @@ fn merchant_capture_script(request_id: &str) -> String {
       if (/(原创作者|贡献者|学习人数|完成任务数|超越员工数|课程介绍|专题介绍|培训介绍|主讲老师\s*[:：])/.test(text)) {
         return false;
       }
-      // 必须排除章节总标题面板头部（如“章节 (2) 时长：446分钟”）
-      if (/^章节\s*\(\d+\)/.test(text) || /^目录\s*\(/.test(text)) {
+      // 必须排除章节总标题面板头部（如“章节 (2) 时长：446分钟”或“章节（1）”）
+      if (/^章节\s*[（(]?\d+[）)]?/.test(text) || /^目录\s*[（(]?/.test(text)) {
         return false;
       }
       // 必须排除期次/阶段/模块纯层级大标题
@@ -2150,7 +2264,7 @@ fn merchant_capture_script(request_id: &str) -> String {
       /^\d+\s*分钟$/.test(s) ||
       /^\d+:\d+$/.test(s) ||
       /^\d+\s*人看过$/.test(s) ||
-      /^章节\s*\(\d+\)$/.test(s) ||
+      /^章节\s*[（(]?\d+[）)]?$/.test(s) ||
       /^时长\s*[:：]/.test(s) ||
       /^(标清|高清|超清|倍速|\d+(\.\d+)?倍速|全屏|音量|收起目录|展开目录|课程介绍|主讲老师|收藏|已收藏)$/.test(s) ||
       /^(银商学堂|YS学堂|银联乐学|中国银联|量见[·•]云课堂|量见云课堂)$/i.test(s) ||
@@ -2286,7 +2400,7 @@ fn merchant_capture_script(request_id: &str) -> String {
         if (!visible(el) || isNavOrHeader(el)) return false;
         if (el.closest(".prism-player, [class*='player'], [class*='control-bar'], [class*='controls']")) return false;
         const text = clean(el.innerText);
-        const hasCatalogHeader = /(章节\s*\(?\d+\)?|课程目录|章节列表)/.test(text);
+        const hasCatalogHeader = /(章节\s*[（(]?\d+[）)]?|课程目录|章节列表)/.test(text);
         if (!hasCatalogHeader) return false;
         if (text.length < 20 || text.length > 25000) return false;
 
@@ -2304,12 +2418,22 @@ fn merchant_capture_script(request_id: &str) -> String {
         return candidates[0];
       }
 
-      // 2. 针对包含 .course-stage-caption 的容器
+      // 1.5 针对包含 .course-detail-right-wrapper 等已知章节目录外层容器
+      const rightWrappers = Array.from(document.querySelectorAll(".course-detail-right-wrapper, [class*='detail-right-wrapper']")).filter((el) => {
+        if (!visible(el) || isNavOrHeader(el)) return false;
+        return !!el.querySelector(".course-stage-caption, .course-content-item, [class*='stage-caption'], [class*='content-item']");
+      });
+      if (rightWrappers.length > 0) {
+        return rightWrappers[0];
+      }
+
+      // 2. 针对包含 .course-stage-caption 或 .course-content-item 的容器
       const stageContainers = Array.from(document.querySelectorAll("div, section, aside")).filter((el) => {
         if (!visible(el) || isNavOrHeader(el)) return false;
         if (el.closest(".prism-player, [class*='player'], [class*='control-bar']")) return false;
         const stages = el.querySelectorAll(".course-stage-caption, [class*='stage-caption']");
-        return stages.length >= 2;
+        const items = el.querySelectorAll(".course-content-item, [class*='content-item']");
+        return (stages.length >= 1 && items.length >= 1) || stages.length >= 2;
       });
       if (stageContainers.length > 0) {
         stageContainers.sort((a, b) => a.innerText.length - b.innerText.length);
@@ -2357,7 +2481,7 @@ fn merchant_capture_script(request_id: &str) -> String {
         const text = nodeText(el);
         if (text.length < 2 || text.length > 250) return false;
         if (/(倍速|标清|高清|超清|人看过|课程介绍|主讲老师|收起目录|展开目录|00:00)/.test(text)) return false;
-        if (/^(章节\s*\(?\d+\)?|时长\s*[:：]|\d+\s*分钟$)/.test(text)) return false;
+        if (/^(章节\s*[（(]?\d+[）)]?|时长\s*[:：]|\d+\s*分钟$)/.test(text)) return false;
 
         // 排除大章节折叠头部（大章节名称如 "01 如何使用企微链接..."，必须排除含有时长或在普通 li 列表中的真正小节）
         const hasLessonDuration = /(\d+)\s*分钟|\d+:\d+/.test(text);
@@ -2558,62 +2682,68 @@ fn merchant_capture_script(request_id: &str) -> String {
     // 1. 先收集初始状态下已渲染/已展开的课程条目（大多数普通课程直接在此处完整获取全部小节！）
     addCatalogCourses(parseCatalogCourses(searchRoot));
 
-    // 2. 只有在页面上明确存在“处于折叠/收起状态的大章节”时，才需要进行按需点击展开！
+    // 2. 只有在页面上明确存在“处于折叠/收起状态且缺失子条目的大章节”时，才需要进行按需点击展开！
     // 普通课程（所有章节直接展示）无折叠大章节，跳过点击逻辑，零额外操作
-    const chapterHeaders = getChapterHeaders(searchRoot);
-    const hasCollapsedChapters = chapterHeaders.some((h) => {
-      const parent = h.closest("[class*='stage'], [class*='chapter'], .ant-collapse-item, [class*='collapse-item']") || h.parentElement;
-      const hasContentItems = !!parent && !!parent.querySelector(".course-content-item, [class*='content-item']");
+    const getChapterContainer = (h) =>
+      (h.parentElement ? h.parentElement.closest("[class*='stage'], [class*='chapter'], .ant-collapse-item, [class*='collapse-item']") : null) || h.parentElement;
+
+    const hasChildItems = (h) => {
+      const parent = getChapterContainer(h);
+      if (parent && parent.querySelector(".course-content-item, [class*='content-item']")) return true;
+      let sibling = h.nextElementSibling;
+      while (sibling) {
+        if (sibling.matches(".course-stage-caption, [class*='stage-caption'], .ant-collapse-header, [class*='collapse-header']")) break;
+        if (sibling.matches(".course-content-item, [class*='content-item']") || sibling.querySelector(".course-content-item, [class*='content-item']")) return true;
+        sibling = sibling.nextElementSibling;
+      }
+      return false;
+    };
+
+    const isHeaderCollapsed = (h) => {
+      // 只要该章节当前已经存在课时小节条目，说明已经是展开状态，严禁点击折叠！
+      if (hasChildItems(h)) return false;
       const arrow = h.querySelector(".anticon, svg, [class*='arrow'], [class*='icon']");
       const arrowStyle = (arrow ? arrow.getAttribute("style") || "" : "") + (arrow && arrow.parentElement ? arrow.parentElement.getAttribute("style") || "" : "");
       const isRotated = /rotate\(-?90deg\)/i.test(arrowStyle);
       const isAriaClosed = h.getAttribute("aria-expanded") === "false";
-      return isRotated || isAriaClosed || !hasContentItems;
-    });
+      return isRotated || isAriaClosed || !arrow;
+    };
+
+    const chapterHeaders = getChapterHeaders(searchRoot);
+    const hasCollapsedChapters = chapterHeaders.some(isHeaderCollapsed);
 
     if (chapterHeaders.length > 0 && hasCollapsedChapters) {
       for (let i = 0; i < chapterHeaders.length; i++) {
         const h = chapterHeaders[i];
         try {
-          const parent = h.closest("[class*='stage'], [class*='chapter'], .ant-collapse-item, [class*='collapse-item']") || h.parentElement;
-          const hasContentItems = !!parent && !!parent.querySelector(".course-content-item, [class*='content-item']");
+          if (!isHeaderCollapsed(h)) {
+            continue; // 已经展开，直接跳过，绝不点击！
+          }
 
-          // 检查折叠指示箭头
+          const parent = getChapterContainer(h);
           const arrow = h.querySelector(".anticon, svg, [class*='arrow'], [class*='icon']");
-          const arrowStyle = (arrow ? arrow.getAttribute("style") || "" : "") + (arrow && arrow.parentElement ? arrow.parentElement.getAttribute("style") || "" : "");
-          // 在该平台/Ant Design图标中，折叠时通常带有 rotate(-90deg)
-          const isRotated = /rotate\(-?90deg\)/i.test(arrowStyle);
 
-          const isAriaOpen = h.getAttribute("aria-expanded") === "true";
-          const hasActiveCls = parent && (parent.classList.contains("ant-collapse-item-active") || parent.classList.contains("is-active") || parent.classList.contains("active") || parent.classList.contains("expanded") || parent.classList.contains("open"));
-          const isHeaderActive = h.classList.contains("active") || h.classList.contains("open") || h.classList.contains("is-active");
+          try { h.scrollIntoView({ block: "nearest", behavior: "instant" }); } catch (_) {}
 
-          // 仅在明确收拢时才点击展开
-          const isCollapsed = !hasContentItems || isRotated || (!isAriaOpen && !hasActiveCls && !isHeaderActive);
+          // 触发点击展开
+          h.click();
+          try { h.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, view: window })); } catch (_) {}
 
-          if (isCollapsed) {
-            try { h.scrollIntoView({ block: "nearest", behavior: "instant" }); } catch (_) {}
+          if (arrow) {
+            try { arrow.click(); } catch (_) {}
+            try { arrow.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, view: window })); } catch (_) {}
+          }
+          const innerSpan = h.querySelector(".course-stage-index, span, [role='button']");
+          if (innerSpan && innerSpan !== h) {
+            try { innerSpan.click(); } catch (_) {}
+          }
 
-            // 触发点击展开
-            h.click();
-            try { h.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, view: window })); } catch (_) {}
-
-            if (arrow) {
-              try { arrow.click(); } catch (_) {}
-              try { arrow.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, view: window })); } catch (_) {}
-            }
-            const innerSpan = h.querySelector(".course-stage-index, span, [role='button']");
-            if (innerSpan && innerSpan !== h) {
-              try { innerSpan.click(); } catch (_) {}
-            }
-
-            // 等待 React 异步渲染子小节
-            await sleep(350);
-            let waitTries = 0;
-            while (waitTries < 4 && parent && !parent.querySelector(".course-content-item, [class*='content-item']")) {
-              await sleep(150);
-              waitTries++;
-            }
+          // 等待 React 异步渲染子小节
+          await sleep(350);
+          let waitTries = 0;
+          while (waitTries < 4 && !hasChildItems(h)) {
+            await sleep(150);
+            waitTries++;
           }
 
           // 展开后，从当前章节父容器、searchRoot 以及 document.body 中提取刚渲染出的子课程
@@ -3292,7 +3422,7 @@ fn import_capture(
         let status = if course.completed {
             completed += 1;
             "completed"
-        } else if kind == "video" || kind == "slides" {
+        } else if kind == "video" || kind == "slides" || kind == "material" {
             "pending"
         } else {
             manual += 1;
@@ -3563,7 +3693,7 @@ fn next_pending(
          JOIN video_topics t ON t.id=c.topic_id
          LEFT JOIN video_queue_lanes lane ON lane.provider=COALESCE(?1, 'all')
          LEFT JOIN video_queue_lanes platform ON platform.provider=c.provider
-         WHERE c.status IN ('pending','paused') AND c.kind IN ('video','slides')
+         WHERE c.status IN ('pending','paused') AND c.kind IN ('video','slides','material')
            AND (?1 IS NULL OR c.provider=?1) AND platform.blocked_reason IS NULL
          ORDER BY CASE WHEN c.topic_id=lane.topic_id THEN 0 ELSE 1 END,
                   CASE WHEN c.status='paused' THEN 0 ELSE 1 END,
@@ -4288,13 +4418,24 @@ pub async fn tick_video_queue(
                 continue;
             }
 
-            // 看门狗 3：播放中进度停滞检测（120 秒），杜绝假完播谎报学时，统一标 attention 异常
-            if active.phase == "playing" && stall_duration >= 120 {
+            // 看门狗 3：播放中进度停滞检测（视频120秒，文档300秒宽容期），杜绝假完播谎报学时，统一标 attention 异常
+            let stall_threshold = {
+                let is_material = load_course(state.db_path.as_ref(), &active.course_id)
+                    .map(|c| c.kind == "material")
+                    .unwrap_or(false);
+                if is_material {
+                    300
+                } else {
+                    120
+                }
+            };
+            if active.phase == "playing" && stall_duration >= stall_threshold {
                 pause_player(&app, state.inner(), active.provider);
                 let conn =
                     Connection::open(state.db_path.as_ref()).map_err(|error| error.to_string())?;
                 let mins = (active.current_time / 60.0).floor() as i64;
-                let last_error = format!("视频播放卡住超过2分钟未推进（停在约{mins}分钟），已自动跳过并开始播放下一门");
+                let wait_mins = stall_threshold / 60;
+                let last_error = format!("课程学习进度卡住超过{wait_mins}分钟未推进（停在约{mins}分钟），已自动跳过并开始播放下一门");
                 conn.execute(
                     "UPDATE video_courses SET status='attention',progress=?2,last_error=?3,updated_at=?4 WHERE id=?1",
                     params![active.course_id, progress, last_error, now()],
@@ -4562,7 +4703,7 @@ pub async fn retry_video_course(
 ) -> Result<(), String> {
     let _guard = state.queue_tick.lock().await;
     let course = load_course(state.db_path.as_ref(), &course_id)?;
-    let next_status = if course.kind == "video" || course.kind == "slides" {
+    let next_status = if course.kind == "video" || course.kind == "slides" || course.kind == "material" {
         "pending"
     } else {
         "manual"
@@ -4690,7 +4831,7 @@ pub async fn reset_video_topic(
     }
     conn.execute(
         "UPDATE video_courses SET status='pending',progress=0,last_error=NULL,updated_at=?2
-         WHERE topic_id=?1 AND kind IN ('video', 'slides')",
+         WHERE topic_id=?1 AND kind IN ('video', 'slides', 'material')",
         params![topic_id, now()],
     )
     .map_err(|error| error.to_string())?;
@@ -4709,7 +4850,7 @@ pub async fn reset_video_course(
 ) -> Result<(), String> {
     let _guard = state.queue_tick.lock().await;
     let course = load_course(state.db_path.as_ref(), &course_id)?;
-    let next_status = if course.kind == "video" || course.kind == "slides" {
+    let next_status = if course.kind == "video" || course.kind == "slides" || course.kind == "material" {
         "pending"
     } else {
         "manual"
@@ -5016,6 +5157,70 @@ mod tests {
     }
 
     #[test]
+    fn import_material_course_becomes_pending_and_schedulable() {
+        let path = std::env::temp_dir().join(format!(
+            "mtool-video-task-test-{}.db",
+            CAPTURE_COUNTER.fetch_add(1, Ordering::Relaxed)
+        ));
+        init_db(&path).expect("init test database");
+        let state = VideoTaskState {
+            db_path: Arc::new(path.clone()),
+            settings: Arc::new(Mutex::new(VideoTaskSettings::default())),
+            captures: Arc::new(Mutex::new(CaptureExchange::default())),
+            runtime: Arc::new(Mutex::new(RuntimeState::default())),
+            queue_tick: Arc::new(tokio::sync::Mutex::new(())),
+        };
+        let domain = decode_obfuscated_url("bHpkeGVkdS5jb20=");
+        let course = |id: &str, title: &str, kind: &str, completed: bool| PageCourseCapture {
+            external_id: id.to_string(),
+            title: title.to_string(),
+            url: format!("https://{domain}/course/{id}"),
+            locator: String::new(),
+            section_title: "第一期".to_string(),
+            kind: kind.to_string(),
+            duration_seconds: 60,
+            progress: if completed { 100.0 } else { 40.0 },
+            completed,
+        };
+        let summary = import_capture(
+            &state,
+            Provider::Merchant,
+            PageTopicCapture {
+                title: "测试文档专题".to_string(),
+                url: format!("https://{domain}/study/test_doc"),
+                progress: 40.0,
+                total_count: 1,
+                completed_count: 0,
+                courses: vec![
+                    course("doc1", "03. 协议批量分发功能手册", "material", false),
+                ],
+            },
+        )
+        .expect("import capture");
+        assert_eq!(summary.imported, 1);
+        assert_eq!(summary.completed, 0);
+        assert_eq!(summary.manual, 0);
+
+        let conn = Connection::open(&path).expect("open test database");
+        let doc_status: String = conn
+            .query_row(
+                "SELECT status FROM video_courses WHERE kind='material'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("doc status");
+        assert_eq!(doc_status, "pending");
+
+        // 验证 next_pending 可以正常检索到该文档课程
+        let pending = next_pending(&path, Some(Provider::Merchant)).expect("query next pending");
+        assert!(pending.is_some());
+        assert_eq!(pending.unwrap().title, "03. 协议批量分发功能手册");
+
+        drop(conn);
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
     fn progress_stall_tracking_detects_stall() {
         let captures = Arc::new(Mutex::new(CaptureExchange::default()));
         let runtime = Arc::new(Mutex::new(RuntimeState::default()));
@@ -5161,6 +5366,19 @@ mod tests {
         assert!(script.contains("去考试|开始考试|参加考试|进入考试"));
         assert!(script.contains("ant-modal"));
         assert!(script.contains("baseTitle"));
+    }
+
+    #[test]
+    fn capture_script_and_click_script_handle_single_stage_and_prevent_collapsing_open_chapters() {
+        let script = capture_script("test_req", Provider::Merchant);
+        assert!(script.contains("getChapterContainer"));
+        assert!(script.contains("hasChildItems"));
+        assert!(script.contains("isHeaderCollapsed"));
+        assert!(script.contains("章节\\s*[（(]?\\d+[）)]?"));
+        assert!(script.contains(".course-detail-right-wrapper"));
+
+        let click_script = course_click_script("01. 测试", "#test", Provider::Merchant);
+        assert!(click_script.contains("if (hasContentItems) continue;"));
     }
 
     #[test]

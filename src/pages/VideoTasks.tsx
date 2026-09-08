@@ -848,7 +848,7 @@ export function VideoTasks() {
                                   </button>
                                 </>
                               )}
-                              {course.status === 'paused' && !isLoginError && (kindKey === 'video' || kindKey === 'slides') && (
+                              {course.status === 'paused' && !isLoginError && (kindKey === 'video' || kindKey === 'slides' || kindKey === 'material') && (
                                 <button
                                   onClick={() => void runAction('start', async () => {
                                     await invoke('start_video_queue');
@@ -861,7 +861,7 @@ export function VideoTasks() {
                                   <Play className="w-3.5 h-3.5 fill-current" />继续队列
                                 </button>
                               )}
-                              {(course.status === 'skipped' || course.status === 'attention') && (kindKey === 'video' || kindKey === 'slides') && (
+                              {(course.status === 'skipped' || course.status === 'attention') && (kindKey === 'video' || kindKey === 'slides' || kindKey === 'material') && (
                                 <button
                                   onClick={() => void runAction(
                                     'retry-' + course.id,
