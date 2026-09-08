@@ -1184,32 +1184,84 @@ fn course_click_script(title: &str, locator: &str) -> String {
     let title_json = serde_json::to_string(title).unwrap_or_default();
     let locator_json = serde_json::to_string(locator).unwrap_or_default();
     format!(
-        r#"(() => {{
+        r#"(async () => {{
           const targetTitle = {title_json};
           const targetLocator = {locator_json};
           const clean = (value) => String(value || "").replace(/\s+/g, " ").trim();
+          const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
           // 拦截 window.open 防止弹空白页
           try {{
             window.open = (url) => {{
               const next = clean(url);
-              if (next && next !== "about:blank") {{
+              if (next && next !== "about:blank" && !/^javascript:/i.test(next)) {{
                 try {{ window.location.assign(new URL(next, window.location.href).href); }} catch (_) {{}}
               }}
+              try {{
+                window.location = {{
+                  set href(val) {{
+                    try {{ window.location.assign(new URL(val, window.location.href).href); }} catch (_) {{}}
+                  }}
+                }};
+              }} catch (_) {{}}
               return window;
             }};
           }} catch (_) {{}}
 
-          const byLocator = targetLocator ? document.querySelector(targetLocator) : null;
-          const all = Array.from(document.querySelectorAll("body *"));
-          const byTitle = all.find((el) => clean(el.innerText) === clean(targetTitle)) ||
-            all.find((el) => {{
-              const text = clean(el.innerText);
-              return text.length <= clean(targetTitle).length + 10 && text.includes(clean(targetTitle));
-            }});
-          let target = byLocator || byTitle;
+          const cleanTarget = clean(targetTitle);
+          const baseTitle = cleanTarget.replace(/^\d{{1,2}}\s*[.、-]\s*/, "").trim();
+
+          const findTarget = () => {{
+            const byLocator = targetLocator ? document.querySelector(targetLocator) : null;
+            const all = Array.from(document.querySelectorAll("body *"));
+            const byTitle = all.find((el) => clean(el.innerText) === cleanTarget) ||
+              all.find((el) => {{
+                const text = clean(el.innerText);
+                return text.length <= cleanTarget.length + 10 && text.includes(cleanTarget);
+              }}) ||
+              (baseTitle.length >= 3 ? all.find((el) => {{
+                const text = clean(el.innerText);
+                return text.length <= baseTitle.length + 12 && text.includes(baseTitle);
+              }}) : null);
+            return byLocator || byTitle;
+          }};
+
+          let target = findTarget();
+          if (!target) {{
+            // 查找页面上所有处于折叠状态的章节头部并展开
+            const stageHeaders = Array.from(document.querySelectorAll(
+              ".course-stage-caption, [class*='stage-caption'], .ant-collapse-header, [class*='collapse-header'], [class*='collapse-item__header'], [class*='chapter-header'], [class*='chapter_header'], [role='tab']"
+            ));
+            let expandedAny = false;
+            for (const h of stageHeaders) {{
+              const parent = h.closest("[class*='stage'], [class*='chapter'], .ant-collapse-item, [class*='collapse-item']") || h.parentElement;
+              const hasContentItems = !!parent && !!parent.querySelector(".course-content-item, [class*='content-item']");
+              const arrow = h.querySelector(".anticon, svg, [class*='arrow'], [class*='icon']");
+              const arrowStyle = (arrow ? arrow.getAttribute("style") || "" : "") + (arrow && arrow.parentElement ? arrow.parentElement.getAttribute("style") || "" : "");
+              const isRotated = /rotate\(-?90deg\)/i.test(arrowStyle);
+              const isAriaClosed = h.getAttribute("aria-expanded") === "false";
+              if (!hasContentItems || isRotated || isAriaClosed) {{
+                try {{ h.click(); }} catch (_) {{}}
+                try {{ h.dispatchEvent(new MouseEvent("click", {{ bubbles: true, cancelable: true, view: window }})); }} catch (_) {{}}
+                if (arrow) {{
+                  try {{ arrow.click(); }} catch (_) {{}}
+                  try {{ arrow.dispatchEvent(new MouseEvent("click", {{ bubbles: true, cancelable: true, view: window }})); }} catch (_) {{}}
+                }}
+                const innerSpan = h.querySelector(".course-stage-caption, span, [role='button']");
+                if (innerSpan && innerSpan !== h) {{
+                  try {{ innerSpan.click(); }} catch (_) {{}}
+                }}
+                expandedAny = true;
+              }}
+            }}
+            if (expandedAny) {{
+              await sleep(350);
+            }}
+            target = findTarget();
+          }}
           if (!target) return;
 
+          // 递归找到整张小节卡片容器
           let card = target;
           for (let current = target, depth = 0; current && current !== document.body && depth < 8; current = current.parentElement, depth++) {{
             if (current.matches("a[href], [class*='card'], [class*='item'], [class*='course'], [class*='list-item'], [class*='row'], tr, li")) {{
@@ -1220,10 +1272,12 @@ fn course_click_script(title: &str, locator: &str) -> String {
 
           try {{ card.scrollIntoView({{ block: "center", behavior: "instant" }}); }} catch (_) {{}}
 
+          // 优先查找卡片内的操作按钮（扩展支持去考试/开始考试/参加考试/进入考试）
+          const actionRegex = /^(去学习|开始学习|继续学习|立即学习|学习中|进入学习|播放|去考试|开始考试|参加考试|进入考试|立即考试|重新考试|补考|查看试卷)$/;
           const actionBtn = Array.from(card.querySelectorAll("button, a, [role='button'], div, span")).find((el) => {{
             const t = clean(el.innerText);
-            return /^(去学习|开始学习|继续学习|立即学习|学习中|进入学习|播放)$/.test(t) ||
-                   el.matches("[class*='btn-primary'], [class*='study-btn'], [class*='play-btn'], [class*='start']");
+            return actionRegex.test(t) ||
+                   el.matches("[class*='btn-primary'], [class*='study-btn'], [class*='play-btn'], [class*='start'], [class*='exam-btn']");
           }});
 
           const anchor = card.matches("a[href]") ? card : card.querySelector("a[href]");
@@ -1239,24 +1293,46 @@ fn course_click_script(title: &str, locator: &str) -> String {
 
           clickTarget.querySelectorAll?.("a[target]").forEach((a) => a.removeAttribute("target"));
           if (clickTarget.matches?.("a[target]")) clickTarget.removeAttribute("target");
-          try {{
-            const rect = clickTarget.getBoundingClientRect();
-            const init = {{
-              bubbles: true,
-              cancelable: true,
-              view: window,
-              clientX: rect.left + rect.width / 2,
-              clientY: rect.top + rect.height / 2,
-              button: 0,
-            }};
-            clickTarget.dispatchEvent(new PointerEvent("pointerdown", init));
-            clickTarget.dispatchEvent(new MouseEvent("mousedown", init));
-            clickTarget.dispatchEvent(new PointerEvent("pointerup", init));
-            clickTarget.dispatchEvent(new MouseEvent("mouseup", init));
-            clickTarget.dispatchEvent(new MouseEvent("click", init));
-            if (typeof clickTarget.click === "function") clickTarget.click();
-          }} catch (_) {{
-            try {{ clickTarget.click(); }} catch (_) {{}}
+
+          const triggerClick = (el) => {{
+            if (!el) return;
+            try {{
+              const rect = el.getBoundingClientRect();
+              const init = {{
+                bubbles: true,
+                cancelable: true,
+                view: window,
+                clientX: rect.left + Math.max(5, Math.min(rect.width / 2, 25)),
+                clientY: rect.top + Math.max(5, Math.min(rect.height / 2, 25)),
+                button: 0,
+              }};
+              el.dispatchEvent(new PointerEvent("pointerdown", init));
+              el.dispatchEvent(new MouseEvent("mousedown", init));
+              el.dispatchEvent(new PointerEvent("pointerup", init));
+              el.dispatchEvent(new MouseEvent("mouseup", init));
+              el.dispatchEvent(new MouseEvent("click", init));
+              if (typeof el.click === "function") el.click();
+            }} catch (_) {{
+              try {{ el.click(); }} catch (_) {{}}
+            }}
+          }};
+
+          triggerClick(clickTarget);
+          if (card !== clickTarget) triggerClick(card);
+          if (target !== clickTarget && target !== card) triggerClick(target);
+
+          // 等待弹窗或主界面渲染，自动触发【开始考试】/【进入考试】/【参加考试】
+          await sleep(400);
+          const modalOrMain = document.querySelector(".ant-modal, .ant-modal-content, [role='dialog'], [class*='modal'], [class*='dialog'], [class*='drawer'], .mainContent___vvQdb, [class*='main-content'], .sectionContent___rouak");
+          if (modalOrMain) {{
+            const modalBtn = Array.from(modalOrMain.querySelectorAll("button, a, [role='button'], div, span")).find((el) => {{
+              const t = clean(el.innerText);
+              return /^(开始考试|进入考试|参加考试|立即考试|去考试|开始答题|进入答题)$/.test(t) ||
+                     el.matches(".ant-btn-primary, [class*='btn-primary'], [class*='primary-btn']");
+            }});
+            if (modalBtn) {{
+              triggerClick(modalBtn);
+            }}
           }}
 
           window.setTimeout(() => {{
@@ -1284,7 +1360,7 @@ fn capture_script(request_id: &str, provider: Provider) -> String {
   const originalTitle = document.title;
   window.__MTOOL_CAPTURE_REQUEST__ = requestId;
   document.title = "MTOOL_CAPTURE_START|" + requestId;
-  window.setTimeout(() => {
+  window.setTimeout(async () => {
     try {
       const provider = "__PROVIDER__";
     const clean = (value) => String(value || "").replace(/\s+/g, " ").trim();
@@ -1295,11 +1371,12 @@ fn capture_script(request_id: &str, provider: Provider) -> String {
       const style = window.getComputedStyle(element);
       return style.display !== "none" && style.visibility !== "hidden";
     };
+    const sleep = (ms) => new Promise((resolve) => window.setTimeout(resolve, ms));
     const cssPath = (element) => {
       if (!element || element === document.body) return "body";
       const parts = [];
       let current = element;
-      while (current && current !== document.body && parts.length < 7) {
+      while (current && current !== document.body && parts.length < 12) {
         if (current.id) { parts.unshift("#" + CSS.escape(current.id)); break; }
         let part = current.tagName.toLowerCase();
         const siblings = current.parentElement ? Array.from(current.parentElement.children)
@@ -1311,7 +1388,12 @@ fn capture_script(request_id: &str, provider: Provider) -> String {
       return parts.join(" > ");
     };
     const countMatches = (str, regex) => (String(str || "").match(regex) || []).length;
-    const isTagOrBadge = (s) => /^(知识|课程|考试|测验|测试|课件|文档|阅读材料|参考资料|视频|音频|图文|直播|ppt|pptx|pdf|word|excel|线下课|线上课|面授|面授课|公开课|问卷|调查问卷|评价表|满意度评价|调研|签到|打卡|活动|讨论|实操|练习|作业|大纲|目录|必修|选修|必修课|选修课|必修学分|选修学分|已完成|已学完|已学习|未学习|学习中|已考试|已通过|未通过|进行中|全部|展开|收起|去学习|立即学习|开始学习|重新学习|继续学习|查看|详情|上次学习|试看|播放中|\d{1,2})$/i.test(clean(s));
+    const isTagOrBadge = (s) => /^(知识|课程|考试|测验|测试|课件|文档|阅读材料|参考资料|视频|音频|图文|直播|ppt|pptx|pdf|word|excel|线下课|线上课|面授|面授课|公开课|问卷|调查问卷|评价表|满意度评价|调研|签到|打卡|活动|讨论|实操|练习|作业|大纲|目录|必修|选修|必修课|选修课|必修学分|选修学分|未完成|已完成|已学完|已学习|未学习|学习中|已考试|已通过|未通过|进行中|全部|展开|收起|去学习|立即学习|开始学习|重新学习|继续学习|查看|详情|上次学习|试看|播放中|需本人处理|\d{1,2})$/i.test(clean(s));
+    const isPureTagOrBadge = (s) => {
+      const t = clean(s);
+      if (!t) return true;
+      return /^(?:(?:知识|课程|考试|测验|测试|课件|文档|资料|手册|阅读材料|参考资料|视频|音频|图文|直播|ppt|pptx|pdf|word|excel|问卷|调查问卷|评价表|满意度评价|未完成|已完成|已学完|已学习|未学习|学习中|已考试|已通过|未通过|进行中|上次学习|试看|播放中|去学习|立即学习|开始学习|重新学习|继续学习|必修|选修|需本人处理)\s*)+$/i.test(t);
+    };
     const isMeta = (s) => /(学习时长|必修学分|选修学分|进度\s*[:：]?|学时\s*[:：]?\s*\d+|学分\s*[:：]?\s*\d+|起止时间|得分|正确率|总分|题数|时长\s*[:：]|考试时长|课程数|浏览人数|学习人数)/i.test(s);
     const isSiteOrUiTitle = (s) => /^(YS学堂|银商学堂|银联乐学|中国银联|乐学|首页|个人中心|学习中心|学习地图|考试中心|赛事中心|全部|培训管理|培训介绍|培训内容|专题介绍|课程大纲|乐学圈|我的学习|我的课程|课程详情|专题详情|全部课程|培训项目|学习任务|登录|加入自学|已加入)$/i.test(s);
 
@@ -1403,7 +1485,7 @@ fn capture_script(request_id: &str, provider: Provider) -> String {
 
       // “上次学习”仅标记最近访问的章节，已完成课程也会显示，不能据此否定完成图标。
       // 明确未完成状态仍需排除，避免把待学或学习中的课程识别为已完成。
-      if (/(学习中|播放中|未学习|未开始|待学习)/.test(combinedText) && !/(已完成|已学完|已考合格|100%)/.test(combinedText)) {
+      if (/(学习中|播放中|未学习|未开始|待学习)/.test(combinedText) && !/(已完成|已学完|已学习|已考合格|100%)/.test(combinedText)) {
         return false;
       }
 
@@ -1411,8 +1493,8 @@ fn capture_script(request_id: &str, provider: Provider) -> String {
       const rowProgress = combinedText.match(/进度\s*[:：]?\s*(\d+(?:\.\d+)?)%/);
       if (rowProgress) return Number(rowProgress[1]) >= 100;
 
-      // 1. 文本匹配与对勾字符
-      if (/(已完成|已学完|已考合格|考试合格|已通过|已考试通过|进度\s*[:：]?\s*100%)/.test(combinedText)) {
+      // 1. 文本匹配与对勾字符（包含“已学习”徽章）
+      if (/(已完成|已学完|已学习|已考合格|考试合格|已通过|已考试通过|进度\s*[:：]?\s*100%)/.test(combinedText)) {
         return true;
       }
       if (/[✓✔☑✅]/.test(combinedText)) {
@@ -1420,7 +1502,7 @@ fn capture_script(request_id: &str, provider: Provider) -> String {
       }
 
       // 2. 显式属性与无障碍标记
-      if (row.querySelector && row.querySelector("[title*='完成'], [title*='已学完'], [title*='已通过'], [aria-label*='完成'], [aria-label*='已学完'], [aria-label*='已通过']")) {
+      if (row.querySelector && row.querySelector("[title*='完成'], [title*='已学完'], [title*='已学习'], [title*='已通过'], [aria-label*='完成'], [aria-label*='已学完'], [aria-label*='已学习'], [aria-label*='已通过']")) {
         return true;
       }
 
@@ -1632,7 +1714,7 @@ fn capture_script(request_id: &str, provider: Provider) -> String {
         const value = data.courseId || data.contentId || data.knowledgeId || data.resourceId || data.id;
         if (value) return String(value);
       }
-      return url || locator || title;
+      return url || title || locator;
     };
 
     const sectionTitleFrom = (container) => {
@@ -1806,75 +1888,170 @@ fn capture_script(request_id: &str, provider: Provider) -> String {
     };
 
     // 1. 优先定位右侧章节目录面板（如量见·云课堂/银商学堂右侧章节列表面板）
-    const catalogPanel = Array.from(document.querySelectorAll("body *")).find((el) => {
-      if (!visible(el) || isNavOrHeader(el)) return false;
-      if (el.closest(".prism-player, [class*='player'], [class*='control-bar'], [class*='controls']")) return false;
-      const text = clean(el.innerText);
-      return /^(章节\s*\(?\d+\)?|目录|课程目录|章节列表)/.test(text) && text.length > 20 && text.length < 8000;
-    });
+    const findCatalogPanel = () => {
+      // 1. 寻找包含 "章节 (X)" 或 "目录" 或 "章节列表" 的所有容器
+      const candidates = Array.from(document.querySelectorAll("body *")).filter((el) => {
+        if (!visible(el) || isNavOrHeader(el)) return false;
+        if (el.closest(".prism-player, [class*='player'], [class*='control-bar'], [class*='controls']")) return false;
+        const text = clean(el.innerText);
+        const hasCatalogHeader = /(章节\s*\(?\d+\)?|课程目录|章节列表)/.test(text);
+        if (!hasCatalogHeader) return false;
+        if (text.length < 20 || text.length > 25000) return false;
+
+        // 该容器内部必须实际包含章节列表项（即使全折叠，也包含 .course-stage-caption、.course-content-item、.course-stage-index 等）
+        const hasKnownStage = !!el.querySelector(".course-stage-caption, .course-content-item, .course-stage-index, [class*='stage-caption'], [class*='content-item'], .ant-collapse-item, [class*='collapse-item']");
+        if (hasKnownStage) return true;
+
+        const childTexts = Array.from(el.querySelectorAll("div, li, span, p")).map((c) => clean(c.innerText));
+        const hasChapters = childTexts.some((t) => /^\d{1,2}\s*[^\s\d]/.test(t) || /^\d{1,2}\s+[^\s]/.test(t) || /^\d{1,2}\s*[.、-]/.test(t) || /^\d{1,2}$/.test(t));
+        return hasChapters;
+      });
+
+      if (candidates.length > 0) {
+        candidates.sort((a, b) => a.innerText.length - b.innerText.length);
+        return candidates[0];
+      }
+
+      // 2. 针对包含 .course-stage-caption 的容器
+      const stageContainers = Array.from(document.querySelectorAll("div, section, aside")).filter((el) => {
+        if (!visible(el) || isNavOrHeader(el)) return false;
+        if (el.closest(".prism-player, [class*='player'], [class*='control-bar']")) return false;
+        const stages = el.querySelectorAll(".course-stage-caption, [class*='stage-caption']");
+        return stages.length >= 2;
+      });
+      if (stageContainers.length > 0) {
+        stageContainers.sort((a, b) => a.innerText.length - b.innerText.length);
+        return stageContainers[0];
+      }
+
+      // 3. 回退：直接寻找包含多个章节项（如同时出现 01 和 02）的公共容器
+      const allContainers = Array.from(document.querySelectorAll("div, section, aside, ul")).filter((el) => {
+        if (!visible(el) || isNavOrHeader(el)) return false;
+        if (el.closest(".prism-player, [class*='player'], [class*='control-bar']")) return false;
+        const text = clean(el.innerText);
+        if (text.length < 30 || text.length > 25000) return false;
+        const children = Array.from(el.children);
+        const chapterChildren = children.filter((c) => {
+          const ct = clean(c.innerText);
+          return /^\d{1,2}\s*[^\s\d]/.test(ct) || /^\d{1,2}\s+[^\s]/.test(ct) || /^\d{1,2}\s*[.、-]/.test(ct) || c.querySelector(".course-stage-caption, [class*='stage-caption']");
+        });
+        return chapterChildren.length >= 2;
+      });
+
+      if (allContainers.length > 0) {
+        allContainers.sort((a, b) => a.innerText.length - b.innerText.length);
+        return allContainers[0];
+      }
+
+      return null;
+    };
 
     const parseCatalogCourses = (panel) => {
       if (!panel) return [];
 
-      // 1. 优先查找 ul > li 结构（播放器右侧目录的规范结构，确保每个小节都是完整的 li 行，包含图标、标题和时长）
-      const ulLis = Array.from(panel.querySelectorAll("ul > li")).filter((el) => {
-        if (!visible(el) || isNavOrHeader(el)) return false;
-        const text = clean(el.innerText);
-        if (text.length < 3 || text.length > 250) return false;
+      const nodeText = (el) => {
+        if (!el) return "";
+        const t = clean(el.innerText);
+        if (t) return t;
+        return clean(el.textContent);
+      };
+
+      // 提取规范章节条目：识别并提取所有子课程（播放课程条目），彻底排除大章节名称
+      const rawCandidates = Array.from(
+        panel.querySelectorAll("li, div, a, [class*='item'], [class*='chapter'], [class*='section'], [class*='node'], [class*='lesson']")
+      ).filter((el) => {
+        if (isNavOrHeader(el)) return false;
+        if (el.closest(".prism-player, [class*='player'], [class*='control-bar'], [class*='controls'], [class*='speed'], [class*='quality'], [class*='intro'], [class*='teacher']")) return false;
+        const text = nodeText(el);
+        if (text.length < 2 || text.length > 250) return false;
         if (/(倍速|标清|高清|超清|人看过|课程介绍|主讲老师|收起目录|展开目录|00:00)/.test(text)) return false;
         if (/^(章节\s*\(?\d+\)?|时长\s*[:：]|\d+\s*分钟$)/.test(text)) return false;
 
-        const hasDuration = /(\d+)\s*分钟/.test(text);
-        const hasChapterMarker = /^(导入|第\d+[期讲节章步回集课]|模块\d+|\d{1,2}[\s.-、])/.test(text);
-        const hasProgressOrStatus = /进度\s*[:：]?\s*\d+(?:\.\d+)?%/.test(text) || /(已完成|未学习|学习中|上次学习)/.test(text);
-        return hasDuration || hasChapterMarker || hasProgressOrStatus;
+        // 排除大章节折叠头部（大章节名称如 "01 如何使用企微链接..."，必须排除含有时长或在普通 li 列表中的真正小节）
+        const hasLessonDuration = /(\d+)\s*分钟|\d+:\d+/.test(text);
+        const isLiItem = el.tagName === "LI" || !!el.closest("li");
+        const isExplicitStageHeader = el.matches(
+          ".course-stage-caption, [class*='stage-caption'], .ant-collapse-header, [class*='collapse-header'], [class*='collapse-item__header'], [class*='chapter-header'], [class*='chapter_header'], [class*='stage__header']"
+        ) || !!el.closest(".course-stage-caption, [class*='stage-caption'], .ant-collapse-header, [class*='collapse-header']");
+
+        const isBigChapterHeader = isExplicitStageHeader || (!hasLessonDuration && !isLiItem && (/^\d{1,2}\s*[^\s\d.、-]/.test(text) || /^\d{1,2}\s+[^\s]/.test(text)) && !/^\d{1,2}\s*[.、-]/.test(text) && !/(视频|文档|课件|进度|已完成|未学习)/.test(text));
+        if (isBigChapterHeader) return false;
+
+        // 子小节特征：小节编号(如 01. / 1. / 01)、时长、小节类型徽章(视频/文档/课件等)、进度/状态，或者已知小节容器类名
+        const isKnownContentItem = el.matches(".course-content-item, [class*='content-item']") || !!el.closest(".course-content-item, [class*='content-item']");
+        const hasLessonNumber = /^\d{1,2}\s*[.、-]/.test(text) || /^第\d+[讲节课步]\s*/.test(text) || (/^\d{1,2}\s+[^\s]/.test(text) && text.length < 90);
+        const hasDuration = /(\d+)\s*分钟/.test(text) || /\d+:\d+/.test(text);
+        const hasBadge = /(视频|课件|文档|资料|手册|ppt|考试|测验)/i.test(text);
+        const hasProgressOrStatus = /进度\s*[:：]?\s*\d+(?:\.\d+)?%/.test(text) || /(已完成|未学习|学习中|上次学习|待播放|未开始|播放中)/.test(text) || (el.classList && (el.classList.contains("completed") || el.classList.contains("active")));
+        const hasPlayIcon = !!el.querySelector("svg, i, [class*='play'], [class*='video'], [class*='icon']");
+
+        return isKnownContentItem || (isLiItem && (hasLessonNumber || hasDuration)) || (hasLessonNumber && hasDuration) || hasLessonNumber || (hasDuration && (hasBadge || hasProgressOrStatus)) || (hasBadge && hasProgressOrStatus) || (hasLessonNumber && hasPlayIcon);
       });
 
-      let candidateItems = [];
-      if (ulLis.length >= 2) {
-        candidateItems = ulLis;
-      } else {
-        candidateItems = Array.from(
-          panel.querySelectorAll("li, div, a, [class*='item'], [class*='chapter'], [class*='section'], [class*='node']")
-        ).filter((el) => {
-          if (!visible(el) || isNavOrHeader(el)) return false;
-          if (el.closest(".prism-player, [class*='player'], [class*='control-bar'], [class*='controls'], [class*='speed'], [class*='quality'], [class*='intro'], [class*='teacher']")) return false;
-          const text = clean(el.innerText);
-          if (text.length < 3 || text.length > 150) return false;
-          if (/(倍速|标清|高清|超清|人看过|课程介绍|主讲老师|收起目录|展开目录|00:00)/.test(text)) return false;
-          if (/^(章节\s*\(?\d+\)?|时长\s*[:：]|\d+\s*分钟$)/.test(text)) return false;
+      // 过滤出真正代表一门小节的条目（排除大容器和小标签）
+      const singleLessonItems = rawCandidates.filter((el) => {
+        const t = nodeText(el);
+        const isPureMeta = /^(进度\s*[:：]?\s*\d+(?:\.\d+)?%|学习时长\s*[:：].*|时长\s*[:：].*|\d+\s*分钟|学时\s*[:：].*|学分\s*[:：].*)$/i.test(t);
+        if (isTagOrBadge(t) || isPureTagOrBadge(t) || isPureMeta || /^\d+\s*分钟$/.test(t)) return false;
+        const lines = t.split(/\n+/).map(clean).filter(Boolean);
+        const validLines = lines.filter((l) => l.length >= 2 && !isTagOrBadge(l) && !isPureTagOrBadge(l) && !isMeta(l) && !isPhaseOrSectionHeader(l));
+        if (validLines.length === 0) return false;
 
-          const hasDuration = /(\d+)\s*分钟/.test(text);
-          const hasChapterMarker = /^(导入|第\d+[期讲节章步回集课]|模块\d+|\d{1,2}[\s.-、])/.test(text);
-          const hasProgressOrStatus = /进度\s*[:：]?\s*\d+(?:\.\d+)?%/.test(text) || /(已完成|未学习|学习中|上次学习)/.test(text);
-          if (!hasDuration && !hasChapterMarker && !hasProgressOrStatus) return false;
-
-          // 排除包含多个不同章节大标题的祖先容器（如整个目录列表 ul/div）
-          const children = Array.from(el.children);
-          const subChapters = children.filter((c) => {
-            const ct = clean(c.innerText);
-            return /^(导入|第\d+[期讲节章步回集课]|模块\d+|\d{1,2}[\s.-、])/.test(ct);
-          });
-          if (subChapters.length > 1) return false;
-          return true;
+        // 排除包含多个不同小节的父容器（例如如果它的子元素里有多个编号开头的小节）
+        const children = Array.from(el.children);
+        const childLessons = children.filter((c) => {
+          const ct = nodeText(c);
+          return /^\d{1,2}\s*[.、-]/.test(ct) || (/^\d{1,2}\s+[^\s]/.test(ct) && ct.length < 80);
         });
-      }
+        if (childLessons.length > 1) return false;
+        return true;
+      });
+
+      // 当父子两层都满足单课条件时（例如外层行与内层标题 div），保留包含更多元信息（类型徽章/进度/时长/考试）的外层行
+      const leafCandidates = singleLessonItems.filter((item) => {
+        const parent = item.parentElement;
+        if (parent && singleLessonItems.includes(parent)) {
+          const pText = nodeText(parent);
+          const iText = nodeText(item);
+          // 若父容器文本并没有多包含其他小节，且包含类型、进度或考试，则保留父容器
+          if (/(视频|文档|课件|考试|测验|测试|进度|%|分钟|未完成)/.test(pText) && !/(视频|文档|课件|考试|测验|测试|进度|%|分钟|未完成)/.test(iText)) {
+            return false;
+          }
+        }
+        return true;
+      });
+
+      // 如果筛选出的列表较少，回退保留 leafOnly
+      const finalItems = leafCandidates.length > 0 ? leafCandidates : rawCandidates.filter((item) =>
+        !rawCandidates.some((other) => other !== item && item.contains(other))
+      );
 
       const catalogSeen = new Set();
       const parsed = [];
-      candidateItems.forEach((item) => {
-        const text = clean(item.innerText);
+      finalItems.forEach((item) => {
+        const text = nodeText(item);
+        const card = item.closest(".course-content-item, [class*='content-item'], li, tr, [class*='card'], [class*='item']") || item;
+        const cardText = clean(card.innerText || card.textContent || "");
+        const parentText = item.parentElement ? clean(item.parentElement.innerText || item.parentElement.textContent || "") : "";
+        const fullItemText = clean(text + " " + cardText + " " + parentText);
+
         const lines = text.split(/\n+/).map(clean).filter(Boolean);
         const validLines = lines.filter((l) =>
           l.length >= 2 &&
           !isTagOrBadge(l) &&
+          !isPureTagOrBadge(l) &&
           !isMeta(l) &&
           !/^\d+\s*分钟$/.test(l) &&
-          !/^(上次学习|已完成|未开始|播放中|试看|\d+:\d+)$/.test(l)
+          !/^(上次学习|已完成|未完成|未开始|播放中|试看|\d+:\d+)$/.test(l)
         );
         validLines.sort((a, b) => scoreTitleCandidate(b) - scoreTitleCandidate(a) || b.length - a.length);
         const rawTitle = validLines[0] || lines[0] || "";
-        const title = rawTitle.replace(/\s*\d+\s*分钟.*$/, "").replace(/\s*上次学习.*$/, "").trim();
+        let title = rawTitle
+          .replace(/\s*\d+\s*分钟.*$/, "")
+          .replace(/\s*上次学习.*$/, "");
+        // 彻底清洗标题末尾拼接的类型标签与状态词（如 "考试 未完成"、"需本人处理"、"未完成"、"视频" 等）
+        title = title.replace(/(?:\s+(?:视频|课件|文档|资料|手册|ppt课件|ppt|考试|测验|测试|问卷|未完成|已完成|未学习|学习中|已考试|合格|不合格|已通过|未通过|需本人处理|去学习|立即学习|开始学习|待播放|播放中))+$/i, "").trim();
+
         if (!title || title.length < 2 || isInvalidTopicTitle(title) || isPhaseOrSectionHeader(title) || catalogSeen.has(title)) return;
         catalogSeen.add(title);
 
@@ -1882,22 +2059,38 @@ fn capture_script(request_id: &str, provider: Provider) -> String {
         const url = linkFrom(item);
         const externalId = externalIdFrom(item, url, locator, title);
 
-        let durMatch = text.match(/(\d+)\s*分钟/);
-        if (!durMatch && item.parentElement) {
-          durMatch = clean(item.parentElement.innerText).match(/(\d+)\s*分钟/);
-        }
+        let durMatch = fullItemText.match(/学习时长\s*[:：]?\s*(\d+)\s*分钟/) || fullItemText.match(/(\d+)\s*分钟/) || fullItemText.match(/学时\s*[:：]?\s*(\d+)/) || fullItemText.match(/时长\s*[:：]?\s*(\d+)/);
         let durationSeconds = 0;
         if (durMatch) {
-          durationSeconds = (Number(durMatch[1]) || 0) * 60;
+          const val = Number(durMatch[1]) || 0;
+          if (/学时/.test(durMatch[0])) {
+            durationSeconds = val * 45 * 60;
+          } else {
+            durationSeconds = val * 60;
+          }
         }
 
-        const progressMatch = text.match(/进度\s*[:：]?\s*(\d+(?:\.\d+)?)%/);
-        const hasExplicitIncomplete = /(学习中|播放中|未学习|未开始|待学习)/.test(text);
-        const completed = !hasExplicitIncomplete && (isElementCompleted(item) || (progressMatch ? Number(progressMatch[1]) >= 100 : false));
-        const progress = completed ? 100 : (progressMatch ? Number(progressMatch[1]) : 0);
+        const progressMatch = fullItemText.match(/进度\s*[:：]?\s*(\d+(?:\.\d+)?)%/);
+        const hasExplicitIncomplete = /(学习中|播放中|未学习|未开始|待学习)/.test(fullItemText) && !/(已完成|已学完|已学习|已考合格|100%)/.test(fullItemText);
+        const isProgress100 = progressMatch ? Number(progressMatch[1]) >= 100 : false;
+        const completed = isProgress100 || (!hasExplicitIncomplete && (
+          isElementCompleted(card) ||
+          isElementCompleted(item) ||
+          /(已完成|已学完|已学习|已考合格|已通过)/.test(fullItemText)
+        ));
+        let progress = completed ? 100 : (progressMatch ? Number(progressMatch[1]) : 0);
+        if (progressMatch) {
+          const pVal = Number(progressMatch[1]) || 0;
+          if (pVal >= 100) {
+            progress = 100;
+          } else if (!completed) {
+            progress = pVal;
+          }
+        }
 
         const itemKind = detectCourseKind(title, text, durationSeconds, item);
 
+        // 不再显示章节名称二级目录，直接平铺在专题下方
         parsed.push({
           externalId,
           title,
@@ -1914,70 +2107,202 @@ fn capture_script(request_id: &str, provider: Provider) -> String {
     };
 
     let courses = [];
-    const catalogCourses = parseCatalogCourses(catalogPanel);
+    const catalogPanel = findCatalogPanel();
+    const searchRoot = catalogPanel || document.body;
+
+    const isBigChapterTitle = (text) => {
+      const t = clean(text);
+      if (t.length < 3 || t.length > 90) return false;
+      if (/(进度|已完成|未学习|学习中|\d+:\d+|\d+\s*分钟|原创作者|学习人数|课程介绍|讲师简介|评价)/.test(t)) return false;
+      if (/^\d{1,2}\s*[.、-]/.test(t) || /^第\d+[讲节课步]\s*/.test(t)) return false;
+      return /^\d{1,2}\s*[^\s\d.、-]/.test(t) || /^\d{1,2}\s+[^\s]/.test(t) || /^第[0-9一二三四五六七八九十]+[章节部分篇]\s*/.test(t);
+    };
+
+    const getChapterHeaders = (root) => {
+      const searchTargets = [root, document.body].filter(Boolean);
+      for (const target of searchTargets) {
+        const byClass = Array.from(
+          target.querySelectorAll(
+            ".course-stage-caption, [class*='stage-caption'], .ant-collapse-header, [class*='collapse-header'], [class*='collapse-item__header'], [class*='chapter-header'], [class*='chapter_header'], [class*='stage__header']"
+          )
+        ).filter((el) => {
+          if (!visible(el) || isNavOrHeader(el)) return false;
+          if (el.closest(".prism-player, [class*='player'], [class*='control-bar'], [class*='controls']")) return false;
+          // 排除含有具体小节时长或属于 li 列表的普通课程条目，绝不把普通小节误认作大章节头部
+          const t = clean(el.innerText || el.textContent);
+          if (/(\d+)\s*分钟|\d+:\d+/.test(t) || el.tagName === "LI" || !!el.closest("li")) return false;
+          return true;
+        });
+        if (byClass.length > 0) return byClass;
+      }
+      return [];
+    };
+
+    let allCatalogCourses = [];
+    const seenCatalogTitles = new Set();
+    const addCatalogCourses = (list) => {
+      if (!Array.isArray(list)) return;
+      for (const item of list) {
+        if (!item || !item.title) continue;
+        const existing = allCatalogCourses.find((c) => c.title === item.title);
+        if (!existing) {
+          seenCatalogTitles.add(item.title);
+          allCatalogCourses.push(item);
+        } else {
+          // 如果后续解析得到了更高的进度或完成状态，进行更新
+          if (item.completed && !existing.completed) {
+            existing.completed = true;
+            existing.progress = 100;
+          } else if (item.progress > existing.progress) {
+            existing.progress = item.progress;
+          }
+          if (item.durationSeconds > 0 && existing.durationSeconds === 0) {
+            existing.durationSeconds = item.durationSeconds;
+          }
+        }
+      }
+    };
+
+    // 1. 先收集初始状态下已渲染/已展开的课程条目（大多数普通课程直接在此处完整获取全部小节！）
+    addCatalogCourses(parseCatalogCourses(searchRoot));
+
+    // 2. 只有在页面上明确存在“处于折叠/收起状态的大章节”时，才需要进行按需点击展开！
+    // 普通课程（所有章节直接展示）无折叠大章节，跳过点击逻辑，零额外操作
+    const chapterHeaders = getChapterHeaders(searchRoot);
+    const hasCollapsedChapters = chapterHeaders.some((h) => {
+      const parent = h.closest("[class*='stage'], [class*='chapter'], .ant-collapse-item, [class*='collapse-item']") || h.parentElement;
+      const hasContentItems = !!parent && !!parent.querySelector(".course-content-item, [class*='content-item']");
+      const arrow = h.querySelector(".anticon, svg, [class*='arrow'], [class*='icon']");
+      const arrowStyle = (arrow ? arrow.getAttribute("style") || "" : "") + (arrow && arrow.parentElement ? arrow.parentElement.getAttribute("style") || "" : "");
+      const isRotated = /rotate\(-?90deg\)/i.test(arrowStyle);
+      const isAriaClosed = h.getAttribute("aria-expanded") === "false";
+      return isRotated || isAriaClosed || !hasContentItems;
+    });
+
+    if (chapterHeaders.length > 0 && hasCollapsedChapters) {
+      for (let i = 0; i < chapterHeaders.length; i++) {
+        const h = chapterHeaders[i];
+        try {
+          const parent = h.closest("[class*='stage'], [class*='chapter'], .ant-collapse-item, [class*='collapse-item']") || h.parentElement;
+          const hasContentItems = !!parent && !!parent.querySelector(".course-content-item, [class*='content-item']");
+
+          // 检查折叠指示箭头
+          const arrow = h.querySelector(".anticon, svg, [class*='arrow'], [class*='icon']");
+          const arrowStyle = (arrow ? arrow.getAttribute("style") || "" : "") + (arrow && arrow.parentElement ? arrow.parentElement.getAttribute("style") || "" : "");
+          // 在该平台/Ant Design图标中，折叠时通常带有 rotate(-90deg)
+          const isRotated = /rotate\(-?90deg\)/i.test(arrowStyle);
+
+          const isAriaOpen = h.getAttribute("aria-expanded") === "true";
+          const hasActiveCls = parent && (parent.classList.contains("ant-collapse-item-active") || parent.classList.contains("is-active") || parent.classList.contains("active") || parent.classList.contains("expanded") || parent.classList.contains("open"));
+          const isHeaderActive = h.classList.contains("active") || h.classList.contains("open") || h.classList.contains("is-active");
+
+          // 仅在明确收拢时才点击展开
+          const isCollapsed = !hasContentItems || isRotated || (!isAriaOpen && !hasActiveCls && !isHeaderActive);
+
+          if (isCollapsed) {
+            try { h.scrollIntoView({ block: "nearest", behavior: "instant" }); } catch (_) {}
+
+            // 触发点击展开
+            h.click();
+            try { h.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, view: window })); } catch (_) {}
+
+            if (arrow) {
+              try { arrow.click(); } catch (_) {}
+              try { arrow.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, view: window })); } catch (_) {}
+            }
+            const innerSpan = h.querySelector(".course-stage-index, span, [role='button']");
+            if (innerSpan && innerSpan !== h) {
+              try { innerSpan.click(); } catch (_) {}
+            }
+
+            // 等待 React 异步渲染子小节
+            await sleep(350);
+            let waitTries = 0;
+            while (waitTries < 4 && parent && !parent.querySelector(".course-content-item, [class*='content-item']")) {
+              await sleep(150);
+              waitTries++;
+            }
+          }
+
+          // 展开后，从当前章节父容器、searchRoot 以及 document.body 中提取刚渲染出的子课程
+          if (parent) {
+            addCatalogCourses(parseCatalogCourses(parent));
+          }
+          addCatalogCourses(parseCatalogCourses(searchRoot));
+          addCatalogCourses(parseCatalogCourses(document.body));
+        } catch (_) {}
+      }
+    }
+
+    const catalogCourses = allCatalogCourses;
     if (catalogCourses.length > 0) {
       courses = catalogCourses;
     } else {
-      // 2. 常规专题页基于 markers 扫描
-      const markers = Array.from(document.querySelectorAll("body *")).filter((element) => {
-        if (!visible(element)) return false;
-        const text = clean(element.innerText);
-        if (provider === "merchant") {
-          return /^(已完成|已考试|未学习|学习中|去学习|立即学习)$/.test(text) || /^进度\s*[:：]?\s*\d+(?:\.\d+)?%$/.test(text);
-        }
-        return /^(未学习|已学习|学习中)$/.test(text);
-      });
-
-      const seenElements = new Set();
-      const seenTitles = new Set();
-      markers.forEach((marker) => {
-        const container = courseContainer(marker);
-        if (!container || seenElements.has(container)) return;
-        seenElements.add(container);
-
-        const title = titleFrom(container);
-        if (!title || isTagOrBadge(title) || isMeta(title) || isPhaseOrSectionHeader(title) || seenTitles.has(title)) return;
-        seenTitles.add(title);
-
-        const text = clean(container.innerText);
-        const locator = cssPath(container);
-        const url = linkFrom(container);
-        const externalId = externalIdFrom(container, url, locator, title);
-
-        const progressMatch = text.match(/进度\s*[:：]?\s*(\d+(?:\.\d+)?)%/);
-        const hasExplicitIncomplete = /(学习中|播放中|未学习|未开始|待学习)/.test(text);
-        const completed = !hasExplicitIncomplete && (isElementCompleted(container) || (progressMatch ? Number(progressMatch[1]) >= 100 : false));
-        const progress = completed ? 100 : (progressMatch ? Number(progressMatch[1]) : 0);
-
-        const durationMatch = text.match(/学习时长\s*[:：]?\s*(\d+)\s*分钟/) || text.match(/学时\s*[:：]?\s*(\d+)/) || text.match(/时长\s*[:：]?\s*(\d+)/);
-        let durationSeconds = 0;
-        if (durationMatch) {
-          const val = Number(durationMatch[1]) || 0;
-          if (/学时/.test(durationMatch[0])) {
-            durationSeconds = val * 45 * 60;
-          } else {
-            durationSeconds = val * 60;
+      // 2. 如果特定 panel 没命中，优先在全局 document.body 搜索章节目录！
+      const bodyCatalog = parseCatalogCourses(document.body);
+      if (bodyCatalog.length > 0) {
+        courses = bodyCatalog;
+      } else {
+        // 3. 只有当全局均未匹配到任何章节小节时，才回退至常规专题页基于 markers 扫描
+        const markers = Array.from(document.querySelectorAll("body *")).filter((element) => {
+          if (!visible(element)) return false;
+          const text = clean(element.innerText);
+          if (provider === "merchant") {
+            return /^(已完成|已考试|未学习|学习中|去学习|立即学习)$/.test(text) || /^进度\s*[:：]?\s*\d+(?:\.\d+)?%$/.test(text);
           }
-        }
-
-        const kind = detectCourseKind(title, text, durationSeconds, container);
-
-        courses.push({
-          externalId,
-          title,
-          url,
-          locator,
-          sectionTitle: sectionTitleFrom(container),
-          kind,
-          durationSeconds,
-          progress,
-          completed
+          return /^(未学习|已学习|学习中)$/.test(text);
         });
-      });
 
-      // 3. 若 markers 依然未匹配到，回退在全局 body 中搜索章节目录列表
-      if (courses.length === 0) {
-        courses = parseCatalogCourses(document.body);
+        const seenElements = new Set();
+        const seenTitles = new Set();
+        markers.forEach((marker) => {
+          const container = courseContainer(marker);
+          if (!container || seenElements.has(container)) return;
+          seenElements.add(container);
+
+          const title = titleFrom(container);
+          if (!title || isTagOrBadge(title) || isMeta(title) || isPhaseOrSectionHeader(title) || seenTitles.has(title)) return;
+          seenTitles.add(title);
+
+          const text = clean(container.innerText);
+          const locator = cssPath(container);
+          const url = linkFrom(container);
+          const externalId = externalIdFrom(container, url, locator, title);
+
+          const progressMatch = text.match(/进度\s*[:：]?\s*(\d+(?:\.\d+)?)%/);
+          const hasExplicitIncomplete = /(未学习|未开始|待学习)/.test(text) || (/(学习中|播放中)/.test(text) && !/(已完成|已学完|已学习|已考合格|100%)/.test(text));
+          const completed = !hasExplicitIncomplete && (
+            isElementCompleted(container) ||
+            (progressMatch ? Number(progressMatch[1]) >= 100 : false) ||
+            /(已完成|已学完|已学习|已考合格|已通过)/.test(text)
+          );
+          const progress = completed ? 100 : (progressMatch ? Number(progressMatch[1]) : 0);
+
+          const durationMatch = text.match(/学习时长\s*[:：]?\s*(\d+)\s*分钟/) || text.match(/学时\s*[:：]?\s*(\d+)/) || text.match(/时长\s*[:：]?\s*(\d+)/);
+          let durationSeconds = 0;
+          if (durationMatch) {
+            const val = Number(durationMatch[1]) || 0;
+            if (/学时/.test(durationMatch[0])) {
+              durationSeconds = val * 45 * 60;
+            } else {
+              durationSeconds = val * 60;
+            }
+          }
+
+          const kind = detectCourseKind(title, text, durationSeconds, container);
+
+          courses.push({
+            externalId,
+            title,
+            url,
+            locator,
+            sectionTitle: sectionTitleFrom(container),
+            kind,
+            durationSeconds,
+            progress,
+            completed
+          });
+        });
       }
     }
 
@@ -2000,7 +2325,17 @@ fn capture_script(request_id: &str, provider: Provider) -> String {
       isTopicExpired = true;
     }
 
-    if (isTopicExpired) {
+    const countMatch = bodyText.match(/完成任务数\s*(\d+)\s*\/\s*(\d+)/) || bodyText.match(/完成标准\s*(\d+)\s*\/\s*(\d+)/);
+    const topicProgressMatch = bodyText.match(/(?:学习|章节)进度\s*[:：]?\s*(\d+(?:\.\d+)?)%/);
+    const isAllCompletedByStats = !!(
+      countMatch &&
+      Number(countMatch[1]) > 0 &&
+      Number(countMatch[1]) === Number(countMatch[2]) &&
+      courses.length === Number(countMatch[2]) &&
+      (topicProgressMatch ? Number(topicProgressMatch[1]) >= 100 : true)
+    );
+
+    if (isTopicExpired || isAllCompletedByStats) {
       courses.forEach((c) => {
         c.completed = true;
         c.progress = 100;
@@ -2008,14 +2343,12 @@ fn capture_script(request_id: &str, provider: Provider) -> String {
     }
 
     const topicTitle = findTopicTitle();
-    const topicProgressMatch = bodyText.match(/学习进度\s*[:：]?\s*(\d+(?:\.\d+)?)%/);
-    const countMatch = bodyText.match(/完成任务数\s*(\d+)\s*\/\s*(\d+)/) || bodyText.match(/完成标准\s*(\d+)\s*\/\s*(\d+)/);
-    const completedCount = isTopicExpired ? courses.length : (countMatch ? Number(countMatch[1]) : courses.filter((item) => item.completed).length);
+    const completedCount = isTopicExpired || isAllCompletedByStats ? courses.length : (countMatch ? Number(countMatch[1]) : courses.filter((item) => item.completed).length);
     const totalCount = countMatch ? Number(countMatch[2]) : courses.length;
     const payload = {
       title: String(topicTitle || "未知专题"),
       url: location.href,
-      progress: isTopicExpired ? 100 : (topicProgressMatch ? Number(topicProgressMatch[1]) : (totalCount ? completedCount / totalCount * 100 : 0)),
+      progress: isTopicExpired || isAllCompletedByStats ? 100 : (topicProgressMatch ? Number(topicProgressMatch[1]) : (totalCount ? completedCount / totalCount * 100 : 0)),
       totalCount,
       completedCount,
       courses
@@ -2622,6 +2955,20 @@ fn import_capture(
             .execute(&sql, rusqlite::params_from_iter(params_vec))
             .map_err(|error| error.to_string())?;
     }
+    transaction
+        .execute(
+            "UPDATE video_topics SET 
+             completed_count = (SELECT COUNT(*) FROM video_courses WHERE topic_id=?1 AND status='completed'),
+             total_count = (SELECT COUNT(*) FROM video_courses WHERE topic_id=?1),
+             progress = CASE
+               WHEN (SELECT COUNT(*) FROM video_courses WHERE topic_id=?1 AND status='completed') = (SELECT COUNT(*) FROM video_courses WHERE topic_id=?1) AND (SELECT COUNT(*) FROM video_courses WHERE topic_id=?1) > 0 THEN 100.0
+               WHEN progress > 0.0 THEN progress
+               ELSE ROUND((CAST((SELECT COUNT(*) FROM video_courses WHERE topic_id=?1 AND status='completed') AS REAL) / MAX(1, (SELECT COUNT(*) FROM video_courses WHERE topic_id=?1))) * 100.0, 1)
+             END
+             WHERE id=?1",
+            params![topic_id],
+        )
+        .map_err(|error| error.to_string())?;
     transaction.commit().map_err(|error| error.to_string())?;
 
     let mut runtime = state
@@ -3689,12 +4036,23 @@ pub async fn open_video_course(
         } else {
             let topic_url = topic_url(state.db_path.as_ref(), &course.topic_id)?;
             if let Ok(url) = topic_url.parse::<tauri::Url>() {
-                let _ = window.navigate(url);
+                let current_url_str = window.url().ok().map(|u| u.to_string()).unwrap_or_default();
+                let topic_path = topic_url.split('?').next().unwrap_or(&topic_url);
+                let current_path = current_url_str.split('?').next().unwrap_or(&current_url_str);
+                let already_at_topic = !current_path.is_empty() && current_path == topic_path;
+                if !already_at_topic {
+                    let _ = window.navigate(url);
+                }
                 let click_script = course_click_script(&course.title, &course.locator);
                 let click_window = window.clone();
                 let click_provider = course.provider;
+                let delays = if already_at_topic {
+                    vec![200, 700, 1800, 4000]
+                } else {
+                    vec![1200, 2500, 4500, 8000]
+                };
                 tauri::async_runtime::spawn(async move {
-                    for delay in [1200, 2500, 4500, 8000] {
+                    for delay in delays {
                         tokio::time::sleep(Duration::from_millis(delay)).await;
                         let current_url = click_window.url().ok();
                         if current_url.as_ref().is_some_and(|current| {
@@ -4322,6 +4680,25 @@ mod tests {
     }
 
     #[test]
+    fn capture_script_accurately_extracts_sub_courses_and_filters_big_chapter_headers() {
+        let script = capture_script("test_req", Provider::Merchant);
+        assert!(script.contains("isBigChapterHeader"));
+        assert!(script.contains("singleLessonItems"));
+        assert!(script.contains("findCatalogPanel"));
+        assert!(script.contains("hasLessonNumber"));
+        assert!(script.contains("sectionTitle: \"\""));
+        assert!(script.contains(".course-stage-caption"));
+        assert!(script.contains(".course-content-item"));
+        assert!(script.contains("rotate\\(-?90deg\\)"));
+    }
+
+    #[test]
+    fn test_scripts_have_no_duplicate_const_declarations() {
+        let script = capture_script("test_req", Provider::Merchant);
+        assert_eq!(script.matches("const catalogPanel").count(), 1);
+    }
+
+    #[test]
     fn browser_nav_script_suppresses_autoplay_safely() {
         let script = browser_nav_script(Provider::Merchant);
         assert!(script.contains("__MTOOL_BROWSER_NAV_SHIELD__"));
@@ -4368,6 +4745,30 @@ mod tests {
         let script = capture_script("test_req", Provider::Merchant);
         assert!(script.contains("isPhaseOrSectionHeader"));
         assert!(script.contains("if (isPhaseOrSectionHeader(c.title)) return false;"));
+    }
+
+    #[test]
+    fn capture_script_eliminates_duplicate_exam_entries_and_cleans_titles() {
+        let script = capture_script("test_req", Provider::Merchant);
+        assert!(script.contains("isPureTagOrBadge"));
+        assert!(script.contains("未完成"));
+        assert!(script.contains("需本人处理"));
+        assert!(script.contains("ppt课件|ppt|考试|测验|测试|问卷|未完成|已完成"));
+    }
+
+    #[test]
+    fn course_click_script_supports_async_modal_and_exam_buttons() {
+        let script = course_click_script("01. 六步赢单考试", "#saved-course");
+        assert!(script.contains("去考试|开始考试|参加考试|进入考试"));
+        assert!(script.contains("ant-modal"));
+        assert!(script.contains("baseTitle"));
+    }
+
+    #[test]
+    fn capture_script_recognizes_ulearn_completed_badge() {
+        let script = capture_script("test_req", Provider::Ulearn);
+        assert!(script.contains("已完成|已学完|已学习"));
+        assert!(script.contains("isAllCompletedByStats"));
     }
 
     #[test]
