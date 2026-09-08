@@ -1180,7 +1180,103 @@ fn update_media_script(speed: f64, muted: bool, auto_play: bool) -> String {
     )
 }
 
-fn course_click_script(title: &str, locator: &str) -> String {
+fn ulearn_course_click_script(title: &str, locator: &str) -> String {
+    let title_json = serde_json::to_string(title).unwrap_or_default();
+    let locator_json = serde_json::to_string(locator).unwrap_or_default();
+    format!(
+        r#"(async () => {{
+          const targetTitle = {title_json};
+          const targetLocator = {locator_json};
+          const clean = (value) => String(value || "").replace(/\s+/g, " ").trim();
+
+          // 拦截 window.open 防止弹多余新窗口
+          try {{
+            window.open = (url) => {{
+              const next = clean(url);
+              if (next && next !== "about:blank" && !/^javascript:/i.test(next)) {{
+                try {{ window.location.assign(new URL(next, window.location.href).href); }} catch (_) {{}}
+              }}
+              try {{
+                window.location = {{
+                  set href(val) {{
+                    try {{ window.location.assign(new URL(val, window.location.href).href); }} catch (_) {{}}
+                  }}
+                }};
+              }} catch (_) {{}}
+              return window;
+            }};
+          }} catch (_) {{}}
+
+          const cleanTarget = clean(targetTitle);
+          const findTarget = () => {{
+            const byLocator = targetLocator ? document.querySelector(targetLocator) : null;
+            const all = Array.from(document.querySelectorAll("body *"));
+            const byTitle = all.find((el) => clean(el.innerText) === cleanTarget) ||
+              all.find((el) => {{
+                const text = clean(el.innerText);
+                return text.length <= cleanTarget.length + 8 && text.includes(cleanTarget);
+              }});
+            return byLocator || byTitle;
+          }};
+
+          let target = findTarget();
+          if (!target) return;
+
+          // 找到卡片或链接
+          let card = target;
+          for (let current = target, depth = 0; current && current !== document.body && depth < 6; current = current.parentElement, depth++) {{
+            if (current.matches("a[href], [class*='card'], [class*='item'], [class*='course']")) {{
+              card = current;
+              break;
+            }}
+          }}
+
+          try {{ card.scrollIntoView({{ block: "center", behavior: "instant" }}); }} catch (_) {{}}
+
+          const anchor = card.matches("a[href]") ? card : card.querySelector("a[href]");
+          const clickTarget = anchor || (card.matches("button, [role='button']") ? card : null) || target;
+
+          if (clickTarget.tagName === "A" && clickTarget.getAttribute("href") && !/^javascript:/i.test(clickTarget.getAttribute("href"))) {{
+            clickTarget.removeAttribute("target");
+            try {{
+              window.location.assign(new URL(clickTarget.getAttribute("href"), window.location.href).href);
+              return;
+            }} catch (_) {{}}
+          }}
+
+          clickTarget.querySelectorAll?.("a[target]").forEach((a) => a.removeAttribute("target"));
+          if (clickTarget.matches?.("a[target]")) clickTarget.removeAttribute("target");
+
+          const triggerClick = (el) => {{
+            if (!el) return;
+            try {{
+              const rect = el.getBoundingClientRect();
+              const init = {{
+                bubbles: true,
+                cancelable: true,
+                view: window,
+                clientX: rect.left + Math.max(5, Math.min(rect.width / 2, 25)),
+                clientY: rect.top + Math.max(5, Math.min(rect.height / 2, 25)),
+                button: 0,
+              }};
+              el.dispatchEvent(new PointerEvent("pointerdown", init));
+              el.dispatchEvent(new MouseEvent("mousedown", init));
+              el.dispatchEvent(new PointerEvent("pointerup", init));
+              el.dispatchEvent(new MouseEvent("mouseup", init));
+              el.dispatchEvent(new MouseEvent("click", init));
+              if (typeof el.click === "function") el.click();
+            }} catch (_) {{
+              try {{ el.click(); }} catch (_) {{}}
+            }}
+          }};
+
+          triggerClick(clickTarget);
+          if (card !== clickTarget) triggerClick(card);
+        }})();"#
+    )
+}
+
+fn merchant_course_click_script(title: &str, locator: &str) -> String {
     let title_json = serde_json::to_string(title).unwrap_or_default();
     let locator_json = serde_json::to_string(locator).unwrap_or_default();
     format!(
@@ -1353,7 +1449,303 @@ fn course_click_script(title: &str, locator: &str) -> String {
     )
 }
 
-fn capture_script(request_id: &str, provider: Provider) -> String {
+fn course_click_script(title: &str, locator: &str, provider: Provider) -> String {
+    match provider {
+        Provider::Ulearn => ulearn_course_click_script(title, locator),
+        Provider::Merchant => merchant_course_click_script(title, locator),
+    }
+}
+
+fn ulearn_capture_script(request_id: &str) -> String {
+    const TEMPLATE: &str = r##"
+(() => {
+  const requestId = "__REQUEST_ID__";
+  const originalTitle = document.title;
+  window.__MTOOL_CAPTURE_REQUEST__ = requestId;
+  document.title = "MTOOL_CAPTURE_START|" + requestId;
+  window.setTimeout(async () => {
+    try {
+      const clean = (value) => String(value || "").replace(/\s+/g, " ").trim();
+      const ownText = (element) => clean(Array.from(element.childNodes || [])
+        .filter((node) => node.nodeType === Node.TEXT_NODE).map((node) => node.textContent).join(" "));
+      const visible = (element) => {
+        if (!element) return false;
+        const style = window.getComputedStyle(element);
+        return style.display !== "none" && style.visibility !== "hidden";
+      };
+      const cssPath = (element) => {
+        if (!element || element === document.body) return "body";
+        const parts = [];
+        let current = element;
+        while (current && current !== document.body && parts.length < 12) {
+          if (current.id) { parts.unshift("#" + CSS.escape(current.id)); break; }
+          let part = current.tagName.toLowerCase();
+          const siblings = current.parentElement ? Array.from(current.parentElement.children)
+            .filter((item) => item.tagName === current.tagName) : [];
+          if (siblings.length > 1) part += ":nth-of-type(" + (siblings.indexOf(current) + 1) + ")";
+          parts.unshift(part);
+          current = current.parentElement;
+        }
+        return parts.join(" > ");
+      };
+
+      const isNavOrHeader = (el) => {
+        let cur = el;
+        for (let i = 0; cur && cur !== document.body && i < 6; i++, cur = cur.parentElement) {
+          if (cur.tagName === "HEADER" || cur.tagName === "NAV") return true;
+          const c = String(cur.className || "").toLowerCase();
+          if (c.includes("header") || c.includes("navbar") || c.includes("nav-bar") || c.includes("bread") || c.includes("menu")) return true;
+        }
+        return false;
+      };
+
+      const isInvalidTopicTitle = (s) => {
+        const t = clean(s);
+        if (!t || t.length < 2) return true;
+        return /^(银联乐学|中国银联|乐学|首页|个人中心|学习中心|学习地图|考试中心|赛事中心|全部|课程大纲|专题介绍|乐学圈|我的学习|全部课程|返回|上一步|加入自学|已加入)$/.test(t) ||
+               /^(起止时间|课程数|浏览人数|学习人数|完成标准|章节进度|学习进度)/.test(t);
+      };
+
+      const findTopicTitle = () => {
+        // 1. 优先通过页面信息头部特征锚点精准定位大标题
+        const metaAnchor = Array.from(document.querySelectorAll("body *")).find((el) => {
+          if (!visible(el) || isNavOrHeader(el)) return false;
+          const t = clean(el.innerText);
+          if (t.length < 2 || t.length > 50) return false;
+          return /^(起止时间|学习人数|学习进度|完成任务数|完成标准|章节进度|课程数|浏览人数)\s*[:：]?/.test(t);
+        });
+        if (metaAnchor) {
+          let card = metaAnchor.parentElement;
+          for (let d = 0; card && card !== document.body && d < 6; d++, card = card.parentElement) {
+            const titleCandidates = Array.from(card.querySelectorAll("h1, h2, h3, h4, [class*='title'], [class*='name']"))
+              .filter((el) => {
+                if (!visible(el) || isNavOrHeader(el)) return false;
+                const text = clean(el.innerText);
+                return text.length >= 2 && text.length <= 80 && !isInvalidTopicTitle(text);
+              })
+              .map((el) => clean(el.innerText));
+            if (titleCandidates.length > 0) {
+              return titleCandidates[0];
+            }
+          }
+        }
+
+        // 2. 银联乐学的“课程大纲”使用 chapterTitle 标识专题名
+        const chapterTitleElements = Array.from(document.querySelectorAll(".chapterTitle"));
+        for (const element of chapterTitleElements) {
+          if (!visible(element)) continue;
+          const text = clean(element.getAttribute("title") || element.innerText);
+          if (!isInvalidTopicTitle(text)) return text;
+        }
+
+        // 3. 页面标题清洗
+        let docTitle = clean(originalTitle);
+        docTitle = docTitle
+          .replace(/^MTOOL\s*·\s*[^·]+\s*·\s*/i, "")
+          .replace(/\s*[-_|\s]\s*(银联乐学|中国银联|培训平台|专题详情|课程详情|学习端|播放端).*$/i, "")
+          .trim();
+        if (docTitle && !isInvalidTopicTitle(docTitle) && docTitle.length >= 2) {
+          return docTitle;
+        }
+
+        const topicMetaPatterns = [/起止时间/, /课程数/, /浏览人数/, /学习人数/, /学习进度/, /完成标准/, /章节进度/];
+        // 4. 扫描当前 DOM 中的可见候选文本
+        const directCandidates = Array.from(document.querySelectorAll("body *"))
+          .filter((el) => visible(el) && !isNavOrHeader(el) && el.getClientRects().length > 0)
+          .map((el) => ({ element: el, text: ownText(el) }))
+          .filter(({ text }) => !isInvalidTopicTitle(text) && text.length >= 4);
+        const occurrences = new Map();
+        directCandidates.forEach(({ text }) => occurrences.set(text, (occurrences.get(text) || 0) + 1));
+
+        for (const { text } of directCandidates) {
+          if ((occurrences.get(text) || 0) === 1) {
+            const hasMeta = topicMetaPatterns.filter((p) => p.test(text)).length > 0;
+            if (!hasMeta) return text;
+          }
+        }
+
+        return location.hostname;
+      };
+
+      const bodyText = clean(document.body.innerText);
+
+      // 2. 专题指标判定
+      const countMatch = bodyText.match(/完成任务数\s*(\d+)\s*\/\s*(\d+)/) || bodyText.match(/完成标准\s*(\d+)\s*\/\s*(\d+)/);
+      const topicProgressMatch = bodyText.match(/(?:学习|章节)进度\s*[:：]?\s*(\d+(?:\.\d+)?)%/);
+
+      // 3. 扫描银联乐学专属课程卡片
+      const badgeMarkers = Array.from(document.querySelectorAll("body *")).filter((element) => {
+        if (!visible(element)) return false;
+        const text = clean(element.innerText);
+        return /^(已学习|未学习|学习中)$/.test(text);
+      });
+
+      const rawCards = [];
+      if (badgeMarkers.length > 0) {
+        for (const marker of badgeMarkers) {
+          let card = marker;
+          for (let depth = 0; card && card !== document.body && depth < 8; depth++, card = card.parentElement) {
+            const t = clean(card.innerText);
+            if (/(学时|学分)/.test(t) && t.length < 600) {
+              rawCards.push(card);
+              break;
+            }
+          }
+        }
+      } else {
+        const metaElements = Array.from(document.querySelectorAll("body *")).filter((el) => {
+          if (!visible(el)) return false;
+          const t = clean(el.innerText);
+          return /学时\s*[:：]?\s*\d+/.test(t) && /学分\s*[:：]?\s*\d+/.test(t) && t.length < 600;
+        });
+        rawCards.push(...metaElements);
+      }
+
+      const courses = [];
+      const seenTitles = new Set();
+      const seenCards = new Set();
+
+      for (const card of rawCards) {
+        if (!card || card === document.body || seenCards.has(card)) continue;
+        seenCards.add(card);
+
+        const cardText = clean(card.innerText);
+
+        // 提取标题
+        let title = "";
+        const titleEl = card.querySelector("[class*='name'], [class*='title'], h2, h3, h4, h5, p");
+        const candTitle = titleEl ? clean(titleEl.innerText) : "";
+        if (candTitle.length >= 2 && !/(学时|学分|已学习|未学习|学习中)/.test(candTitle)) {
+          title = candTitle;
+        } else {
+          const subTexts = Array.from(card.querySelectorAll("div, p, span, a"))
+            .filter((el) => visible(el))
+            .map((el) => clean(el.innerText))
+            .filter((t) => t.length >= 3 && !/(学时|学分|已学习|未学习|学习中|分|星)/.test(t) && !/^\d+$/.test(t) && !/^[★☆\s\d]+$/.test(t));
+          if (subTexts.length > 0) {
+            title = subTexts[0];
+          }
+        }
+
+        if (!title || seenTitles.has(title)) continue;
+        seenTitles.add(title);
+
+        const locator = cssPath(card);
+        const link = card.matches("a[href]") ? card.getAttribute("href") : (card.querySelector("a[href]")?.getAttribute("href") || "");
+        const url = link ? new URL(link, location.href).href : location.href;
+        const externalId = url !== location.href ? url : (title + "_" + locator);
+
+        // 状态判定：专属识别已学习与未学习
+        const isCompleted = /(已完成|已学完|已学习)/.test(cardText) || !!card.querySelector("[title*='已学习'], [title*='已完成'], [aria-label*='已学习'], [aria-label*='已完成']");
+        const isIncomplete = /未学习/.test(cardText);
+        let completed = false;
+        let progress = 0;
+        if (isCompleted) {
+          completed = true;
+          progress = 100;
+        } else if (!isIncomplete && /学习中/.test(cardText)) {
+          completed = false;
+          progress = 50;
+        }
+
+        // 时长识别（学时 1 -> 45分钟）
+        let durationSeconds = 0;
+        const durMatch = cardText.match(/学时\s*[:：]?\s*(\d+)/) || cardText.match(/(\d+)\s*分钟/);
+        if (durMatch) {
+          const val = Number(durMatch[1]) || 0;
+          if (/学时/.test(durMatch[0])) {
+            durationSeconds = val * 45 * 60;
+          } else {
+            durationSeconds = val * 60;
+          }
+        }
+
+        courses.push({
+          externalId,
+          title,
+          url,
+          locator,
+          sectionTitle: "",
+          kind: "video",
+          durationSeconds,
+          progress,
+          completed
+        });
+      }
+
+      // 整专题全满校正
+      const isAllCompletedByStats = !!(
+        countMatch &&
+        Number(countMatch[1]) > 0 &&
+        Number(countMatch[1]) === Number(countMatch[2]) &&
+        courses.length === Number(countMatch[2]) &&
+        (topicProgressMatch ? Number(topicProgressMatch[1]) >= 100 : true)
+      );
+
+      if (isAllCompletedByStats) {
+        courses.forEach((c) => {
+          c.completed = true;
+          c.progress = 100;
+        });
+      }
+
+      const topicTitle = findTopicTitle();
+      const completedCount = isAllCompletedByStats ? courses.length : (countMatch ? Number(countMatch[1]) : courses.filter((item) => item.completed).length);
+      const totalCount = countMatch ? Number(countMatch[2]) : courses.length;
+
+      const payload = {
+        title: String(topicTitle || "未知专题"),
+        url: location.href,
+        progress: isAllCompletedByStats ? 100 : (topicProgressMatch ? Number(topicProgressMatch[1]) : (totalCount ? completedCount / totalCount * 100 : 0)),
+        totalCount,
+        completedCount,
+        courses
+      };
+
+      const bytes = new TextEncoder().encode(JSON.stringify(payload));
+      let binary = "";
+      bytes.forEach((byte) => { binary += String.fromCharCode(byte); });
+      const encoded = btoa(binary);
+      const chunkSize = __CHUNK_SIZE__;
+      const chunks = encoded.match(new RegExp(".{1," + chunkSize + "}", "g")) || [""];
+      chunks.forEach((chunk, index) => {
+        window.setTimeout(() => {
+          if (window.__MTOOL_CAPTURE_REQUEST__ !== requestId) return;
+          document.title = "MTOOL_CAPTURE|" + requestId + "|" + index + "|" + chunks.length + "|" + encoded.length + "|" + chunk;
+          if (index === chunks.length - 1) window.setTimeout(() => { document.title = originalTitle; }, __RESTORE_DELAY__);
+        }, index * __CHUNK_INTERVAL__);
+      });
+    } catch (err) {
+      const errorPayload = {
+        title: "错误",
+        url: location.href,
+        progress: 0,
+        totalCount: 0,
+        completedCount: 0,
+        courses: []
+      };
+      const bytes = new TextEncoder().encode(JSON.stringify(errorPayload));
+      let binary = "";
+      bytes.forEach((byte) => { binary += String.fromCharCode(byte); });
+      const encoded = btoa(binary);
+      if (window.__MTOOL_CAPTURE_REQUEST__ === requestId) {
+        document.title = "MTOOL_CAPTURE|" + requestId + "|0|1|" + encoded.length + "|" + encoded;
+      }
+    }
+  }, 0);
+})();
+"##;
+    TEMPLATE
+        .replace("__REQUEST_ID__", request_id)
+        .replace("__CHUNK_SIZE__", &CAPTURE_CHUNK_SIZE.to_string())
+        .replace("__CHUNK_INTERVAL__", &CAPTURE_CHUNK_INTERVAL_MS.to_string())
+        .replace(
+            "__RESTORE_DELAY__",
+            &(CAPTURE_CHUNK_INTERVAL_MS * 2).to_string(),
+        )
+}
+
+fn merchant_capture_script(request_id: &str) -> String {
     const TEMPLATE: &str = r##"
 (() => {
   const requestId = "__REQUEST_ID__";
@@ -2388,13 +2780,20 @@ fn capture_script(request_id: &str, provider: Provider) -> String {
 "##;
     TEMPLATE
         .replace("__REQUEST_ID__", request_id)
-        .replace("__PROVIDER__", provider.key())
+        .replace("__PROVIDER__", "merchant")
         .replace("__CHUNK_SIZE__", &CAPTURE_CHUNK_SIZE.to_string())
         .replace("__CHUNK_INTERVAL__", &CAPTURE_CHUNK_INTERVAL_MS.to_string())
         .replace(
             "__RESTORE_DELAY__",
             &(CAPTURE_CHUNK_INTERVAL_MS * 2).to_string(),
         )
+}
+
+fn capture_script(request_id: &str, provider: Provider) -> String {
+    match provider {
+        Provider::Ulearn => ulearn_capture_script(request_id),
+        Provider::Merchant => merchant_capture_script(request_id),
+    }
 }
 
 fn decode_capture_buffer(buffer: &CaptureBuffer) -> Result<PageTopicCapture, String> {
@@ -3083,7 +3482,7 @@ async fn open_course(
             .parse::<tauri::Url>()
             .map_err(|error| error.to_string())?;
         window.navigate(url).map_err(|error| error.to_string())?;
-        let click_script = course_click_script(&course.title, &course.locator);
+        let click_script = course_click_script(&course.title, &course.locator, course.provider);
         let click_window = window.clone();
         let click_provider = course.provider;
         let click_state = state.clone();
@@ -4043,7 +4442,7 @@ pub async fn open_video_course(
                 if !already_at_topic {
                     let _ = window.navigate(url);
                 }
-                let click_script = course_click_script(&course.title, &course.locator);
+                let click_script = course_click_script(&course.title, &course.locator, course.provider);
                 let click_window = window.clone();
                 let click_provider = course.provider;
                 let delays = if already_at_topic {
@@ -4352,7 +4751,7 @@ mod tests {
 
     #[test]
     fn course_click_prefers_saved_locator_and_reuses_current_window() {
-        let script = course_click_script("课程标题", "#saved-course");
+        let script = course_click_script("课程标题", "#saved-course", Provider::Ulearn);
         let locator_index = script.find("byLocator").expect("locator lookup exists");
         let title_index = script.find("byTitle").expect("title fallback exists");
         assert!(locator_index < title_index);
@@ -4758,7 +5157,7 @@ mod tests {
 
     #[test]
     fn course_click_script_supports_async_modal_and_exam_buttons() {
-        let script = course_click_script("01. 六步赢单考试", "#saved-course");
+        let script = course_click_script("01. 六步赢单考试", "#saved-course", Provider::Merchant);
         assert!(script.contains("去考试|开始考试|参加考试|进入考试"));
         assert!(script.contains("ant-modal"));
         assert!(script.contains("baseTitle"));
@@ -4769,6 +5168,32 @@ mod tests {
         let script = capture_script("test_req", Provider::Ulearn);
         assert!(script.contains("已完成|已学完|已学习"));
         assert!(script.contains("isAllCompletedByStats"));
+    }
+
+    #[test]
+    fn test_ulearn_and_merchant_scripts_are_strictly_isolated() {
+        let ulearn_capture = capture_script("req_u", Provider::Ulearn);
+        let merchant_capture = capture_script("req_m", Provider::Merchant);
+
+        // 银联乐学专属抓取器极其轻量，绝不包含 YS 学堂的折叠展开和大章节复杂度
+        assert!(!ulearn_capture.contains(".course-stage-caption"));
+        assert!(!ulearn_capture.contains("isBigChapterHeader"));
+        assert!(!ulearn_capture.contains("findCatalogPanel"));
+        assert!(ulearn_capture.contains("已学习"));
+
+        // YS 学堂抓取器包含专属复杂逻辑
+        assert!(merchant_capture.contains(".course-stage-caption"));
+        assert!(merchant_capture.contains("isBigChapterHeader"));
+        assert!(merchant_capture.contains("findCatalogPanel"));
+
+        // 点击脚本物理隔离：乐学不包含 ant-modal 弹窗等待与折叠展开
+        let ulearn_click = course_click_script("测试课程", "#loc", Provider::Ulearn);
+        let merchant_click = course_click_script("测试课程", "#loc", Provider::Merchant);
+
+        assert!(!ulearn_click.contains("ant-modal"));
+        assert!(!ulearn_click.contains("stageHeaders"));
+        assert!(merchant_click.contains("ant-modal"));
+        assert!(merchant_click.contains("stageHeaders"));
     }
 
     #[test]
