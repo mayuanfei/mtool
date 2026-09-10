@@ -852,15 +852,24 @@ export function VideoTasks() {
                               )}
                               {course.status === 'paused' && !isLoginError && (kindKey === 'video' || kindKey === 'slides' || kindKey === 'material') && (
                                 <button
-                                  onClick={() => void runAction('start', async () => {
-                                    await invoke('start_video_queue');
-                                    await invoke('tick_video_queue');
-                                  }, '队列已继续，优先续播暂停的课程。')}
+                                  onClick={() => void runAction(
+                                    'play-course-' + course.id,
+                                    async () => {
+                                      await invoke('play_video_course', { courseId: course.id });
+                                      await invoke('tick_video_queue');
+                                    },
+                                    `已开始播放《${course.title}》。`,
+                                  )}
                                   disabled={busyKey !== null}
                                   className="px-3 py-1.5 rounded-md border border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-300 text-xs font-semibold flex items-center gap-1.5 hover:bg-amber-500/20 disabled:opacity-50"
-                                  title="继续队列，播放进度以平台保存的断点为准"
+                                  title="立即播放本节课程并启动队列"
                                 >
-                                  <Play className="w-3.5 h-3.5 fill-current" />继续队列
+                                  {busyKey === 'play-course-' + course.id ? (
+                                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                                  ) : (
+                                    <Play className="w-3.5 h-3.5 fill-current" />
+                                  )}
+                                  {kindKey === 'video' ? '继续播放' : '继续学习'}
                                 </button>
                               )}
                               {(course.status === 'skipped' || course.status === 'attention') && (kindKey === 'video' || kindKey === 'slides' || kindKey === 'material') && (

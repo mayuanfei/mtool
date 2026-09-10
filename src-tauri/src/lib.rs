@@ -1442,6 +1442,7 @@ pub fn run() {
             video_tasks::pause_video_queue,
             video_tasks::tick_video_queue,
             video_tasks::open_video_course,
+            video_tasks::play_video_course,
             video_tasks::pause_video_course,
             video_tasks::skip_video_course,
             video_tasks::resume_video_platform,

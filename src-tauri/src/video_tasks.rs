@@ -7,7 +7,7 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
-use tauri::{AppHandle, Manager, WebviewUrl, WebviewWindowBuilder};
+use tauri::{AppHandle, Emitter, Manager, WebviewUrl, WebviewWindowBuilder};
 
 const ULEARN_HOME: &str = "https://ulearn.cup.com.cn/home";
 const BRIDGE_CAPTURE_START_PREFIX: &str = "MTOOL_CAPTURE_START|";
@@ -4604,7 +4604,7 @@ pub async fn tick_video_queue(
             // 看门狗 3：播放中进度停滞检测（视频120秒，文档300秒宽容期），杜绝假完播谎报学时，统一标 attention 异常
             let stall_threshold = {
                 let is_material = load_course(state.db_path.as_ref(), &active.course_id)
-                    .map(|c| c.kind == "material")
+                    .map(|c| c.kind == "material" || c.kind == "slides")
                     .unwrap_or(false);
                 if is_material {
                     300
@@ -4684,6 +4684,14 @@ pub async fn tick_video_queue(
                 params![active.course_id],
             )
             .map_err(|error| error.to_string())?;
+            state
+                .runtime
+                .lock()
+                .unwrap_or_else(|error| error.into_inner())
+                .active
+                .remove(active.provider.key());
+        } else {
+            // 兜底：任何其他非活跃状态（如 paused 等）从 runtime.active 彻底移除，杜绝死锁调度
             state
                 .runtime
                 .lock()
@@ -4813,17 +4821,109 @@ pub async fn open_video_course(
         params![course.provider.key(), timestamp, course.id],
     );
 
-    // 已完成课程手动打开复习时保持 completed，非视频课件/资料记为 paused，视频课件记为 opening
-    let next_status = if course.status == "completed" {
+    // 已完成课程手动打开复习时保持 completed；未完成课程打开时统一标记为 opening 并进行跟踪
+    let is_completed = course.status == "completed";
+    let next_status = if is_completed {
         "completed"
-    } else if course.kind == "video" {
-        "opening"
     } else {
-        "paused"
+        "opening"
     };
     conn.execute(
         "UPDATE video_courses SET status=?2,last_error=NULL,updated_at=?3 WHERE id=?1",
         params![course.id, next_status, timestamp],
+    )
+    .map_err(|error| error.to_string())?;
+
+    if !is_completed {
+        let initial_duration = course.duration_seconds as f64;
+        let initial_time = if initial_duration > 0.0 && course.progress > 0.0 {
+            (course.progress / 100.0) * initial_duration
+        } else {
+            0.0
+        };
+        state
+            .runtime
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .active
+            .insert(
+                course.provider.key().to_string(),
+                ActiveCourse {
+                    course_id: course.id,
+                    topic_id: course.topic_id,
+                    provider: course.provider,
+                    phase: "opening".to_string(),
+                    phase_since: timestamp,
+                    last_media_at: timestamp,
+                    last_progress_at: timestamp,
+                    last_advanced_time: initial_time,
+                    current_time: initial_time,
+                    duration: initial_duration,
+                },
+            );
+    }
+    let window = ensure_platform_window(&app, state.inner(), course.provider, true).await?;
+    let _ = window.show();
+    let _ = window.unminimize();
+    let _ = window.set_focus();
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn play_video_course(
+    app: AppHandle,
+    state: tauri::State<'_, VideoTaskState>,
+    course_id: String,
+) -> Result<(), String> {
+    let _guard = state.queue_tick.lock().await;
+    let course = load_course(state.db_path.as_ref(), &course_id)?;
+
+    // 1. 停止当前平台其他正在播放的课程并保存为 paused
+    let old_active = {
+        let mut runtime = state
+            .runtime
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        runtime.active.remove(course.provider.key())
+    };
+    if let Some(old) = old_active {
+        pause_player(&app, state.inner(), old.provider);
+        if let Ok(conn) = Connection::open(state.db_path.as_ref()) {
+            let _ = conn.execute(
+                "UPDATE video_courses SET status='paused',updated_at=?2 WHERE id=?1 AND status IN ('opening','playing','verifying')",
+                params![old.course_id, now()],
+            );
+        }
+    }
+
+    // 2. 将全局队列设置为运行状态，并清理阻断标记与记录当前专题
+    {
+        let mut settings = state
+            .settings
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        settings.running = true;
+        let _ = persist_settings(state.db_path.as_ref(), &settings);
+    }
+    let conn = Connection::open(state.db_path.as_ref()).map_err(|error| error.to_string())?;
+    let _ = conn.execute(
+        "UPDATE video_queue_lanes SET blocked_reason=NULL WHERE provider=?1",
+        params![course.provider.key()],
+    );
+    let _ = remember_queue_topic(&conn, &course);
+
+    // 3. 打开目标课程并开始播放
+    open_course(&app, state.inner(), &course, true).await?;
+
+    // 4. 更新数据库状态为 opening，记录到 active 中
+    let timestamp = now();
+    let _ = conn.execute(
+        "UPDATE video_courses SET status='paused',updated_at=?2 WHERE provider=?1 AND id != ?3 AND status IN ('opening','playing','verifying')",
+        params![course.provider.key(), timestamp, course.id],
+    );
+    conn.execute(
+        "UPDATE video_courses SET status='opening',last_error=NULL,updated_at=?2 WHERE id=?1",
+        params![course.id, timestamp],
     )
     .map_err(|error| error.to_string())?;
 
@@ -4844,13 +4944,7 @@ pub async fn open_video_course(
                 course_id: course.id,
                 topic_id: course.topic_id,
                 provider: course.provider,
-                phase: if course.status == "completed" {
-                    "ended".to_string()
-                } else if course.kind == "video" {
-                    "opening".to_string()
-                } else {
-                    "paused".to_string()
-                },
+                phase: "opening".to_string(),
                 phase_since: timestamp,
                 last_media_at: timestamp,
                 last_progress_at: timestamp,
@@ -4859,10 +4953,8 @@ pub async fn open_video_course(
                 duration: initial_duration,
             },
         );
-    let window = ensure_platform_window(&app, state.inner(), course.provider, true).await?;
-    let _ = window.show();
-    let _ = window.unminimize();
-    let _ = window.set_focus();
+
+    let _ = app.emit("video-queue-state-changed", true);
     Ok(())
 }
 
