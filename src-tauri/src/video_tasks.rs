@@ -805,13 +805,37 @@ fn bridge_script(provider: Provider, speed: f64, muted: bool) -> String {
 
     // 0. 实时检测是否处于登录/SSO/扫码页面
     try {
+      const pageAge = Date.now() - state.pageLoadedAt;
       const href = (window.location.href || "").toLowerCase();
-      const bodyText = (document.body ? document.body.innerText || "" : "").slice(0, 1500);
-      const isLoginUrl = href.includes("/login") || href.includes("/sso") || href.includes("/cas/") || href.includes("oauth") || href.includes("auth.");
-      const isLoginText = bodyText.includes("扫码登录") || bodyText.includes("cu 扫码登录") || bodyText.includes("账号登录") || bodyText.includes("密码登录") || bodyText.includes("请先登录") || bodyText.includes("统一身份认证");
-      if (isLoginUrl || isLoginText) {
-        report("need_login", { currentTime: 0, duration: 0 });
-        return;
+
+      // 检查页面是否存在视频/音频元素，或者是否有播放器容器
+      const hasMediaOrPlayer = () => {
+        for (const doc of docs) {
+          try {
+            if (doc.querySelector("video, audio, .prism-player, .xgplayer, .tcplayer, [class*='player']")) {
+              return true;
+            }
+          } catch (_) {}
+        }
+        return false;
+      };
+
+      // 仅在没有媒体播放器、且超过 8 秒加载宽容期时，才进行登录检测，避免页面加载过渡期或接口测试课程文本触发误判
+      if (!hasMediaOrPlayer() && pageAge >= 8000) {
+        const isLoginUrl = href.includes("/login") || href.includes("/sso/login") || href.includes("/cas/login") || href.includes("oauth/authorize");
+        let hasLoginForm = false;
+        for (const doc of docs) {
+          try {
+            if (doc.querySelector("input[type='password'], [class*='qrcode-login'], .login-qrcode, .login-box")) {
+              hasLoginForm = true;
+              break;
+            }
+          } catch (_) {}
+        }
+        if (isLoginUrl || hasLoginForm) {
+          report("need_login", { currentTime: 0, duration: 0 });
+          return;
+        }
       }
     } catch (_) {}
 
@@ -3597,6 +3621,27 @@ async fn open_course(
         .unwrap_or_else(|error| error.into_inner())
         .playback_tokens
         .insert(course.provider.key().to_string(), token);
+
+    let already_running_this_course = {
+        let runtime = state
+            .runtime
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        runtime
+            .active
+            .get(course.provider.key())
+            .map(|active| active.course_id == course.id && (active.phase == "playing" || active.phase == "opening"))
+            .unwrap_or(false)
+    };
+    if already_running_this_course {
+        let settings = state
+            .settings
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .clone();
+        let _ = window.eval(update_media_script(settings.speed, settings.muted, auto_play));
+        return Ok(());
+    }
     if !course.url.is_empty() {
         let url = course
             .url
@@ -4140,6 +4185,16 @@ pub async fn update_video_task_settings(
 #[tauri::command]
 pub async fn start_video_queue(state: tauri::State<'_, VideoTaskState>) -> Result<(), String> {
     let _guard = state.queue_tick.lock().await;
+    if let Ok(conn) = Connection::open(state.db_path.as_ref()) {
+        let _ = conn.execute(
+            "UPDATE video_queue_lanes SET blocked_reason=NULL WHERE blocked_reason LIKE '%登录%'",
+            [],
+        );
+        let _ = conn.execute(
+            "UPDATE video_courses SET last_error=NULL WHERE last_error LIKE '%登录%'",
+            [],
+        );
+    }
     let mut settings = state
         .settings
         .lock()
@@ -4271,6 +4326,10 @@ pub async fn resume_video_platform(
         params![provider.key()],
     )
     .map_err(|error| error.to_string())?;
+    let _ = conn.execute(
+        "UPDATE video_courses SET last_error=NULL WHERE provider=?1 AND last_error LIKE '%登录%'",
+        params![provider.key()],
+    );
     let mut settings = state
         .settings
         .lock()
@@ -4362,11 +4421,20 @@ pub async fn tick_video_queue(
                 .and_then(|window| window.url().ok())
                 .map(|url| {
                     let s = url.as_str().to_lowercase();
-                    s.contains("/login") || s.contains("/sso") || s.contains("/cas/") || s.contains("oauth")
+                    let path = url.path().to_lowercase();
+                    path.ends_with("/login")
+                        || path.contains("/login/")
+                        || path.contains("/cas/login")
+                        || path.contains("/sso/login")
+                        || path.contains("/oauth/authorize")
+                        || s.contains("/login?")
+                        || s.contains("/sso?")
                 })
                 .unwrap_or(false);
 
-            if is_login_url && (active.phase == "playing" || now() - active.phase_since >= 15) {
+            let is_actively_progressing = now() - active.last_progress_at <= 5;
+
+            if is_login_url && !is_actively_progressing && (active.phase == "playing" || now() - active.phase_since >= 15) {
                 pause_player(&app, state.inner(), active.provider);
                 block_platform(state.db_path.as_ref(), &active)?;
                 if let Some(window) = app.get_webview_window(&active.provider.label()) {
@@ -4658,6 +4726,14 @@ pub async fn open_video_course(
     let timestamp = now();
     let conn = Connection::open(state.db_path.as_ref()).map_err(|error| error.to_string())?;
     let _ = remember_queue_topic(&conn, &course);
+    let _ = conn.execute(
+        "UPDATE video_queue_lanes SET blocked_reason=NULL WHERE provider=?1",
+        params![course.provider.key()],
+    );
+    let _ = conn.execute(
+        "UPDATE video_courses SET last_error=NULL WHERE provider=?1 AND last_error LIKE '%登录%'",
+        params![course.provider.key()],
+    );
     let _ = conn.execute(
         "UPDATE video_courses SET status='paused',updated_at=?2 WHERE provider=?1 AND id != ?3 AND status IN ('opening','playing','verifying')",
         params![course.provider.key(), timestamp, course.id],
@@ -6027,6 +6103,59 @@ mod tests {
 
         assert!(!is_login("https://study.example.com/course/play/123"));
         assert!(!is_login("https://study.example.com/video/player.html"));
+    }
+
+    #[test]
+    fn test_bridge_script_exempts_media_from_login_detection() {
+        let script = bridge_script(Provider::Merchant, 2.0, true);
+        assert!(script.contains("hasMediaOrPlayer"));
+        assert!(script.contains("input[type='password']"));
+        assert!(script.contains("pageAge >= 8000"));
+    }
+
+    #[test]
+    fn test_unblocking_login_clears_blocked_reason_and_course_error() {
+        let f = QueueFixture::new();
+        let active = f.active("a1");
+        block_platform(&f.path, &active).unwrap();
+
+        // 验证被 block
+        let conn = Connection::open(&f.path).unwrap();
+        let blocked: Option<String> = conn.query_row(
+            "SELECT blocked_reason FROM video_queue_lanes WHERE provider='merchant'",
+            [],
+            |row| row.get(0),
+        ).unwrap();
+        assert!(blocked.is_some());
+
+        // 执行解锁清理
+        conn.execute(
+            "UPDATE video_queue_lanes SET blocked_reason=NULL WHERE blocked_reason LIKE '%登录%'",
+            [],
+        ).unwrap();
+        conn.execute(
+            "UPDATE video_courses SET last_error=NULL WHERE last_error LIKE '%登录%'",
+            [],
+        ).unwrap();
+
+        // 验证已清空且课程可再次被调度
+        let blocked_after: Option<String> = conn.query_row(
+            "SELECT blocked_reason FROM video_queue_lanes WHERE provider='merchant'",
+            [],
+            |row| row.get(0),
+        ).unwrap();
+        assert!(blocked_after.is_none());
+
+        let course_err: Option<String> = conn.query_row(
+            "SELECT last_error FROM video_courses WHERE id='a1'",
+            [],
+            |row| row.get(0),
+        ).unwrap();
+        assert!(course_err.is_none());
+
+        let next = next_pending(&f.path, Some(Provider::Merchant)).unwrap();
+        assert!(next.is_some());
+        assert_eq!(next.unwrap().id, "a1");
     }
 }
 

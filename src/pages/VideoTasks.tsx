@@ -531,9 +531,11 @@ export function VideoTasks() {
                   await invoke('start_video_queue');
                   await invoke('tick_video_queue');
                 }, '队列已开始运行。')}
-                disabled={dashboard.nextCourses.length === 0 || busyKey !== null}
+                disabled={(dashboard.nextCourses.length === 0 && dashboard.stats.pending === 0 && dashboard.stats.paused === 0) || busyKey !== null}
                 className="px-4 py-2.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 text-white text-sm font-semibold flex items-center gap-2"
-                title={dashboard.nextCourses.length === 0 ? '暂无可播放课程；需要登录、跳过或异常的课程请先处理' : '按专题顺序播放，优先续播暂停的课程'}
+                title={dashboard.nextCourses.length === 0 && dashboard.stats.pending === 0 && dashboard.stats.paused === 0
+                  ? '暂无可播放课程；需要登录、跳过或异常的课程请先处理'
+                  : '按专题顺序播放，优先续播暂停的课程'}
               >
                 {busyKey === 'start'
                   ? <Loader2 className="w-4 h-4 animate-spin" />
