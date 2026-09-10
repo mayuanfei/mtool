@@ -3719,10 +3719,15 @@ async fn open_course(
     course: &CourseRecord,
     auto_play: bool,
 ) -> Result<(), String> {
-    // 队列自动播放时 (auto_play = true) 保持窗口隐藏；仅当用户手动点击“打开考试/打开内容”时才显示窗口
+    // 队列自动播放时保持后台调度；仅当用户手动点击“打开考试/打开内容”(!auto_play)时才强制前台显示窗口
     let window = ensure_window(app, state, course.provider, !auto_play).await?;
     if auto_play {
-        let _ = window.hide();
+        // 自动切课时：若用户此前已主动打开窗口查看（visible），绝不强行关闭，保持其可见状态平滑流转下一课；
+        // 仅当窗口原本就处于后台静默状态时，才继续保持隐藏
+        let is_visible = window.is_visible().unwrap_or(false);
+        if !is_visible {
+            let _ = window.hide();
+        }
     }
     let token = CAPTURE_COUNTER.fetch_add(1, Ordering::Relaxed);
     state
