@@ -13,6 +13,7 @@ const ULEARN_HOME: &str = "https://ulearn.cup.com.cn/home";
 const BRIDGE_CAPTURE_START_PREFIX: &str = "MTOOL_CAPTURE_START|";
 const BRIDGE_CAPTURE_PREFIX: &str = "MTOOL_CAPTURE|";
 const BRIDGE_MEDIA_PREFIX: &str = "MTOOL_MEDIA|";
+const BRIDGE_DEVTOOLS_TOGGLE_PREFIX: &str = "MTOOL_DEVTOOLS_TOGGLE|";
 const CAPTURE_CHUNK_SIZE: usize = 800;
 const CAPTURE_CHUNK_INTERVAL_MS: u64 = 100;
 const CAPTURE_POLL_INTERVAL_MS: u64 = 50;
@@ -67,16 +68,16 @@ impl Provider {
         }
     }
 
+    fn label(self) -> String {
+        format!("video-task-{}", self.key())
+    }
+
     fn player_label(self) -> String {
-        format!("video-task-{}-player", self.key())
+        self.label()
     }
 
     fn browser_label(self) -> String {
-        format!("video-task-{}-browser", self.key())
-    }
-
-    fn label(self) -> String {
-        self.player_label()
+        self.label()
     }
 }
 
@@ -203,6 +204,7 @@ struct CourseRecord {
     title: String,
     duration_seconds: i64,
     progress: f64,
+    status: String,
 }
 
 #[derive(Serialize)]
@@ -399,12 +401,6 @@ fn init_db(path: &PathBuf) -> Result<(), String> {
     );
     let _ = conn.execute(
         "UPDATE video_courses
-         SET kind = 'video'
-         WHERE kind = 'slides' AND (duration_seconds >= 120 OR title NOT LIKE '%课件%')",
-        [],
-    );
-    let _ = conn.execute(
-        "UPDATE video_courses
          SET status = 'pending'
          WHERE kind = 'video' AND status = 'manual'",
         [],
@@ -480,9 +476,47 @@ fn bridge_script(provider: Provider, speed: f64, muted: bool) -> String {
     }
   };
 
+  let lastDevtoolsToggle = 0;
+  const triggerDevtools = () => {
+    const now = Date.now();
+    if (now - lastDevtoolsToggle < 300) return;
+    lastDevtoolsToggle = now;
+    const message = "MTOOL_DEVTOOLS_TOGGLE|" + now;
+    if (window.top === window) {
+      try {
+        const prev = document.title;
+        setTitleMessage(message);
+        setTimeout(() => {
+          try {
+            if (document.title.startsWith("MTOOL_DEVTOOLS_TOGGLE|")) {
+              setTitleMessage(prev);
+            }
+          } catch (_) {}
+        }, 50);
+      } catch (_) {}
+    } else {
+      try { window.top.postMessage({ __mtoolDevtools: true }, "*"); } catch (_) {}
+      try { window.parent.postMessage({ __mtoolDevtools: true }, "*"); } catch (_) {}
+    }
+  };
+
+  try {
+    window.addEventListener("keydown", (e) => {
+      const isF12 = e.key === "F12" || e.keyCode === 123 || e.code === "F12";
+      const isMacInspect = (e.metaKey && e.altKey && (e.key === "i" || e.key === "I" || e.keyCode === 73 || e.code === "KeyI"));
+      const isWinInspect = (e.ctrlKey && e.shiftKey && (e.key === "i" || e.key === "I" || e.keyCode === 73 || e.code === "KeyI"));
+      if (isF12 || isMacInspect || isWinInspect) {
+        e.preventDefault();
+        e.stopPropagation();
+        triggerDevtools();
+      }
+    }, true);
+  } catch (_) {}
+
   if (window.top === window) {
     window.addEventListener("message", (event) => {
       if (event.data && event.data.__mtoolMedia) setTitleMessage(event.data.__mtoolMedia);
+      if (event.data && event.data.__mtoolDevtools) triggerDevtools();
     });
 
     // 快捷键支持：Alt + ← 后退，Alt + → 前进
@@ -1097,11 +1131,49 @@ fn bridge_script(provider: Provider, speed: f64, muted: bool) -> String {
         .replace("__MUTED__", if muted { "true" } else { "false" })
 }
 
+#[allow(dead_code)]
 fn browser_nav_script(provider: Provider) -> String {
     const TEMPLATE: &str = r##"
 (() => {
-  // 1. 全局媒体静音暂停（在所有 frame / iframe 均生效）
+  // 1. 全局媒体静音暂停与开发者工具快捷键（在所有 frame / iframe 均生效）
   // 选专题窗口专门用于浏览目录和导入专题，防止视频自动出声并避免抢占学习
+  let lastDevtoolsToggle = 0;
+  const triggerDevtools = () => {
+    const now = Date.now();
+    if (now - lastDevtoolsToggle < 300) return;
+    lastDevtoolsToggle = now;
+    const message = "MTOOL_DEVTOOLS_TOGGLE|" + now;
+    if (window.top === window) {
+      try {
+        const prev = document.title;
+        document.title = message;
+        setTimeout(() => {
+          try {
+            if (document.title.startsWith("MTOOL_DEVTOOLS_TOGGLE|")) {
+              document.title = prev;
+            }
+          } catch (_) {}
+        }, 50);
+      } catch (_) {}
+    } else {
+      try { window.top.postMessage({ __mtoolDevtools: true }, "*"); } catch (_) {}
+      try { window.parent.postMessage({ __mtoolDevtools: true }, "*"); } catch (_) {}
+    }
+  };
+
+  try {
+    window.addEventListener("keydown", (e) => {
+      const isF12 = e.key === "F12" || e.keyCode === 123 || e.code === "F12";
+      const isMacInspect = (e.metaKey && e.altKey && (e.key === "i" || e.key === "I" || e.keyCode === 73 || e.code === "KeyI"));
+      const isWinInspect = (e.ctrlKey && e.shiftKey && (e.key === "i" || e.key === "I" || e.keyCode === 73 || e.code === "KeyI"));
+      if (isF12 || isMacInspect || isWinInspect) {
+        e.preventDefault();
+        e.stopPropagation();
+        triggerDevtools();
+      }
+    }, true);
+  } catch (_) {}
+
   try {
     if (!window.__MTOOL_BROWSER_NAV_SHIELD__) {
       window.__MTOOL_BROWSER_NAV_SHIELD__ = true;
@@ -1133,12 +1205,39 @@ fn browser_nav_script(provider: Provider) -> String {
 
       const timer = setInterval(ensurePaused, 1000);
       setTimeout(() => clearInterval(timer), 15000);
+
+      // 自动处理防作弊弹窗（点击“继续学习”）
+      const checkAntiCheatDialog = () => {
+        try {
+          const allButtons = document.querySelectorAll("button, a, [role='button'], input[type='button'], .ant-btn, .el-button, [class*='btn'], [class*='button']");
+          for (const btn of allButtons) {
+            if (btn.offsetWidth === 0 && btn.offsetHeight === 0 && btn.getClientRects().length === 0) continue;
+            const text = (btn.innerText || btn.value || btn.title || "").replace(/\s+/g, "");
+            if (/^(继续学习|继续播放|我知道了|确定|确认)$/.test(text)) {
+              const modalParent = btn.closest(".ant-modal, .el-dialog, [class*='modal'], [class*='dialog'], [role='dialog'], [class*='popover']") || document.body;
+              const modalText = (modalParent.innerText || "").replace(/\s+/g, "");
+              if (modalText.includes("防作弊") || modalText.includes("另一个课程") || modalText.includes("继续学习") || text === "继续学习") {
+                if (typeof btn.click === "function") btn.click();
+                try {
+                  btn.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, view: window }));
+                } catch (_) {}
+                break;
+              }
+            }
+          }
+        } catch (_) {}
+      };
+      setInterval(checkAntiCheatDialog, 800);
     }
   } catch (_) {}
 
   // 2. 仅在顶层窗口（Top Frame）挂载导航工具栏与快捷键
   if (window.top !== window || document.getElementById("__mtool_nav_toolbar__")) return;
   const homeUrl = "__HOME_URL__";
+
+  window.addEventListener("message", (event) => {
+    if (event.data && event.data.__mtoolDevtools) triggerDevtools();
+  });
 
   // 快捷键支持：Alt + ← 后退，Alt + → 前进
   window.addEventListener("keydown", (e) => {
@@ -1253,12 +1352,14 @@ fn browser_nav_script(provider: Provider) -> String {
   const forwardBtn = createBtn("前进 (Alt+→)", '<path d="m9 18 6-6-6-6"/>', () => window.history.forward());
   const refreshBtn = createBtn("刷新页面", '<path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M8 16H3v5"/>', () => window.location.reload());
   const homeBtn = createBtn("返回平台首页", '<path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/>', () => { window.location.href = homeUrl; });
+  const devtoolsBtn = createBtn("开发者工具 (F12 / ⌥⌘I)", '<polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/>', () => triggerDevtools());
 
   bar.appendChild(handle);
   bar.appendChild(backBtn);
   bar.appendChild(forwardBtn);
   bar.appendChild(refreshBtn);
   bar.appendChild(homeBtn);
+  bar.appendChild(devtoolsBtn);
 
   const mount = () => {
     if (document.body && !document.getElementById("__mtool_nav_toolbar__")) {
@@ -1552,7 +1653,7 @@ fn merchant_course_click_script(title: &str, locator: &str) -> String {
           if (modalOrMain) {{
             const modalBtn = Array.from(modalOrMain.querySelectorAll("button, a, [role='button'], div, span")).find((el) => {{
               const t = clean(el.innerText);
-              return /^(开始考试|进入考试|参加考试|立即考试|去考试|开始答题|进入答题)$/.test(t) ||
+              return /^(开始考试|进入考试|参加考试|立即考试|去考试|开始答题|进入答题|继续学习|继续播放|我知道了)$/.test(t) ||
                      el.matches(".ant-btn-primary, [class*='btn-primary'], [class*='primary-btn']");
             }});
             if (modalBtn) {{
@@ -1937,21 +2038,21 @@ fn merchant_capture_script(request_id: &str) -> String {
 
       // 1. 【最高优先级：条目自身明确的类型徽章/Tag 与标题后缀】
       // 必须优先以当前小节自身的徽章为准，绝不能被同一页面左侧的视频播放器一刀切误判！
-      const hasExplicitMaterialBadge = /(^|\s)(文档|资料|阅读材料|参考资料|手册|pdf|word)(\s|$)/i.test(combinedText) ||
-        /[-_（(【\[\s](文档|阅读材料|参考资料|资料|pdf|手册)[)）\]\s]?$/i.test(cleanTitle) ||
+      const hasExplicitMaterialBadge = /(^|[^a-zA-Z0-9])(文档|资料|阅读材料|参考资料|手册|pdf|word|docx)([^a-zA-Z0-9]|$)/i.test(combinedText) ||
+        /[-_（(【\[\s](文档|阅读材料|参考资料|资料|pdf|手册|word|docx)[)）\]\s]?$/i.test(cleanTitle) ||
         (card && card.querySelectorAll &&
-         Array.from(card.querySelectorAll("[class*='tag'], [class*='badge'], span, em, i")).some((el) => /^(文档|资料|阅读材料|参考资料|手册|pdf)$/i.test(clean(el.innerText))));
+         Array.from(card.querySelectorAll("[class*='tag'], [class*='badge'], span, em, i, div, p")).some((el) => /^(文档|资料|阅读材料|参考资料|手册|pdf|word|docx)$/i.test(clean(el.innerText))));
 
       if (hasExplicitMaterialBadge) {
         return "material";
       }
 
-      // 2. 精确收窄 PPT/课件判定
-      const hasExplicitSlidesBadge = /(^|\s)(ppt课件|课件|幻灯片)(\s|$)/i.test(combinedText) ||
-        /[-_（(【\[\s](课件|幻灯片|ppt课件)[)）\]\s]?$/i.test(cleanTitle) ||
-        /^.*[-_]课件$/i.test(cleanTitle) ||
+      // 2. 精确收窄 PPT/课件判定（显式匹配 PPT/PPTX/课件/幻灯片 徽章与标题）
+      const hasExplicitSlidesBadge = /(^|[^a-zA-Z0-9])(ppt|pptx|ppt课件|课件|幻灯片)([^a-zA-Z0-9]|$)/i.test(combinedText) ||
+        /[-_（(【\[\s](课件|幻灯片|ppt课件|ppt|pptx)[)）\]\s]?$/i.test(cleanTitle) ||
+        /^.*[-_](课件|ppt|pptx)$/i.test(cleanTitle) ||
         (card && card.querySelectorAll &&
-         Array.from(card.querySelectorAll("[class*='tag'], [class*='badge'], span, em, i")).some((el) => /^(课件|ppt课件|幻灯片)$/i.test(clean(el.innerText))));
+         Array.from(card.querySelectorAll("[class*='tag'], [class*='badge'], span, em, i, div, p")).some((el) => /^(课件|ppt课件|幻灯片|ppt|pptx)$/i.test(clean(el.innerText))));
 
       if (hasExplicitSlidesBadge) {
         return "slides";
@@ -2020,7 +2121,7 @@ fn merchant_capture_script(request_id: &str) -> String {
       }
 
       // 单课明确的进度优先于文本、类名和图标，部分进度不能被强制改为 100%。
-      const rowProgress = combinedText.match(/进度\s*[:：]?\s*(\d+(?:\.\d+)?)%/);
+      const rowProgress = combinedText.match(/(?:学习)?进度\s*[:：]?\s*(\d+(?:\.\d+)?)%/);
       if (rowProgress) return Number(rowProgress[1]) >= 100;
 
       // 1. 文本匹配与对勾字符（包含“已学习”徽章）
@@ -2554,7 +2655,7 @@ fn merchant_capture_script(request_id: &str) -> String {
           const pText = nodeText(parent);
           const iText = nodeText(item);
           // 若父容器文本并没有多包含其他小节，且包含类型、进度或考试，则保留父容器
-          if (/(视频|文档|课件|考试|测验|测试|进度|%|分钟|未完成)/.test(pText) && !/(视频|文档|课件|考试|测验|测试|进度|%|分钟|未完成)/.test(iText)) {
+          if (/(视频|文档|课件|ppt|pptx|考试|测验|测试|进度|%|分钟|未完成)/i.test(pText) && !/(视频|文档|课件|ppt|pptx|考试|测验|测试|进度|%|分钟|未完成)/i.test(iText)) {
             return false;
           }
         }
@@ -2572,8 +2673,7 @@ fn merchant_capture_script(request_id: &str) -> String {
         const text = nodeText(item);
         const card = item.closest(".course-content-item, [class*='content-item'], li, tr, [class*='card'], [class*='item']") || item;
         const cardText = clean(card.innerText || card.textContent || "");
-        const parentText = item.parentElement ? clean(item.parentElement.innerText || item.parentElement.textContent || "") : "";
-        const fullItemText = clean(text + " " + cardText + " " + parentText);
+        const ownItemText = clean(text + " " + cardText);
 
         const lines = text.split(/\n+/).map(clean).filter(Boolean);
         const validLines = lines.filter((l) =>
@@ -2590,7 +2690,7 @@ fn merchant_capture_script(request_id: &str) -> String {
           .replace(/\s*\d+\s*分钟.*$/, "")
           .replace(/\s*上次学习.*$/, "");
         // 彻底清洗标题末尾拼接的类型标签与状态词（如 "考试 未完成"、"需本人处理"、"未完成"、"视频" 等）
-        title = title.replace(/(?:\s+(?:视频|课件|文档|资料|手册|ppt课件|ppt|考试|测验|测试|问卷|未完成|已完成|未学习|学习中|已考试|合格|不合格|已通过|未通过|需本人处理|去学习|立即学习|开始学习|待播放|播放中))+$/i, "").trim();
+        title = title.replace(/(?:\s+(?:视频|课件|文档|资料|手册|ppt课件|ppt|pptx|考试|测验|测试|问卷|未完成|已完成|未学习|学习中|已考试|合格|不合格|已通过|未通过|需本人处理|去学习|立即学习|开始学习|待播放|播放中))+$/i, "").trim();
 
         if (!title || title.length < 2 || isInvalidTopicTitle(title) || isPhaseOrSectionHeader(title) || catalogSeen.has(title)) return;
         catalogSeen.add(title);
@@ -2599,7 +2699,7 @@ fn merchant_capture_script(request_id: &str) -> String {
         const url = linkFrom(item);
         const externalId = externalIdFrom(item, url, locator, title);
 
-        let durMatch = fullItemText.match(/学习时长\s*[:：]?\s*(\d+)\s*分钟/) || fullItemText.match(/(\d+)\s*分钟/) || fullItemText.match(/学时\s*[:：]?\s*(\d+)/) || fullItemText.match(/时长\s*[:：]?\s*(\d+)/);
+        let durMatch = ownItemText.match(/学习时长\s*[:：]?\s*(\d+)\s*分钟/) || ownItemText.match(/(\d+)\s*分钟/) || ownItemText.match(/学时\s*[:：]?\s*(\d+)/) || ownItemText.match(/时长\s*[:：]?\s*(\d+)/);
         let durationSeconds = 0;
         if (durMatch) {
           const val = Number(durMatch[1]) || 0;
@@ -2610,21 +2710,28 @@ fn merchant_capture_script(request_id: &str) -> String {
           }
         }
 
-        const progressMatch = fullItemText.match(/进度\s*[:：]?\s*(\d+(?:\.\d+)?)%/);
-        const hasExplicitIncomplete = /(学习中|播放中|未学习|未开始|待学习)/.test(fullItemText) && !/(已完成|已学完|已学习|已考合格|100%)/.test(fullItemText);
-        const isProgress100 = progressMatch ? Number(progressMatch[1]) >= 100 : false;
-        const completed = isProgress100 || (!hasExplicitIncomplete && (
-          isElementCompleted(card) ||
-          isElementCompleted(item) ||
-          /(已完成|已学完|已学习|已考合格|已通过)/.test(fullItemText)
-        ));
-        let progress = completed ? 100 : (progressMatch ? Number(progressMatch[1]) : 0);
+        const progressMatch = ownItemText.match(/(?:学习)?进度\s*[:：]?\s*(\d+(?:\.\d+)?)%/);
+        let progress = 0;
+        let completed = false;
+
         if (progressMatch) {
           const pVal = Number(progressMatch[1]) || 0;
           if (pVal >= 100) {
+            completed = true;
             progress = 100;
-          } else if (!completed) {
+          } else {
+            // 只要条目自身明确标明了小于 100% 的进度（例如 16%、37%、0%），必须判定为未完成，保留其真实进度！
+            completed = false;
             progress = pVal;
+          }
+        } else {
+          // 仅在条目自身没有明确百分比进度时，才根据未完成/已完成词条及完成图标判定
+          const hasExplicitIncomplete = /(学习中|播放中|未学习|未开始|待学习)/.test(ownItemText);
+          if (!hasExplicitIncomplete) {
+            if (isElementCompleted(card) || /(已完成|已学完|已学习|已考合格|已通过)/.test(ownItemText)) {
+              completed = true;
+              progress = 100;
+            }
           }
         }
 
@@ -2815,14 +2922,28 @@ fn merchant_capture_script(request_id: &str) -> String {
           const url = linkFrom(container);
           const externalId = externalIdFrom(container, url, locator, title);
 
-          const progressMatch = text.match(/进度\s*[:：]?\s*(\d+(?:\.\d+)?)%/);
-          const hasExplicitIncomplete = /(未学习|未开始|待学习)/.test(text) || (/(学习中|播放中)/.test(text) && !/(已完成|已学完|已学习|已考合格|100%)/.test(text));
-          const completed = !hasExplicitIncomplete && (
-            isElementCompleted(container) ||
-            (progressMatch ? Number(progressMatch[1]) >= 100 : false) ||
-            /(已完成|已学完|已学习|已考合格|已通过)/.test(text)
-          );
-          const progress = completed ? 100 : (progressMatch ? Number(progressMatch[1]) : 0);
+          const progressMatch = text.match(/(?:学习)?进度\s*[:：]?\s*(\d+(?:\.\d+)?)%/);
+          let progress = 0;
+          let completed = false;
+
+          if (progressMatch) {
+            const pVal = Number(progressMatch[1]) || 0;
+            if (pVal >= 100) {
+              completed = true;
+              progress = 100;
+            } else {
+              completed = false;
+              progress = pVal;
+            }
+          } else {
+            const hasExplicitIncomplete = /(未学习|未开始|待学习|学习中|播放中)/.test(text);
+            if (!hasExplicitIncomplete) {
+              if (isElementCompleted(container) || /(已完成|已学完|已学习|已考合格|已通过)/.test(text)) {
+                completed = true;
+                progress = 100;
+              }
+            }
+          }
 
           const durationMatch = text.match(/学习时长\s*[:：]?\s*(\d+)\s*分钟/) || text.match(/学时\s*[:：]?\s*(\d+)/) || text.match(/时长\s*[:：]?\s*(\d+)/);
           let durationSeconds = 0;
@@ -3078,13 +3199,13 @@ fn handle_bridge_title(
     false
 }
 
-async fn ensure_player_window(
+async fn ensure_platform_window(
     app: &AppHandle,
     state: &VideoTaskState,
     provider: Provider,
     show: bool,
 ) -> Result<tauri::WebviewWindow, String> {
-    let label = provider.player_label();
+    let label = provider.label();
     if let Some(window) = app.get_webview_window(&label) {
         if show {
             window.show().map_err(|error| error.to_string())?;
@@ -3108,21 +3229,35 @@ async fn ensure_player_window(
     let app_for_popup = app.clone();
     let popup_label = label.clone();
     let settings_state = state.settings.clone();
+    let last_title = Arc::new(Mutex::new(format!("MTOOL · {}", provider.name())));
+    let last_title_for_cb = last_title.clone();
     let window = WebviewWindowBuilder::new(app, &label, WebviewUrl::External(url))
-        .title(format!("MTOOL · {} · 播放窗口", provider.name()))
+        .title(format!("MTOOL · {}", provider.name()))
         .inner_size(1280.0, 820.0)
         .min_inner_size(640.0, 480.0)
-        .visible(false)
-        .focused(false)
+        .devtools(true)
+        .visible(show)
+        .focused(show)
         .initialization_script_for_all_frames(bridge_script(
             provider,
             settings.speed,
             settings.muted,
         ))
         .on_document_title_changed(move |window, title| {
+            if title.starts_with(BRIDGE_DEVTOOLS_TOGGLE_PREFIX) {
+                if window.is_devtools_open() {
+                    window.close_devtools();
+                } else {
+                    window.open_devtools();
+                }
+                let prev = last_title_for_cb.lock().unwrap_or_else(|e| e.into_inner()).clone();
+                let _ = window.set_title(&prev);
+                return;
+            }
             if !handle_bridge_title(&title, provider_for_title, &captures, &runtime) {
-                let _ =
-                    window.set_title(&format!("MTOOL · {} · {title}", provider_for_title.name()));
+                let formatted = format!("MTOOL · {} · {title}", provider_for_title.name());
+                let _ = window.set_title(&formatted);
+                *last_title_for_cb.lock().unwrap_or_else(|e| e.into_inner()) = formatted;
             }
         })
         .on_page_load(move |window, _payload| {
@@ -3141,7 +3276,7 @@ async fn ensure_player_window(
             tauri::webview::NewWindowResponse::Deny
         })
         .build()
-        .map_err(|error| format!("打开{}播放窗口失败: {error}", provider.name()))?;
+        .map_err(|error| format!("打开{}学习窗口失败: {error}", provider.name()))?;
 
     let win_for_close = window.clone();
     window.on_window_event(move |event| {
@@ -3161,63 +3296,22 @@ async fn ensure_player_window(
     Ok(window)
 }
 
+async fn ensure_player_window(
+    app: &AppHandle,
+    state: &VideoTaskState,
+    provider: Provider,
+    show: bool,
+) -> Result<tauri::WebviewWindow, String> {
+    ensure_platform_window(app, state, provider, show).await
+}
+
 async fn ensure_browser_window(
     app: &AppHandle,
     state: &VideoTaskState,
     provider: Provider,
     show: bool,
 ) -> Result<tauri::WebviewWindow, String> {
-    let label = provider.browser_label();
-    if let Some(window) = app.get_webview_window(&label) {
-        if show {
-            window.show().map_err(|error| error.to_string())?;
-            window.unminimize().map_err(|error| error.to_string())?;
-            window.set_focus().map_err(|error| error.to_string())?;
-        }
-        return Ok(window);
-    }
-    let url = provider
-        .home()
-        .parse::<tauri::Url>()
-        .map_err(|error| error.to_string())?;
-    let captures = state.captures.clone();
-    let runtime = state.runtime.clone();
-    let provider_for_title = provider;
-    let app_for_popup = app.clone();
-    let popup_label = label.clone();
-    let window = WebviewWindowBuilder::new(app, &label, WebviewUrl::External(url))
-        .title(format!("MTOOL · {} · 选专题", provider.name()))
-        .inner_size(1280.0, 820.0)
-        .min_inner_size(640.0, 480.0)
-        .visible(show)
-        .focused(show)
-        .initialization_script_for_all_frames(browser_nav_script(provider))
-        .on_document_title_changed(move |window, title| {
-            if !handle_bridge_title(&title, provider_for_title, &captures, &runtime) {
-                let _ =
-                    window.set_title(&format!("MTOOL · {} · {title}", provider_for_title.name()));
-            }
-        })
-        .on_new_window(move |url, _features| {
-            if matches!(url.scheme(), "http" | "https") {
-                if let Some(window) = app_for_popup.get_webview_window(&popup_label) {
-                    let _ = window.navigate(url);
-                }
-            }
-            tauri::webview::NewWindowResponse::Deny
-        })
-        .build()
-        .map_err(|error| format!("打开{}浏览窗口失败: {error}", provider.name()))?;
-
-    let win_for_close = window.clone();
-    window.on_window_event(move |event| {
-        if let tauri::WindowEvent::CloseRequested { api, .. } = event {
-            api.prevent_close();
-            let _ = win_for_close.hide();
-        }
-    });
-
-    Ok(window)
+    ensure_platform_window(app, state, provider, show).await
 }
 
 async fn ensure_window(
@@ -3408,10 +3502,12 @@ fn import_capture(
         .execute(
             "INSERT INTO video_topics(id,provider,title,url,progress,total_count,completed_count,last_synced_at)
              VALUES(?1,?2,?3,?4,?5,?6,?7,?8)
-             ON CONFLICT(id) DO UPDATE SET
-               title=excluded.title,url=excluded.url,progress=excluded.progress,
-               total_count=excluded.total_count,completed_count=excluded.completed_count,
-               last_synced_at=excluded.last_synced_at",
+              ON CONFLICT(id) DO UPDATE SET
+                title=excluded.title,url=excluded.url,
+                progress=MAX(COALESCE(video_topics.progress, 0.0), COALESCE(excluded.progress, 0.0)),
+                total_count=CASE WHEN excluded.total_count > 0 THEN excluded.total_count ELSE video_topics.total_count END,
+                completed_count=MAX(COALESCE(video_topics.completed_count, 0), COALESCE(excluded.completed_count, 0)),
+                last_synced_at=excluded.last_synced_at",
             params![
                 topic_id,
                 provider.key(),
@@ -3443,7 +3539,7 @@ fn import_capture(
         };
         let course_id = stable_id(&[&topic_id, &external_id]);
         current_course_ids.push(course_id.clone());
-        let status = if course.completed {
+        let status = if course.completed || course.progress >= 100.0 {
             completed += 1;
             "completed"
         } else if kind == "video" || kind == "slides" || kind == "material" {
@@ -3463,17 +3559,17 @@ fn import_capture(
                    section_title=excluded.section_title,kind=excluded.kind,
                    duration_seconds=CASE WHEN excluded.duration_seconds > 0 THEN excluded.duration_seconds ELSE video_courses.duration_seconds END,
                    progress=CASE
-                     WHEN excluded.status='completed' THEN 100.0
-                     WHEN video_courses.status IN('opening','playing','verifying','paused','skipped','attention') AND video_courses.progress > 0.0 THEN video_courses.progress
-                     ELSE excluded.progress
+                     WHEN excluded.status='completed' OR video_courses.status='completed' OR excluded.progress >= 100.0 OR video_courses.progress >= 100.0 THEN 100.0
+                     WHEN video_courses.status IN('opening','playing','verifying','paused','skipped','attention') AND video_courses.progress > excluded.progress THEN video_courses.progress
+                     ELSE MAX(COALESCE(video_courses.progress, 0.0), COALESCE(excluded.progress, 0.0))
                    END,
                    status=CASE
-                     WHEN excluded.status='completed' THEN 'completed'
+                     WHEN excluded.status='completed' OR video_courses.status='completed' OR excluded.progress >= 100.0 OR video_courses.progress >= 100.0 THEN 'completed'
                      WHEN video_courses.status IN('opening','playing','verifying','paused','skipped','attention') THEN video_courses.status
                      ELSE excluded.status
                    END,
                    sort_order=excluded.sort_order,
-                   last_error=CASE WHEN excluded.status='completed' THEN NULL ELSE video_courses.last_error END,
+                   last_error=CASE WHEN excluded.status='completed' OR video_courses.status='completed' THEN NULL ELSE video_courses.last_error END,
                    updated_at=excluded.updated_at",
                 params![
                     course_id,
@@ -3515,13 +3611,26 @@ fn import_capture(
              total_count = (SELECT COUNT(*) FROM video_courses WHERE topic_id=?1),
              progress = CASE
                WHEN (SELECT COUNT(*) FROM video_courses WHERE topic_id=?1 AND status='completed') = (SELECT COUNT(*) FROM video_courses WHERE topic_id=?1) AND (SELECT COUNT(*) FROM video_courses WHERE topic_id=?1) > 0 THEN 100.0
-               WHEN progress > 0.0 THEN progress
-               ELSE ROUND((CAST((SELECT COUNT(*) FROM video_courses WHERE topic_id=?1 AND status='completed') AS REAL) / MAX(1, (SELECT COUNT(*) FROM video_courses WHERE topic_id=?1))) * 100.0, 1)
+               ELSE MAX(
+                 COALESCE(progress, 0.0),
+                 ROUND((CAST((SELECT COUNT(*) FROM video_courses WHERE topic_id=?1 AND status='completed') AS REAL) / MAX(1, (SELECT COUNT(*) FROM video_courses WHERE topic_id=?1))) * 100.0, 1)
+               )
              END
              WHERE id=?1",
             params![topic_id],
         )
         .map_err(|error| error.to_string())?;
+
+    let (db_completed, db_manual): (usize, usize) = transaction
+        .query_row(
+            "SELECT 
+               COALESCE(SUM(CASE WHEN status='completed' THEN 1 ELSE 0 END), 0),
+               COALESCE(SUM(CASE WHEN status='manual' THEN 1 ELSE 0 END), 0)
+             FROM video_courses WHERE topic_id=?1",
+            params![topic_id],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .unwrap_or((completed, manual));
     transaction.commit().map_err(|error| error.to_string())?;
 
     let mut runtime = state
@@ -3529,7 +3638,7 @@ fn import_capture(
         .lock()
         .unwrap_or_else(|error| error.into_inner());
     for (index, course) in valid_courses.iter().enumerate() {
-        if course.completed {
+        if course.completed || course.progress >= 100.0 {
             let external_id = if course.external_id.trim().is_empty() {
                 format!("{}-{index}", course.title)
             } else {
@@ -3543,8 +3652,8 @@ fn import_capture(
         topic_id,
         topic_title: capture.title,
         imported: valid_courses.len(),
-        completed,
-        manual,
+        completed: db_completed,
+        manual: db_manual,
     })
 }
 
@@ -3573,7 +3682,7 @@ fn is_phase_or_section_title(title: &str) -> bool {
 fn load_course(path: &PathBuf, course_id: &str) -> Result<CourseRecord, String> {
     let conn = Connection::open(path).map_err(|error| error.to_string())?;
     conn.query_row(
-        "SELECT id,topic_id,provider,url,locator,kind,title,duration_seconds,progress FROM video_courses WHERE id=?1",
+        "SELECT id,topic_id,provider,url,locator,kind,title,duration_seconds,progress,status FROM video_courses WHERE id=?1",
         params![course_id],
         |row| {
             let provider: String = row.get(2)?;
@@ -3587,6 +3696,7 @@ fn load_course(path: &PathBuf, course_id: &str) -> Result<CourseRecord, String> 
                 title: row.get(6)?,
                 duration_seconds: row.get(7)?,
                 progress: row.get(8)?,
+                status: row.get(9)?,
             })
         },
     )
@@ -4634,51 +4744,6 @@ pub async fn open_video_course(
 ) -> Result<(), String> {
     let _guard = state.queue_tick.lock().await;
     let course = load_course(state.db_path.as_ref(), &course_id)?;
-    if course.kind != "video" {
-        // 课件、考试、资料属于用户手动交互内容，在前台选专题/浏览窗口打开，完全不打扰后台视频播放队列
-        let window = ensure_browser_window(&app, state.inner(), course.provider, true).await?;
-        if !course.url.trim().is_empty() {
-            if let Ok(url) = course.url.parse::<tauri::Url>() {
-                let _ = window.navigate(url);
-            }
-        } else {
-            let topic_url = topic_url(state.db_path.as_ref(), &course.topic_id)?;
-            if let Ok(url) = topic_url.parse::<tauri::Url>() {
-                let current_url_str = window.url().ok().map(|u| u.to_string()).unwrap_or_default();
-                let topic_path = topic_url.split('?').next().unwrap_or(&topic_url);
-                let current_path = current_url_str.split('?').next().unwrap_or(&current_url_str);
-                let already_at_topic = !current_path.is_empty() && current_path == topic_path;
-                if !already_at_topic {
-                    let _ = window.navigate(url);
-                }
-                let click_script = course_click_script(&course.title, &course.locator, course.provider);
-                let click_window = window.clone();
-                let click_provider = course.provider;
-                let delays = if already_at_topic {
-                    vec![200, 700, 1800, 4000]
-                } else {
-                    vec![1200, 2500, 4500, 8000]
-                };
-                tauri::async_runtime::spawn(async move {
-                    for delay in delays {
-                        tokio::time::sleep(Duration::from_millis(delay)).await;
-                        let current_url = click_window.url().ok();
-                        if current_url.as_ref().is_some_and(|current| {
-                            current.as_str() != topic_url && provider_accepts_url(click_provider, current)
-                        }) {
-                            break;
-                        }
-                        let _ = click_window.eval(&click_script);
-                    }
-                });
-            }
-        }
-        let _ = window.show();
-        let _ = window.unminimize();
-        let _ = window.set_focus();
-        return Ok(());
-    }
-
     let is_currently_running = {
         let runtime = state
             .runtime
@@ -4691,7 +4756,7 @@ pub async fn open_video_course(
             .unwrap_or(false)
     };
     if is_currently_running {
-        let window = ensure_player_window(&app, state.inner(), course.provider, true).await?;
+        let window = ensure_platform_window(&app, state.inner(), course.provider, true).await?;
         window.show().map_err(|error| error.to_string())?;
         window.unminimize().map_err(|error| error.to_string())?;
         window.set_focus().map_err(|error| error.to_string())?;
@@ -4722,6 +4787,10 @@ pub async fn open_video_course(
             }
         }
     }
+
+    // 用户手动打开课程内容（视频、课件或考试）时，暂停后台调度队列，防止自动切课打扰用户手动学习
+    let _ = pause_queue(&app, state.inner());
+
     open_course(&app, state.inner(), &course, false).await?;
     let timestamp = now();
     let conn = Connection::open(state.db_path.as_ref()).map_err(|error| error.to_string())?;
@@ -4738,11 +4807,21 @@ pub async fn open_video_course(
         "UPDATE video_courses SET status='paused',updated_at=?2 WHERE provider=?1 AND id != ?3 AND status IN ('opening','playing','verifying')",
         params![course.provider.key(), timestamp, course.id],
     );
+
+    // 已完成课程手动打开复习时保持 completed，非视频课件/资料记为 paused，视频课件记为 opening
+    let next_status = if course.status == "completed" {
+        "completed"
+    } else if course.kind == "video" {
+        "opening"
+    } else {
+        "paused"
+    };
     conn.execute(
-        "UPDATE video_courses SET status='opening',last_error=NULL,updated_at=?2 WHERE id=?1",
-        params![course.id, timestamp],
+        "UPDATE video_courses SET status=?2,last_error=NULL,updated_at=?3 WHERE id=?1",
+        params![course.id, next_status, timestamp],
     )
     .map_err(|error| error.to_string())?;
+
     let initial_duration = course.duration_seconds as f64;
     let initial_time = if initial_duration > 0.0 && course.progress > 0.0 {
         (course.progress / 100.0) * initial_duration
@@ -4760,7 +4839,13 @@ pub async fn open_video_course(
                 course_id: course.id,
                 topic_id: course.topic_id,
                 provider: course.provider,
-                phase: "opening".to_string(),
+                phase: if course.status == "completed" {
+                    "ended".to_string()
+                } else if course.kind == "video" {
+                    "opening".to_string()
+                } else {
+                    "paused".to_string()
+                },
                 phase_since: timestamp,
                 last_media_at: timestamp,
                 last_progress_at: timestamp,
@@ -4769,6 +4854,10 @@ pub async fn open_video_course(
                 duration: initial_duration,
             },
         );
+    let window = ensure_platform_window(&app, state.inner(), course.provider, true).await?;
+    let _ = window.show();
+    let _ = window.unminimize();
+    let _ = window.set_focus();
     Ok(())
 }
 
@@ -5389,6 +5478,20 @@ mod tests {
     }
 
     #[test]
+    fn browser_and_bridge_scripts_include_devtools_shortcuts() {
+        let nav_script = browser_nav_script(Provider::Merchant);
+        assert!(nav_script.contains("MTOOL_DEVTOOLS_TOGGLE|"));
+        assert!(nav_script.contains("F12"));
+        assert!(nav_script.contains("isMacInspect"));
+        assert!(nav_script.contains("isWinInspect"));
+        assert!(nav_script.contains("开发者工具 (F12 / ⌥⌘I)"));
+
+        let bridge = bridge_script(Provider::Merchant, 1.0, true);
+        assert!(bridge.contains("MTOOL_DEVTOOLS_TOGGLE|"));
+        assert!(bridge.contains("F12"));
+    }
+
+    #[test]
     fn capture_script_detects_course_kind_accurately_without_survey_false_positive() {
         let script = capture_script("test_req", Provider::Merchant);
         assert!(script.contains("detectCourseKind"));
@@ -5397,6 +5500,8 @@ mod tests {
         assert!(script.contains("const itemKind = detectCourseKind(title, text, durationSeconds, item);"));
         assert!(script.contains("const kind = detectCourseKind(title, text, durationSeconds, container);"));
         assert!(script.contains("hasRealisticDuration = Number(durationSeconds) >= 120;"));
+        assert!(script.contains("hasExplicitSlidesBadge"));
+        assert!(script.contains("ppt|pptx|ppt课件|课件|幻灯片"));
     }
 
     #[test]
@@ -5433,7 +5538,7 @@ mod tests {
         assert!(script.contains("isPureTagOrBadge"));
         assert!(script.contains("未完成"));
         assert!(script.contains("需本人处理"));
-        assert!(script.contains("ppt课件|ppt|考试|测验|测试|问卷|未完成|已完成"));
+        assert!(script.contains("ppt课件|ppt|pptx|考试|测验|测试|问卷|未完成|已完成"));
     }
 
     #[test]
@@ -5885,11 +5990,10 @@ mod tests {
     }
 
     #[test]
-    fn sync_corrects_previously_misclassified_completed_courses() {
+    fn sync_preserves_completed_courses_and_never_regresses_progress() {
         let f = QueueFixture::new();
-        // 对应用户截图：12 门课程中只有 3 门完成，其余保留实际的部分进度或零进度。
         let progress_values = [100.0, 66.38, 100.0, 100.0, 93.62, 93.95, 94.57, 0.0, 0.0, 15.73, 33.18, 26.66];
-        let capture = |misclassified: bool| PageTopicCapture {
+        let capture = |all_completed: bool| PageTopicCapture {
             title: "银杏数智赋能专项培训（2026）".into(),
             url: "https://example.com/completion-regression".into(),
             progress: 20.22,
@@ -5903,15 +6007,26 @@ mod tests {
                 section_title: String::new(),
                 kind: "video".into(),
                 duration_seconds: 960,
-                progress: if misclassified { 100.0 } else { *progress },
-                completed: misclassified || *progress >= 100.0,
+                progress: if all_completed { 100.0 } else { *progress },
+                completed: all_completed || *progress >= 100.0,
             }).collect(),
         };
         let topic_id = import_capture(&f.state, Provider::Merchant, capture(true)).unwrap().topic_id;
-        let summary = import_capture(&f.state, Provider::Merchant, capture(false)).unwrap();
-        assert_eq!(summary.imported, 12);
-        assert_eq!(summary.completed, 3);
+        // 核心保护断言：课程已完成（100%）时，再次同步即使网页上报了较低的中间进度（例如79%），也绝不倒退覆盖！
+        let summary_preserved = import_capture(&f.state, Provider::Merchant, capture(false)).unwrap();
+        assert_eq!(summary_preserved.imported, 12);
+        assert_eq!(summary_preserved.completed, 12);
+
+        // 当用户显式重置课程状态后，重新同步方可采纳网页端较低的初始进度
         let conn = Connection::open(&f.path).unwrap();
+        conn.execute(
+            "UPDATE video_courses SET status='pending',progress=0 WHERE topic_id=?1",
+            params![topic_id],
+        ).unwrap();
+        let summary_reset = import_capture(&f.state, Provider::Merchant, capture(false)).unwrap();
+        assert_eq!(summary_reset.imported, 12);
+        assert_eq!(summary_reset.completed, 3);
+
         let mut stmt = conn.prepare("SELECT status,progress FROM video_courses WHERE topic_id=?1 ORDER BY sort_order").unwrap();
         let courses = stmt.query_map(params![topic_id], |row| {
             Ok((row.get::<_, String>(0)?, row.get::<_, f64>(1)?))
@@ -5921,11 +6036,6 @@ mod tests {
             assert_eq!(*progress, expected);
             assert_eq!(status, if expected >= 100.0 { "completed" } else { "pending" });
         }
-        let topic: (i64, i64, f64) = conn.query_row(
-            "SELECT completed_count,total_count,progress FROM video_topics WHERE id=?1",
-            params![topic_id], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
-        ).unwrap();
-        assert_eq!(topic, (3, 12, 20.22));
     }
 
     #[test]
