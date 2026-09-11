@@ -206,6 +206,7 @@ struct CourseRecord {
     locator: String,
     kind: String,
     title: String,
+    section_title: String,
     duration_seconds: i64,
     progress: f64,
 }
@@ -1754,12 +1755,14 @@ fn ulearn_course_click_script(title: &str, locator: &str) -> String {
     )
 }
 
-fn merchant_course_click_script(title: &str, locator: &str) -> String {
+fn merchant_course_click_script(title: &str, section_title: &str, locator: &str) -> String {
     let title_json = serde_json::to_string(title).unwrap_or_default();
+    let section_title_json = serde_json::to_string(section_title).unwrap_or_default();
     let locator_json = serde_json::to_string(locator).unwrap_or_default();
     format!(
         r#"(async () => {{
           const targetTitle = {title_json};
+          const targetSectionTitle = {section_title_json};
           const targetLocator = {locator_json};
           const clean = (value) => String(value || "").replace(/\s+/g, " ").trim();
           const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -1783,6 +1786,7 @@ fn merchant_course_click_script(title: &str, locator: &str) -> String {
           }} catch (_) {{}}
 
           const cleanTarget = clean(targetTitle);
+          const cleanTargetSection = clean(targetSectionTitle);
           const baseTitle = cleanTarget.replace(/^\d{{1,2}}\s*[.、-]\s*/, "").trim();
           const targetIdxMatch = cleanTarget.match(/^(\d{{1,2}})[\s.、-]/);
           const targetIdx = targetIdxMatch ? parseInt(targetIdxMatch[1], 10) : null;
@@ -1808,6 +1812,55 @@ fn merchant_course_click_script(title: &str, locator: &str) -> String {
             return false;
           }};
 
+          const expandHeader = async (h) => {{
+            if (!h) return;
+            const parent = (h.parentElement ? h.parentElement.closest("[class*='stage'], [class*='chapter'], .ant-collapse-item, [class*='collapse-item']") : null) || h.parentElement;
+            const hasContentItems = !!parent && !!parent.querySelector(".course-content-item, [class*='content-item']");
+            if (hasContentItems) return;
+            const arrow = h.querySelector(".anticon, svg, [class*='arrow'], [class*='icon']");
+            const arrowStyle = (arrow ? arrow.getAttribute("style") || "" : "") + (arrow && arrow.parentElement ? arrow.parentElement.getAttribute("style") || "" : "");
+            const isRotated = /rotate\(-?90deg\)/i.test(arrowStyle);
+            const isAriaClosed = h.getAttribute("aria-expanded") === "false";
+            if (isRotated || isAriaClosed || !arrow) {{
+              try {{ h.click(); }} catch (_) {{}}
+              try {{ h.dispatchEvent(new MouseEvent("click", {{ bubbles: true, cancelable: true, view: window }})); }} catch (_) {{}}
+              if (arrow) {{
+                try {{ arrow.click(); }} catch (_) {{}}
+                try {{ arrow.dispatchEvent(new MouseEvent("click", {{ bubbles: true, cancelable: true, view: window }})); }} catch (_) {{}}
+              }}
+              const innerSpan = h.querySelector(".course-stage-index, span, [role='button']");
+              if (innerSpan && innerSpan !== h) {{
+                try {{ innerSpan.click(); }} catch (_) {{}}
+              }}
+              await sleep(350);
+            }}
+          }};
+
+          const stageHeaders = Array.from(document.querySelectorAll(
+            ".course-stage-caption, [class*='stage-caption'], .ant-collapse-header, [class*='collapse-header'], [class*='collapse-item__header'], [class*='chapter-header'], [class*='chapter_header'], [role='tab']"
+          ));
+
+          let target = null;
+
+          // 1. 若提供了章节名称，优先在匹配的章节容器内部查找目标小节
+          if (cleanTargetSection) {{
+            const matchedHeader = stageHeaders.find((h) => {{
+              const ht = clean(h.innerText);
+              return ht === cleanTargetSection || ht.includes(cleanTargetSection) || cleanTargetSection.includes(ht);
+            }});
+            if (matchedHeader) {{
+              await expandHeader(matchedHeader);
+              const sectionScope = (matchedHeader.parentElement ? matchedHeader.parentElement.closest("[class*='stage'], [class*='chapter'], .ant-collapse-item, [class*='collapse-item']") : null) || matchedHeader.parentElement;
+              if (sectionScope) {{
+                const inScopeLocator = targetLocator ? sectionScope.querySelector(targetLocator) : null;
+                const inScopeAll = Array.from(sectionScope.querySelectorAll("body *"));
+                const inScopeByTitle = inScopeAll.find((el) => clean(el.innerText) === cleanTarget) ||
+                  inScopeAll.find((el) => matchesTarget(el.innerText));
+                target = inScopeLocator || inScopeByTitle;
+              }}
+            }}
+          }}
+
           const findTarget = () => {{
             const byLocator = targetLocator ? document.querySelector(targetLocator) : null;
             const all = Array.from(document.querySelectorAll("body *"));
@@ -1816,34 +1869,19 @@ fn merchant_course_click_script(title: &str, locator: &str) -> String {
             return byLocator || byTitle;
           }};
 
-          let target = findTarget();
+          if (!target) {{
+            target = findTarget();
+          }}
+
           if (!target) {{
             // 查找页面上所有处于折叠状态的章节头部并展开
-            const stageHeaders = Array.from(document.querySelectorAll(
-              ".course-stage-caption, [class*='stage-caption'], .ant-collapse-header, [class*='collapse-header'], [class*='collapse-item__header'], [class*='chapter-header'], [class*='chapter_header'], [role='tab']"
-            ));
             let expandedAny = false;
             for (const h of stageHeaders) {{
               const parent = (h.parentElement ? h.parentElement.closest("[class*='stage'], [class*='chapter'], .ant-collapse-item, [class*='collapse-item']") : null) || h.parentElement;
               const hasContentItems = !!parent && !!parent.querySelector(".course-content-item, [class*='content-item']");
               if (hasContentItems) continue;
-              const arrow = h.querySelector(".anticon, svg, [class*='arrow'], [class*='icon']");
-              const arrowStyle = (arrow ? arrow.getAttribute("style") || "" : "") + (arrow && arrow.parentElement ? arrow.parentElement.getAttribute("style") || "" : "");
-              const isRotated = /rotate\(-?90deg\)/i.test(arrowStyle);
-              const isAriaClosed = h.getAttribute("aria-expanded") === "false";
-              if (isRotated || isAriaClosed || !arrow) {{
-                try {{ h.click(); }} catch (_) {{}}
-                try {{ h.dispatchEvent(new MouseEvent("click", {{ bubbles: true, cancelable: true, view: window }})); }} catch (_) {{}}
-                if (arrow) {{
-                  try {{ arrow.click(); }} catch (_) {{}}
-                  try {{ arrow.dispatchEvent(new MouseEvent("click", {{ bubbles: true, cancelable: true, view: window }})); }} catch (_) {{}}
-                }}
-                const innerSpan = h.querySelector(".course-stage-index, span, [role='button']");
-                if (innerSpan && innerSpan !== h) {{
-                  try {{ innerSpan.click(); }} catch (_) {{}}
-                }}
-                expandedAny = true;
-              }}
+              await expandHeader(h);
+              expandedAny = true;
             }}
             if (expandedAny) {{
               await sleep(350);
@@ -1944,10 +1982,10 @@ fn merchant_course_click_script(title: &str, locator: &str) -> String {
     )
 }
 
-fn course_click_script(title: &str, locator: &str, provider: Provider) -> String {
+fn course_click_script(title: &str, section_title: &str, locator: &str, provider: Provider) -> String {
     match provider {
         Provider::Ulearn => ulearn_course_click_script(title, locator),
-        Provider::Merchant => merchant_course_click_script(title, locator),
+        Provider::Merchant => merchant_course_click_script(title, section_title, locator),
     }
 }
 
@@ -2655,34 +2693,63 @@ fn merchant_capture_script(request_id: &str) -> String {
       try { return new URL(href, location.href).href; } catch (_) { return ""; }
     };
 
-    const externalIdFrom = (container, url, locator, title) => {
+    const externalIdFrom = (container, url, locator, title, sectionTitle) => {
       let element = container;
       for (let depth = 0; element && depth < 5; depth++, element = element.parentElement) {
         const data = element.dataset || {};
         const value = data.courseId || data.contentId || data.knowledgeId || data.resourceId || data.id;
         if (value) return String(value);
       }
-      return url || title || locator;
+      const sec = clean(sectionTitle);
+      const prefix = sec ? sec + "_" : "";
+      return url || (prefix + title) || locator;
+    };
+
+    const isChapterHeaderCandidate = (t) => {
+      const s = clean(t);
+      if (!s || s.length < 2 || s.length > 80) return false;
+      if (isPhaseOrSectionHeader(s)) return true;
+      if (isTagOrBadge(s) || isMeta(s) || isSiteOrUiTitle(s)) return false;
+      if (/(进度|已完成|未学习|学习中|\d+:\d+|\d+\s*分钟|原创作者|学习人数|课程介绍|讲师简介|评价)/.test(s)) return false;
+      if (/^\d{1,2}\s*[.、-]/.test(s) || /^第\d+[讲节课步]\s*/.test(s)) return false;
+      return /^\d{1,2}\s*[^\s\d.、-]/.test(s) || /^\d{1,2}\s+[^\s]/.test(s) || /^第[0-9一二三四五六七八九十]+[章节部分篇]\s*/.test(s);
     };
 
     const sectionTitleFrom = (container) => {
-      if (provider !== "merchant") return "";
+      if (provider !== "merchant" || !container) return "";
+      if (container.closest) {
+        const stageContainer = container.closest(".ant-collapse-item, [class*='collapse-item'], [class*='stage-item'], [class*='chapter-item'], [class*='stage'], [class*='chapter']");
+        if (stageContainer) {
+          const h = stageContainer.querySelector(".course-stage-caption, [class*='stage-caption'], .ant-collapse-header, [class*='collapse-header'], [class*='chapter-header'], [class*='stage__header']");
+          if (h) {
+            const lines = (h.innerText || "").split(/\n+/).map(clean).filter(Boolean);
+            const valid = lines.find((l) => isChapterHeaderCandidate(l) || isPhaseOrSectionHeader(l)) || lines[0];
+            if (valid && valid.length <= 80 && !isTagOrBadge(valid) && !isMeta(valid)) {
+              return valid;
+            }
+          }
+        }
+      }
       let current = container;
       for (let depth = 0; current && current.parentElement && depth < 8; depth++, current = current.parentElement) {
         const siblings = Array.from(current.parentElement.children);
         const index = siblings.indexOf(current);
         for (let offset = index - 1; offset >= 0; offset--) {
-          const text = clean(siblings[offset].innerText);
-          if (text && text.length <= 80 && isPhaseOrSectionHeader(text)) {
-            const firstLine = text.split(/\n+/).map(clean).find(isPhaseOrSectionHeader) || text;
+          const sib = siblings[offset];
+          const isHeaderCls = sib.matches && sib.matches(".course-stage-caption, [class*='stage-caption'], .ant-collapse-header, [class*='collapse-header'], [class*='chapter-header']");
+          const sibH = sib.querySelector ? sib.querySelector(".course-stage-caption, [class*='stage-caption'], .ant-collapse-header, [class*='collapse-header'], [class*='chapter-header']") : null;
+          const targetEl = isHeaderCls ? sib : (sibH || sib);
+          const text = clean(targetEl.innerText);
+          if (text && text.length <= 80 && (isHeaderCls || isChapterHeaderCandidate(text) || isPhaseOrSectionHeader(text))) {
+            const firstLine = text.split(/\n+/).map(clean).find((l) => isChapterHeaderCandidate(l) || isPhaseOrSectionHeader(l)) || text;
             return firstLine;
           }
         }
-        const headers = Array.from(current.parentElement.querySelectorAll("h1, h2, h3, h4, h5, [class*='header'], [class*='title'], [class*='phase'], [class*='section']"));
+        const headers = Array.from(current.parentElement.querySelectorAll(".course-stage-caption, [class*='stage-caption'], .ant-collapse-header, [class*='collapse-header'], [class*='chapter-header'], h1, h2, h3, h4, h5"));
         for (const h of headers) {
           if (h !== current && !current.contains(h)) {
             const ht = clean(h.innerText);
-            if (ht && ht.length <= 80 && isPhaseOrSectionHeader(ht)) {
+            if (ht && ht.length <= 80 && (isChapterHeaderCandidate(ht) || isPhaseOrSectionHeader(ht))) {
               return ht;
             }
           }
@@ -3051,12 +3118,15 @@ fn merchant_capture_script(request_id: &str) -> String {
         // 彻底清洗标题末尾拼接的类型标签与状态词（如 "考试 未完成"、"需本人处理"、"未完成"、"视频" 等）
         title = title.replace(/(?:\s+(?:视频|课件|文档|资料|手册|ppt课件|ppt|pptx|考试|测验|测试|问卷|未完成|已完成|未学习|学习中|已考试|合格|不合格|已通过|未通过|需本人处理|去学习|立即学习|开始学习|待播放|播放中))+$/i, "").trim();
 
-        if (!title || title.length < 2 || isInvalidTopicTitle(title) || isPhaseOrSectionHeader(title) || catalogSeen.has(title)) return;
-        catalogSeen.add(title);
+        const sectionTitle = sectionTitleFrom(item) || sectionTitleFrom(card);
+        const courseKey = (sectionTitle ? sectionTitle + "___" : "") + title;
+
+        if (!title || title.length < 2 || isInvalidTopicTitle(title) || isPhaseOrSectionHeader(title) || catalogSeen.has(courseKey)) return;
+        catalogSeen.add(courseKey);
 
         const locator = cssPath(item);
         const url = linkFrom(item);
-        const externalId = externalIdFrom(item, url, locator, title);
+        const externalId = externalIdFrom(item, url, locator, title, sectionTitle);
 
         let durMatch = ownItemText.match(/学习时长\s*[:：]?\s*(\d+)\s*分钟/) || ownItemText.match(/(\d+)\s*分钟/) || ownItemText.match(/学时\s*[:：]?\s*(\d+)/) || ownItemText.match(/时长\s*[:：]?\s*(\d+)/);
         let durationSeconds = 0;
@@ -3096,13 +3166,12 @@ fn merchant_capture_script(request_id: &str) -> String {
 
         const itemKind = detectCourseKind(title, text, durationSeconds, item);
 
-        // 不再显示章节名称二级目录，直接平铺在专题下方
         parsed.push({
           externalId,
           title,
           url,
           locator,
-          sectionTitle: "",
+          sectionTitle,
           kind: itemKind,
           durationSeconds,
           progress,
@@ -3150,11 +3219,21 @@ fn merchant_capture_script(request_id: &str) -> String {
       if (!Array.isArray(list)) return;
       for (const item of list) {
         if (!item || !item.title) continue;
-        const existing = allCatalogCourses.find((c) => c.title === item.title);
+        const itemSec = clean(item.sectionTitle);
+        const existing = allCatalogCourses.find((c) => {
+          const cSec = clean(c.sectionTitle);
+          if (cSec && itemSec) {
+            return cSec === itemSec && c.title === item.title;
+          }
+          return c.title === item.title;
+        });
         if (!existing) {
           seenCatalogTitles.add(item.title);
           allCatalogCourses.push(item);
         } else {
+          if (!existing.sectionTitle && item.sectionTitle) {
+            existing.sectionTitle = item.sectionTitle;
+          }
           // 如果后续解析得到了更高的进度或完成状态，进行更新
           if (item.completed && !existing.completed) {
             existing.completed = true;
@@ -3962,7 +4041,11 @@ fn import_capture(
     for (index, course) in valid_courses.iter().enumerate() {
         let kind = normalize_kind(&course.kind);
         let external_id = if course.external_id.trim().is_empty() {
-            format!("{}-{index}", course.title)
+            if !course.section_title.trim().is_empty() {
+                format!("{}-{}-{}", course.section_title.trim(), course.title.trim(), index)
+            } else {
+                format!("{}-{index}", course.title.trim())
+            }
         } else {
             course.external_id.clone()
         };
@@ -4071,7 +4154,11 @@ fn import_capture(
     for (index, course) in valid_courses.iter().enumerate() {
         if course.completed || course.progress >= 100.0 {
             let external_id = if course.external_id.trim().is_empty() {
-                format!("{}-{index}", course.title)
+                if !course.section_title.trim().is_empty() {
+                    format!("{}-{}-{}", course.section_title.trim(), course.title.trim(), index)
+                } else {
+                    format!("{}-{index}", course.title.trim())
+                }
             } else {
                 course.external_id.clone()
             };
@@ -4113,7 +4200,7 @@ fn is_phase_or_section_title(title: &str) -> bool {
 fn load_course(path: &PathBuf, course_id: &str) -> Result<CourseRecord, String> {
     let conn = Connection::open(path).map_err(|error| error.to_string())?;
     conn.query_row(
-        "SELECT id,topic_id,provider,url,locator,kind,title,duration_seconds,progress FROM video_courses WHERE id=?1",
+        "SELECT id,topic_id,provider,url,locator,kind,title,section_title,duration_seconds,progress FROM video_courses WHERE id=?1",
         params![course_id],
         |row| {
             let provider: String = row.get(2)?;
@@ -4125,8 +4212,9 @@ fn load_course(path: &PathBuf, course_id: &str) -> Result<CourseRecord, String> 
                 locator: row.get(4)?,
                 kind: row.get(5)?,
                 title: row.get(6)?,
-                duration_seconds: row.get(7)?,
-                progress: row.get(8)?,
+                section_title: row.get(7)?,
+                duration_seconds: row.get(8)?,
+                progress: row.get(9)?,
             })
         },
     )
@@ -4208,7 +4296,7 @@ async fn open_course(
             .parse::<tauri::Url>()
             .map_err(|error| error.to_string())?;
         window.navigate(url).map_err(|error| error.to_string())?;
-        let click_script = course_click_script(&course.title, &course.locator, course.provider);
+        let click_script = course_click_script(&course.title, &course.section_title, &course.locator, course.provider);
         let click_window = window.clone();
         let click_provider = course.provider;
         let click_state = state.clone();
@@ -5529,7 +5617,7 @@ mod tests {
 
     #[test]
     fn course_click_prefers_saved_locator_and_reuses_current_window() {
-        let script = course_click_script("课程标题", "#saved-course", Provider::Ulearn);
+        let script = course_click_script("课程标题", "", "#saved-course", Provider::Ulearn);
         let locator_index = script.find("byLocator").expect("locator lookup exists");
         let title_index = script.find("byTitle").expect("title fallback exists");
         assert!(locator_index < title_index);
@@ -5933,7 +6021,7 @@ mod tests {
         assert!(script.contains("singleLessonItems"));
         assert!(script.contains("findCatalogPanel"));
         assert!(script.contains("hasLessonNumber"));
-        assert!(script.contains("sectionTitle: \"\""));
+        assert!(script.contains("sectionTitle"));
         assert!(script.contains(".course-stage-caption"));
         assert!(script.contains(".course-content-item"));
         assert!(script.contains("rotate\\(-?90deg\\)"));
@@ -6037,7 +6125,7 @@ mod tests {
         assert!(script.contains("durCount > 1"));
         assert!(script.contains("creditCount > 1"));
 
-        let click_script = course_click_script("问卷测试", "#loc", Provider::Merchant);
+        let click_script = course_click_script("问卷测试", "", "#loc", Provider::Merchant);
         assert!(click_script.contains("填写问卷|去填写|开始填写|参加调研|参与问卷|开始问卷|问卷调查|去评价|立即评价|填写评价|评价"));
 
         let f = QueueFixture::new();
@@ -6114,7 +6202,7 @@ mod tests {
 
     #[test]
     fn course_click_script_supports_async_modal_and_exam_buttons() {
-        let script = course_click_script("01. 六步赢单考试", "#saved-course", Provider::Merchant);
+        let script = course_click_script("01. 六步赢单考试", "", "#saved-course", Provider::Merchant);
         assert!(script.contains("去考试|开始考试|参加考试|进入考试"));
         assert!(script.contains("ant-modal"));
         assert!(script.contains("baseTitle"));
@@ -6226,7 +6314,7 @@ mod tests {
         assert!(script.contains("章节\\s*[（(]?\\d+[）)]?"));
         assert!(script.contains(".course-detail-right-wrapper"));
 
-        let click_script = course_click_script("01. 测试", "#test", Provider::Merchant);
+        let click_script = course_click_script("01. 测试", "", "#test", Provider::Merchant);
         assert!(click_script.contains("if (hasContentItems) continue;"));
     }
 
@@ -6254,8 +6342,8 @@ mod tests {
         assert!(merchant_capture.contains("findCatalogPanel"));
 
         // 点击脚本物理隔离：乐学不包含 ant-modal 弹窗等待与折叠展开
-        let ulearn_click = course_click_script("测试课程", "#loc", Provider::Ulearn);
-        let merchant_click = course_click_script("测试课程", "#loc", Provider::Merchant);
+        let ulearn_click = course_click_script("测试课程", "", "#loc", Provider::Ulearn);
+        let merchant_click = course_click_script("测试课程", "", "#loc", Provider::Merchant);
 
         assert!(!ulearn_click.contains("ant-modal"));
         assert!(!ulearn_click.contains("stageHeaders"));
@@ -7254,5 +7342,75 @@ mod tests {
             assert_eq!(active.duration, 4165.0);
             assert_eq!(active.current_time, 4165.0);
         }
+    }
+
+    #[test]
+    fn course_click_script_supports_target_section_filtering() {
+        let script = course_click_script(
+            "01. 系统登录—SSO单点登录",
+            "02 分支机构",
+            "#saved-course",
+            Provider::Merchant,
+        );
+        assert!(script.contains("02 分支机构"));
+        assert!(script.contains("cleanTargetSection"));
+        assert!(script.contains("matchedHeader"));
+        assert!(script.contains("sectionScope"));
+        assert!(script.contains("expandHeader"));
+    }
+
+    #[test]
+    fn import_capture_handles_same_name_courses_in_different_sections() {
+        let f = QueueFixture::new();
+        let capture = PageTopicCapture {
+            title: "人力绩效平台操作指引".into(),
+            url: "https://example.com/hr-performance".into(),
+            progress: 0.0,
+            total_count: 2,
+            completed_count: 0,
+            courses: vec![
+                PageCourseCapture {
+                    external_id: "01 总公司_01. 系统登录—SSO单点登录".into(),
+                    title: "01. 系统登录—SSO单点登录".into(),
+                    url: String::new(),
+                    locator: "#c1".into(),
+                    section_title: "01 总公司".into(),
+                    kind: "video".into(),
+                    duration_seconds: 600,
+                    progress: 0.0,
+                    completed: false,
+                },
+                PageCourseCapture {
+                    external_id: "02 分支机构_01. 系统登录—SSO单点登录".into(),
+                    title: "01. 系统登录—SSO单点登录".into(),
+                    url: String::new(),
+                    locator: "#c2".into(),
+                    section_title: "02 分支机构".into(),
+                    kind: "video".into(),
+                    duration_seconds: 600,
+                    progress: 0.0,
+                    completed: false,
+                },
+            ],
+        };
+
+        let summary = import_capture(&f.state, Provider::Merchant, capture).unwrap();
+        assert_eq!(summary.imported, 2);
+        assert_eq!(summary.completed, 0);
+
+        let conn = Connection::open(&f.path).unwrap();
+        let total_courses: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM video_courses WHERE topic_id=?1",
+            params![summary.topic_id],
+            |row| row.get(0),
+        ).unwrap();
+        assert_eq!(total_courses, 2);
+
+        let section_count: i64 = conn.query_row(
+            "SELECT COUNT(DISTINCT section_title) FROM video_courses WHERE topic_id=?1",
+            params![summary.topic_id],
+            |row| row.get(0),
+        ).unwrap();
+        assert_eq!(section_count, 2);
     }
 }
