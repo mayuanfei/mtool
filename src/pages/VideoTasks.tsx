@@ -438,35 +438,57 @@ export function VideoTasks() {
                 </button>
               </div>
             )}
-            <div className="mt-4 flex flex-wrap gap-2">
-              <button
-                onClick={() => void openSite(source.provider)}
-                disabled={busyKey === 'open-' + source.provider}
-                className={cx(
-                  'px-3 py-2 disabled:opacity-50 text-white rounded-lg text-xs font-semibold flex items-center gap-2',
-                  source.currentUrl?.toLowerCase().includes('/login') || source.currentUrl?.toLowerCase().includes('/sso')
-                    ? 'bg-amber-600 hover:bg-amber-500'
-                    : 'bg-indigo-600 hover:bg-indigo-500'
-                )}
-              >
-                {busyKey === 'open-' + source.provider
-                  ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                  : <ExternalLink className="w-3.5 h-3.5" />}
-                {source.currentUrl?.toLowerCase().includes('/login') || source.currentUrl?.toLowerCase().includes('/sso')
-                  ? '打开完成登录'
-                  : '打开/选择专题'}
-              </button>
-              <button
-                onClick={() => void importTopic(source.provider)}
-                disabled={!source.windowOpen || busyKey === 'import-' + source.provider}
-                className="px-3 py-2 th-bg-input-alt border th-border-subtle th-text-2 rounded-lg text-xs font-semibold flex items-center gap-2 disabled:opacity-40 th-hover-surface"
-              >
-                {busyKey === 'import-' + source.provider
-                  ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                  : <RefreshCw className="w-3.5 h-3.5" />}
-                导入当前专题
-              </button>
-            </div>
+            {(() => {
+              const providerTopics = dashboard.topics.filter((t) => t.provider === source.provider);
+              const hasTopics = providerTopics.length > 0;
+              const hasIncomplete = providerTopics.some((t) => t.progress < 100);
+              const isLogin = source.currentUrl?.toLowerCase().includes('/login') || source.currentUrl?.toLowerCase().includes('/sso');
+
+              return (
+                <div className="mt-4 flex flex-wrap gap-2">
+                  <button
+                    onClick={() => void openSite(source.provider)}
+                    disabled={busyKey === 'open-' + source.provider}
+                    title={
+                      isLogin
+                        ? '打开窗口完成扫码/账号登录'
+                        : hasIncomplete
+                        ? '直达当前学习的专题大纲页；若需选其他专题可在窗口中直接切换'
+                        : hasTopics
+                        ? '直达最近专题大纲页；若需选其他专题可在窗口中直接切换'
+                        : '打开平台首页选择要学习的专题'
+                    }
+                    className={cx(
+                      'px-3 py-2 disabled:opacity-50 text-white rounded-lg text-xs font-semibold flex items-center gap-2',
+                      isLogin
+                        ? 'bg-amber-600 hover:bg-amber-500'
+                        : 'bg-indigo-600 hover:bg-indigo-500'
+                    )}
+                  >
+                    {busyKey === 'open-' + source.provider
+                      ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                      : <ExternalLink className="w-3.5 h-3.5" />}
+                    {isLogin
+                      ? '打开完成登录'
+                      : hasIncomplete
+                      ? '直达当前专题'
+                      : hasTopics
+                      ? '打开最近专题'
+                      : '打开/选择专题'}
+                  </button>
+                  <button
+                    onClick={() => void importTopic(source.provider)}
+                    disabled={!source.windowOpen || busyKey === 'import-' + source.provider}
+                    className="px-3 py-2 th-bg-input-alt border th-border-subtle th-text-2 rounded-lg text-xs font-semibold flex items-center gap-2 disabled:opacity-40 th-hover-surface"
+                  >
+                    {busyKey === 'import-' + source.provider
+                      ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                      : <RefreshCw className="w-3.5 h-3.5" />}
+                    导入当前专题
+                  </button>
+                </div>
+              );
+            })()}
           </div>
         ))}
       </section>
