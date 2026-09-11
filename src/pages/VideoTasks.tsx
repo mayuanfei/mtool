@@ -8,7 +8,7 @@ import {
 } from 'lucide-react';
 
 type Provider = 'ulearn' | 'merchant';
-type CourseKind = 'video' | 'exam' | 'slides' | 'material';
+type CourseKind = 'video' | 'exam' | 'slides' | 'material' | 'survey' | 'offline';
 type CourseStatus = 'completed' | 'pending' | 'opening' | 'playing' | 'verifying' | 'manual' | 'attention' | 'paused' | 'skipped';
 
 interface VideoTaskSettings {
@@ -126,6 +126,18 @@ const KIND_META: Record<CourseKind, { label: string; icon: typeof Video; classes
     classes: 'text-emerald-400 bg-emerald-500/10 border-emerald-500/25',
     badgeClasses: 'text-emerald-400 bg-emerald-500/10 border-emerald-500/25',
   },
+  survey: {
+    label: '问卷',
+    icon: ClipboardCheck,
+    classes: 'text-orange-400 bg-orange-500/10 border-orange-500/25',
+    badgeClasses: 'text-orange-400 bg-orange-500/10 border-orange-500/25',
+  },
+  offline: {
+    label: '线下课',
+    icon: GraduationCap,
+    classes: 'text-slate-400 bg-slate-500/10 border-slate-500/25',
+    badgeClasses: 'text-slate-400 bg-slate-500/10 border-slate-500/25',
+  },
   exam: {
     label: '课程考试',
     icon: ClipboardCheck,
@@ -135,7 +147,7 @@ const KIND_META: Record<CourseKind, { label: string; icon: typeof Video; classes
 };
 
 function resolveCourseKind(course: { kind?: string; title?: string }): CourseKind {
-  if (course.kind === 'exam' || course.kind === 'slides' || course.kind === 'material' || course.kind === 'video') {
+  if (course.kind === 'survey' || course.kind === 'offline' || course.kind === 'exam' || course.kind === 'slides' || course.kind === 'material' || course.kind === 'video') {
     return course.kind;
   }
   const title = (course.title || '').trim();
@@ -373,7 +385,7 @@ export function VideoTasks() {
                 <div className="min-w-0">
                   <h2 className="font-semibold th-text-2">{source.name}</h2>
                   <div className="text-xs th-text-muted mt-1 truncate">
-                    {source.windowOpen ? '会话已打开 · ' + currentHost(source.currentUrl) : '尚未打开登录会话'}
+                    {source.windowOpen ? '学习窗口已打开 · ' + currentHost(source.currentUrl) : '尚未打开学习窗口'}
                   </div>
                   <div className="text-[11px] th-text-faint mt-1 truncate select-text">{source.homeUrl}</div>
                 </div>
@@ -391,7 +403,7 @@ export function VideoTasks() {
                   : 'th-text-muted th-border',
               )}>
                 {source.blockedReason
-                  ? '等待登录'
+                  ? '队列待恢复'
                   : source.currentUrl?.toLowerCase().includes('/login') || source.currentUrl?.toLowerCase().includes('/sso')
                   ? '需扫码/登录'
                   : dashboard.settings.running && source.windowOpen
@@ -403,9 +415,13 @@ export function VideoTasks() {
             </div>
             {source.blockedReason && (
               <div className="mt-3 px-3 py-2 rounded-lg bg-rose-500/10 border border-rose-500/30 flex items-center justify-between gap-3 text-xs text-rose-800 dark:text-rose-300">
-                <span className="flex items-center gap-1.5 min-w-0 truncate">
+                <span className="flex items-center gap-1.5 min-w-0">
                   <AlertTriangle className="w-4 h-4 text-rose-600 dark:text-rose-400 shrink-0" />
-                  <span className="truncate">{source.blockedReason}</span>
+                  <span>
+                    {source.blockedReason.includes('登录')
+                      ? '队列曾因登录问题暂停。请打开学习窗口确认；若已显示个人首页，无需重新登录，点击“确认后继续”。'
+                      : source.blockedReason}
+                  </span>
                 </span>
                 <button
                   onClick={() => void runAction(
@@ -418,7 +434,7 @@ export function VideoTasks() {
                   )}
                   className="px-2.5 py-1 rounded bg-rose-500/20 hover:bg-rose-500/30 text-rose-800 dark:text-rose-200 border border-rose-500/40 text-[11px] font-semibold shrink-0"
                 >
-                  登录后继续
+                  确认后继续
                 </button>
               </div>
             )}
@@ -438,7 +454,7 @@ export function VideoTasks() {
                   : <ExternalLink className="w-3.5 h-3.5" />}
                 {source.currentUrl?.toLowerCase().includes('/login') || source.currentUrl?.toLowerCase().includes('/sso')
                   ? '打开完成登录'
-                  : source.windowOpen ? '打开/选择专题' : '登录并选择专题'}
+                  : '打开/选择专题'}
               </button>
               <button
                 onClick={() => void importTopic(source.provider)}
@@ -608,7 +624,7 @@ export function VideoTasks() {
             <div className="space-y-1">
               <div className="flex items-start gap-1.5">
                 <span className="inline-block w-1.5 h-1.5 rounded-full bg-orange-600 dark:bg-orange-400/80 mt-1.5 shrink-0" />
-                <span><strong className="text-orange-950 dark:text-orange-200 font-semibold">需本人处理</strong>：考试、测验与问卷（需人工选择答案并提交）。</span>
+                <span><strong className="text-orange-950 dark:text-orange-200 font-semibold">需本人处理</strong>：考试、测验、问卷与线下课（需本人完成）。</span>
               </div>
               <div className="flex items-start gap-1.5">
                 <span className="inline-block w-1.5 h-1.5 rounded-full bg-orange-600 dark:bg-orange-400/80 mt-1.5 shrink-0" />
@@ -810,7 +826,7 @@ export function VideoTasks() {
                                   title={isLoginError ? '打开窗口完成扫码/账号登录' : '打开网页窗口查看内容'}
                                 >
                                   <ExternalLink className="w-3.5 h-3.5" />
-                                  {isLoginError ? '打开登录' : kindKey === 'exam' ? '打开考试' : kindKey === 'slides' ? '打开课件' : kindKey === 'material' ? '打开资料' : '打开内容'}
+                                  {isLoginError ? '打开登录' : kindKey === 'survey' ? '打开问卷' : kindKey === 'offline' ? '查看线下课' : kindKey === 'exam' ? '打开考试' : kindKey === 'slides' ? '打开课件' : kindKey === 'material' ? '打开资料' : '打开内容'}
                                 </button>
                               )}
                               {(course.status === 'opening' || course.status === 'playing') && (
