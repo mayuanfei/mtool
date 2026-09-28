@@ -830,8 +830,8 @@ export function VideoTasks() {
                               </div>
                             </div>
                             <div className="flex items-center gap-2 shrink-0">
-                              {/* 仅正在播放中的视频，需要人工处理的考试/课件，或者需要登录/处理的异常课程，展示打开按钮 */}
-                              {(course.status === 'opening' || course.status === 'playing' || course.status === 'attention' || isLoginError || kindKey !== 'video') && (
+                              {/* 视频课程仅在当前播放中展示打开按钮，避免同时打开多个视频引发平台冲突报错；非视频类资源（考试/课件/问卷等）或需登录时展示相应打开按钮 */}
+                              {(isLoginError || (kindKey === 'video' ? (course.status === 'opening' || course.status === 'playing') : true)) && (
                                 <button
                                   onClick={() => void runAction(
                                     'open-course-' + course.id,

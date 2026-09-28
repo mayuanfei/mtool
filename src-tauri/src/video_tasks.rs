@@ -421,7 +421,53 @@ fn init_db(path: &PathBuf) -> Result<(), String> {
          WHERE (title LIKE '%手册' OR title LIKE '%文档' OR title LIKE '%手册%' OR title LIKE '%阅读材料%' OR title LIKE '%参考资料%') AND kind = 'video'",
         [],
     );
+    let _ = conn.execute(
+        "UPDATE video_courses
+         SET url = ''
+         WHERE url != ''
+           AND url IN (SELECT url FROM video_topics WHERE video_topics.id = video_courses.topic_id)",
+        [],
+    );
+    let _ = conn.execute(
+        "UPDATE video_courses
+         SET status = 'pending', progress = 0.0, last_error = NULL
+         WHERE kind = 'video'
+           AND status = 'completed'
+           AND duration_seconds = 100",
+        [],
+    );
+    let _ = conn.execute(
+        "UPDATE video_topics
+         SET completed_count = (SELECT COUNT(*) FROM video_courses WHERE topic_id = video_topics.id AND status = 'completed'),
+             progress = ROUND((CAST((SELECT COUNT(*) FROM video_courses WHERE topic_id = video_topics.id AND status = 'completed') AS REAL) / MAX(1, (SELECT COUNT(*) FROM video_courses WHERE topic_id = video_topics.id))) * 100.0, 1)
+         WHERE id IN (SELECT DISTINCT topic_id FROM video_courses WHERE kind = 'video' AND duration_seconds = 100)",
+        [],
+    );
     Ok(())
+}
+
+fn is_same_page_url(url1: &str, url2: &str) -> bool {
+    let clean1 = url1.trim().trim_end_matches('#').trim_end_matches('/');
+    let clean2 = url2.trim().trim_end_matches('#').trim_end_matches('/');
+    if clean1 == clean2 {
+        return true;
+    }
+    let (Ok(p1), Ok(p2)) = (tauri::Url::parse(url1), tauri::Url::parse(url2)) else {
+        return false;
+    };
+    p1.scheme() == p2.scheme()
+        && p1.host_str() == p2.host_str()
+        && p1.port() == p2.port()
+        && p1.path().trim_end_matches('/') == p2.path().trim_end_matches('/')
+        && p1.query() == p2.query()
+}
+
+fn has_distinct_course_url(course_url: &str, topic_url: &str) -> bool {
+    let clean_course = course_url.trim();
+    if clean_course.is_empty() || clean_course.starts_with("javascript:") {
+        return false;
+    }
+    !is_same_page_url(clean_course, topic_url)
 }
 
 fn load_settings(path: &PathBuf) -> Result<VideoTaskSettings, String> {
@@ -462,6 +508,8 @@ fn bridge_script(provider: Provider, speed: f64, muted: bool) -> String {
     muted: __MUTED__,
     autoPlay: false,
     tracked: new WeakSet(),
+    staleMedias: new WeakSet(),
+    activePlayedMedias: new WeakSet(),
     pageLoadedAt: Date.now(),
     currentCourseTitle: "",
     currentCourseKind: "",
@@ -575,15 +623,46 @@ fn bridge_script(provider: Provider, speed: f64, muted: bool) -> String {
   const track = (media) => {
     if (state.tracked.has(media)) return;
     state.tracked.add(media);
-    ["play", "playing", "pause", "ended", "error", "canplay", "canplaythrough", "loadedmetadata", "durationchange"].forEach((name) => {
-      media.addEventListener(name, () => report(name, media), true);
+    ["play", "playing"].forEach((name) => {
+      media.addEventListener(name, () => {
+        if (!state.staleMedias.has(media) || media.currentTime < 2.0) {
+          state.staleMedias.delete(media);
+          state.activePlayedMedias.add(media);
+        }
+        report(name, media);
+      }, true);
+    });
+    ["pause", "ended", "error", "canplay", "canplaythrough", "loadedmetadata", "durationchange"].forEach((name) => {
+      media.addEventListener(name, () => {
+        if (name === "ended") {
+          if (state.staleMedias.has(media) && !state.activePlayedMedias.has(media)) {
+            return;
+          }
+          if (hasUnfinishedExam()) {
+            report("exam_required", media);
+            return;
+          }
+        }
+        report(name, media);
+      }, true);
     });
     media.addEventListener("timeupdate", () => {
+      if (isMediaReallyAdvancing(media) && (!state.staleMedias.has(media) || media.currentTime < 2.0)) {
+        state.staleMedias.delete(media);
+        state.activePlayedMedias.add(media);
+      }
       if (!media.__mtoolLastReport || Date.now() - media.__mtoolLastReport > 600) {
         media.__mtoolLastReport = Date.now();
         report("timeupdate", media);
       }
       if (media.ended || (media.duration > 5 && media.currentTime >= media.duration - 0.8)) {
+        if (state.staleMedias.has(media) && !state.activePlayedMedias.has(media)) {
+          return;
+        }
+        if (hasUnfinishedExam()) {
+          report("exam_required", media);
+          return;
+        }
         report("ended", media);
       }
     }, true);
@@ -662,7 +741,7 @@ fn bridge_script(provider: Provider, speed: f64, muted: bool) -> String {
       }
     } catch (_) {}
 
-    // 2. 全覆盖识别防挂机、继续、确定、提交等弹窗按钮
+    // 2. 全覆盖识别防挂机、继续、确定、提交、开始学习等弹窗与操作按钮
     try {
       const allButtons = doc.querySelectorAll("button, a, [role='button'], input[type='button'], input[type='submit'], .ant-btn, .el-button, [class*='btn'], [class*='button']");
       allButtons.forEach((btn) => {
@@ -670,7 +749,8 @@ fn bridge_script(provider: Provider, speed: f64, muted: bool) -> String {
         // 排除底部的播放器控制条切换键
         if (btn.matches(".prism-play-btn, .vjs-play-control, [class*='play-btn'], [class*='playBtn'], [class*='volume']")) return;
         const text = (btn.innerText || btn.value || btn.title || "").replace(/\s+/g, "");
-        if (/^(继续学习|继续播放|我知道了|确定|确认|知道了|继续|提交|完成|立即学习|开始学习|好的|交卷|下一步)$/.test(text)) {
+        if (/^(继续学习|继续播放|我知道了|确定|确认|知道了|继续|提交|完成|立即学习|开始学习|进入学习|立即观看|开始播放|立即播放|进入课程|开始观看|去学习|播放|好的|交卷|下一步)$/.test(text) ||
+            (text.length <= 12 && /(开始学习|立即学习|继续学习|进入学习|立即播放|开始播放)/.test(text))) {
           simulateFullClick(btn);
         }
       });
@@ -690,7 +770,9 @@ fn bridge_script(provider: Provider, speed: f64, muted: bool) -> String {
     const bigPlaySelectors = [
       ".prism-big-play-btn", ".vjs-big-play-button", ".pv-big-play-btn",
       ".xgplayer-start", ".tcplayer-center-play", "[class*='big-play']",
-      "[class*='center-play']", "[class*='play-mask']", "[class*='player-mask']"
+      "[class*='center-play']", "[class*='play-mask']", "[class*='player-mask']",
+      "[class*='play-icon']", "[class*='video-play']", "[class*='player-play']",
+      ".v-play-btn", ".play-btn"
     ];
     try {
       doc.querySelectorAll(bigPlaySelectors.join(",")).forEach((btn) => {
@@ -937,11 +1019,10 @@ fn bridge_script(provider: Provider, speed: f64, muted: bool) -> String {
       return false;
     };
 
-    // 0.2 检测课程计划是否已结束/过期（已结束的课程无法继续学习，直接标记为完成）
+    // 0.2 检测课程计划是否已明确结束/下架（已下架或关闭的课程上报 error 阻断，绝不能伪造 100% 完播）
     const hasExpiredOrEndedNotice = () => {
       for (const doc of docs) {
         try {
-          const bodyText = (doc.body ? doc.body.innerText : "") || "";
           const alerts = doc.querySelectorAll(".el-message, .ant-message, [role='alert'], [class*='message'], [class*='toast'], [class*='notice'], [class*='tip'], [class*='alert']");
           for (const a of alerts) {
             if (!a || a.offsetWidth === 0 || a.offsetHeight === 0) continue;
@@ -950,21 +1031,11 @@ fn bridge_script(provider: Provider, speed: f64, muted: bool) -> String {
               t.includes("计划已结束") ||
               t.includes("培训已结束") ||
               t.includes("活动已结束") ||
-              t.includes("学习已结束") ||
               t.includes("项目已结束") ||
               t.includes("计划已关闭") ||
-              t.includes("已超过学习截止时间") ||
-              t.includes("已过学习截止时间") ||
               t.includes("课程已下架") ||
               t.includes("报名已结束")
             ) {
-              return true;
-            }
-          }
-          const m = bodyText.match(/起止时间\s*[:：]?\s*\d{4}[-/.]\d{1,2}[-/.]\d{1,2}.*?[~至到-]\s*(\d{4}[-/.]\d{1,2}[-/.]\d{1,2}(?:\s+\d{1,2}:\d{1,2}(?::\d{1,2})?)?)/);
-          if (m) {
-            const endTs = new Date(m[1].replace(/-/g, "/")).getTime();
-            if (endTs && !isNaN(endTs) && endTs < Date.now()) {
               return true;
             }
           }
@@ -973,8 +1044,38 @@ fn bridge_script(provider: Provider, speed: f64, muted: bool) -> String {
       return false;
     };
 
+    // 0.3 检测银联乐学课程大纲中是否包含未完成的结业考试或测验
+    const hasUnfinishedExam = () => {
+      if (provider !== "ulearn") return false;
+      for (const doc of docs) {
+        try {
+          const examActionBtns = Array.from(doc.querySelectorAll("button, a, [role='button'], [class*='btn']")).filter((b) => {
+            if (!b || b.offsetWidth === 0 || b.offsetHeight === 0) return false;
+            const t = (b.innerText || b.value || b.textContent || "").replace(/\s+/g, "");
+            return /^(开始考试|进入考试|参加考试|立即考试|去考试|开始答题|去答题|进行考试)$/.test(t);
+          });
+          if (examActionBtns.length > 0) return true;
+
+          const items = Array.from(doc.querySelectorAll("div, li, tr, [class*='item'], [class*='node'], [class*='chapter'], [class*='card']"));
+          for (const item of items) {
+            if (item.children && item.children.length > 6) continue;
+            const text = (item.innerText || item.textContent || "").replace(/\s+/g, " ").trim();
+            if (text.length > 150) continue;
+            if (/(结业考试|课程结业考试|课程考试|综合测试|随堂测验|综合测验|随堂测试|试卷总分|通过要求|参加考试|进入考试|开始考试|去考试)/.test(text)) {
+              const hasCheck = !!item.querySelector(".anticon-check, .el-icon-check, svg, [class*='check'], [class*='finish'], [class*='success']");
+              const hasPassedText = /(已通过|已合格|已完成|成绩\s*[:：]?\s*\d+)/.test(text);
+              if (!hasCheck && !hasPassedText) {
+                return true;
+              }
+            }
+          }
+        } catch (_) {}
+      }
+      return false;
+    };
+
     if (hasExpiredOrEndedNotice()) {
-      report("ended", { currentTime: 100, duration: 100 });
+      report("error", { currentTime: 0, duration: 0 });
       return;
     }
 
@@ -998,29 +1099,28 @@ fn bridge_script(provider: Provider, speed: f64, muted: bool) -> String {
 
     // 1.1 若页面中有原生视频/音频：以视频自身的实际播放进度为主！
     if (allMedias.length > 0) {
-      // 仅当弹出明确的模态完成对话框时，才上报完播；绝不在常规播放中提前截断
-      if (hasVisibleCompletionModal()) {
-        const primary = allMedias[0];
-        const dur = (primary && primary.duration > 0) ? primary.duration : 100;
-        report("ended", { currentTime: dur, duration: dur });
-        return;
-      }
-      // 看门狗增强：若视频已播放到末尾（距离结束不足0.8秒，或已暂停且进度达到99%以上），主动上报完播
+      // 必须排除上一门课程遗留下来的陈旧媒体，除非该媒体在当前课程中激活播放过
       const finishedMedia = allMedias.find((m) =>
-        m.ended ||
-        (m.duration > 5 && m.currentTime >= m.duration - 0.8) ||
-        (m.duration > 10 && m.paused && (m.currentTime / m.duration) >= 0.99)
+        (!state.staleMedias.has(m) || state.activePlayedMedias.has(m)) && (
+          m.ended ||
+          (m.duration > 5 && m.currentTime >= m.duration - 0.8) ||
+          (m.duration > 10 && m.paused && (m.currentTime / m.duration) >= 0.99)
+        )
       );
       if (finishedMedia) {
+        if (hasUnfinishedExam()) {
+          report("exam_required", finishedMedia);
+          return;
+        }
         report("ended", finishedMedia);
         return;
       }
     } else {
       // 1.2 若页面中未找到原生 video/audio 标签：
-      // 若当前已知课程是视频类型，播放器可能正在渲染或网络缓冲挂载，绝不可走文档探测或伪造进度！
+      // 若当前课程为视频类型，跳过文档类伪造探测，平滑进入下方的 triggerPlayUI 自动寻找并点击【开始学习】/【立即学习】！
       if (state.currentCourseKind === "video") {
-        return;
-      }
+        // 视频课程跳过文档伪造，直达下方 triggerPlayUI
+      } else {
 
       // 优先探测页面上动态变化的学习进度（如 "学习进度: 68%"、进度条等）
       const parseProgressNum = (str) => {
@@ -1318,6 +1418,7 @@ fn bridge_script(provider: Provider, speed: f64, muted: bool) -> String {
           return;
         }
       }
+      }
     }
 
     if (!shouldPlay) return;
@@ -1349,6 +1450,14 @@ fn bridge_script(provider: Provider, speed: f64, muted: bool) -> String {
     state.currentCourseKind = String(kind || "").trim();
     state.lastDocProgress = 0;
     state.pageLoadedAt = Date.now();
+    state.activePlayedMedias = new WeakSet();
+    try {
+      getAccessibleDocs().forEach((doc) => {
+        doc.querySelectorAll("video, audio").forEach((m) => {
+          state.staleMedias.add(m);
+        });
+      });
+    } catch (_) {}
     try {
       sessionStorage.setItem("__mtool_current_course__", JSON.stringify({
         title: state.currentCourseTitle,
@@ -1362,11 +1471,12 @@ fn bridge_script(provider: Provider, speed: f64, muted: bool) -> String {
     state.speed = Math.min(2, Math.max(1, Number(speedValue) || 2));
     state.muted = Boolean(mutedValue);
     if (autoPlay !== undefined) state.autoPlay = Boolean(autoPlay);
-    if (title && !state.currentCourseTitle) {
-      state.currentCourseTitle = String(title).trim();
-    }
-    if (kind && !state.currentCourseKind) {
-      state.currentCourseKind = String(kind).trim();
+    const cleanTitle = String(title || "").trim();
+    const cleanKind = String(kind || "").trim();
+    if (cleanTitle && cleanTitle !== state.currentCourseTitle) {
+      state.setCourse(cleanTitle, cleanKind);
+    } else if (cleanKind && !state.currentCourseKind) {
+      state.currentCourseKind = cleanKind;
     }
     apply(Boolean(autoPlay));
   };
@@ -1434,9 +1544,15 @@ fn browser_nav_script(provider: Provider) -> String {
     if (!window.__MTOOL_BROWSER_NAV_SHIELD__) {
       window.__MTOOL_BROWSER_NAV_SHIELD__ = true;
 
-      // 使用标准的 play 事件捕获监听，自动静音并暂停，绝不修改页面任何 DOM 结构与样式
+      let userInteracted = false;
+      ['pointerdown', 'mousedown', 'keydown', 'touchstart'].forEach((evt) => {
+        window.addEventListener(evt, () => { userInteracted = true; }, { capture: true, passive: true });
+      });
+
+      // 仅在无用户交互的初始阶段自动静音并暂停，绝不修改页面任何 DOM 结构与样式；一旦用户主动交互点击，放行正常播放
       window.addEventListener("play", (e) => {
         try {
+          if (userInteracted) return;
           const media = e.target;
           if (media && typeof media.pause === "function") {
             media.muted = true;
@@ -1446,6 +1562,7 @@ fn browser_nav_script(provider: Provider) -> String {
       }, true);
 
       const ensurePaused = () => {
+        if (userInteracted) return;
         try {
           document.querySelectorAll("video, audio").forEach((m) => {
             if (!m.paused) {
@@ -1653,106 +1770,223 @@ fn update_media_script(
     )
 }
 
+const ULEARN_COURSE_CLICK_TEMPLATE: &str = r##"(async () => {
+  const targetTitle = __TARGET_TITLE__;
+  const targetLocator = __TARGET_LOCATOR__;
+  const clean = (value) => String(value || "").replace(/\s+/g, " ").trim();
+  const pure = (value) => String(value || "").replace(/[《》\s]/g, "").trim();
+
+  // 1. 全局拦截并代理 window.open，确保任何形式的打开均在当前 webview 完成页面导航
+  try {
+    window.open = (url) => {
+      const next = clean(url);
+      if (next && next !== "about:blank" && !/^javascript:/i.test(next)) {
+        try {
+          window.location.assign(new URL(next, window.location.href).href);
+        } catch (_) {}
+      }
+      return window;
+    };
+  } catch (_) {}
+
+  // 1.5 自动检测并点击【加入自学】/【立即报名】，消除未加入专题对卡片点击的拦截
+  try {
+    const enrollBtn = Array.from(document.querySelectorAll("button, a, [role='button'], div, span")).find((el) => {
+      const t = clean(el.innerText);
+      return /^(加入自学|立即自学|立即报名|加入学习|开始自学)$/.test(t) && !el.disabled;
+    });
+    if (enrollBtn) {
+      enrollBtn.click();
+      await new Promise((r) => setTimeout(r, 400));
+    }
+  } catch (_) {}
+
+  // 1.6 确保切换到【课程大纲】Tab，避免停留在“专题介绍”导致未渲染卡片
+  try {
+    const tabs = Array.from(document.querySelectorAll("[role='tab'], .el-tabs__item, .ant-tabs-tab, div, span"));
+    const outlineTab = tabs.find((t) => {
+      const txt = clean(t.innerText);
+      return /^(课程大纲|目录|大纲|课程列表)$/.test(txt);
+    });
+    if (outlineTab) {
+      const isActive = outlineTab.classList.contains("is-active") || outlineTab.classList.contains("active") || outlineTab.getAttribute("aria-selected") === "true";
+      if (!isActive) {
+        outlineTab.click();
+        await new Promise((r) => setTimeout(r, 400));
+      }
+    }
+  } catch (_) {}
+
+  const cleanTarget = clean(targetTitle);
+  const pureTarget = pure(targetTitle);
+  if (!pureTarget) return;
+
+  try {
+    if (window.__MTOOL_LEARNING_BRIDGE__ && typeof window.__MTOOL_LEARNING_BRIDGE__.setCourse === "function") {
+      window.__MTOOL_LEARNING_BRIDGE__.setCourse(cleanTarget);
+    }
+  } catch (_) {}
+
+  // 2. 若页面当前已有正在正常播放的视频，则不重复点击打断播放
+  try {
+    const activeVideo = Array.from(document.querySelectorAll("video")).find((v) => !v.paused && v.currentTime > 0);
+    if (activeVideo) return;
+  } catch (_) {}
+
+  const matchesTitle = (rawText) => {
+    const text = clean(rawText);
+    const pureT = pure(rawText);
+    if (!text || !pureT) return false;
+    if (text === cleanTarget || pureT === pureTarget) return true;
+    if (pureT.includes(pureTarget) || pureTarget.includes(pureT)) return true;
+    return false;
+  };
+
+  // 3. 多策略定位课程卡片
+  let byLocator = null;
+  if (targetLocator) {
+    try {
+      const el = document.querySelector(targetLocator);
+      if (el) {
+        const elText = el.innerText || el.textContent || "";
+        if (matchesTitle(elText) || pure(elText).includes(pureTarget)) {
+          byLocator = el;
+        }
+      }
+    } catch (_) {}
+  }
+
+  let byTitle = null;
+  const allElements = Array.from(document.querySelectorAll("body *"));
+  let matchedElements = allElements.filter((el) => {
+    if (!el || el === document.body) return false;
+    const text = el.innerText || el.textContent || "";
+    return matchesTitle(text);
+  });
+
+  if (matchedElements.length > 0) {
+    matchedElements.sort((a, b) => {
+      const lenA = pure(a.innerText || "").length;
+      const lenB = pure(b.innerText || "").length;
+      return lenA - lenB;
+    });
+    byTitle = matchedElements[0];
+  }
+
+  let targetCard = byLocator || byTitle;
+  if (!targetCard) return;
+
+  // 向上找到课程卡片容器（确保为独立单卡片，绝不向上扩大至多卡片列表网格）
+  let cur = targetCard;
+  for (let d = 0; cur && cur !== document.body && d < 9; d++) {
+    const parent = cur.parentElement;
+    if (!parent || parent === document.body) break;
+    const parentText = parent.innerText || "";
+    const stateCount = (parentText.match(/(?:未学习|已学习|学习中)/g) || []).length;
+    const metaCount = (parentText.match(/(?:学时|学分)/g) || []).length;
+    if (stateCount > 1 || metaCount > 2) {
+      targetCard = cur;
+      break;
+    }
+    cur = parent;
+    const curText = cur.innerText || "";
+    if (/(学时|学分)/.test(curText) || /(已学习|未学习|学习中)/.test(curText)) {
+      targetCard = cur;
+    }
+  }
+
+  // 4. 将卡片平滑滚动到中央
+  try { targetCard.scrollIntoView({ block: "center", behavior: "instant" }); } catch (_) {}
+
+  // 5. 检查并尝试辅助调用 Vue 组件实例方法（尽力而为，绝不提前 return 阻断原生点击）
+  try {
+    const tryVueMethods = (el) => {
+      if (!el) return;
+      const v = el.__vue__ || (el.__vueParentComponent && el.__vueParentComponent.ctx);
+      if (!v) return;
+      const fnNames = ["toDetail", "goDetail", "handleClick", "onClick", "handleCourseClick", "jump", "goCourse", "toCourseDetail", "playCourse", "startLearn"];
+      for (const name of fnNames) {
+        if (typeof v[name] === "function") {
+          try { v[name](); } catch (_) {}
+        }
+      }
+    };
+    tryVueMethods(targetCard);
+    const imgEl = targetCard.querySelector("img");
+    if (imgEl) tryVueMethods(imgEl);
+  } catch (_) {}
+
+  // 6. 优先检查并执行有效 a[href] 链接跳转，移除 target="_blank"
+  const anchor = targetCard.matches("a[href]") ? targetCard : targetCard.querySelector("a[href]");
+  if (anchor && anchor.getAttribute("href") && !/^javascript:/i.test(anchor.getAttribute("href"))) {
+    anchor.removeAttribute("target");
+    try {
+      window.location.assign(new URL(anchor.getAttribute("href"), window.location.href).href);
+      return;
+    } catch (_) {}
+  }
+  try {
+    targetCard.removeAttribute?.("target");
+    targetCard.querySelectorAll?.("a[target]").forEach((a) => a.removeAttribute("target"));
+  } catch (_) {}
+
+  // 7. 收集卡片内部全部关键交互热区并派发全套交互事件
+  const actionRegex = /^(去学习|开始学习|继续学习|立即学习|学习中|进入学习|进入|播放|去完成|学习|查看详情|查看|去考试|开始考试|参加考试)$/;
+  const clickTargets = new Set();
+  const actionBtn = Array.from(targetCard.querySelectorAll("button, a, [role='button'], div, span")).find((el) => {
+    const t = clean(el.innerText);
+    return actionRegex.test(t) || el.matches("[class*='btn-primary'], [class*='study-btn'], [class*='play-btn'], [class*='start'], [class*='play']");
+  });
+  if (actionBtn) clickTargets.add(actionBtn);
+
+  const coverImg = targetCard.querySelector("img");
+  if (coverImg) clickTargets.add(coverImg);
+  const coverWrap = targetCard.querySelector("[class*='cover'], [class*='img'], [class*='pic'], [class*='thumb'], [class*='poster'], [class*='image']");
+  if (coverWrap) clickTargets.add(coverWrap);
+  const titleContainer = targetCard.querySelector("[class*='title'], [class*='name'], h2, h3, h4, h5, p");
+  if (titleContainer) clickTargets.add(titleContainer);
+  targetCard.querySelectorAll?.("a, button, [role='button'], [class*='btn']").forEach((el) => clickTargets.add(el));
+  clickTargets.add(targetCard);
+
+  const fireInteraction = (el) => {
+    if (!el) return;
+    try {
+      if (el.matches?.("a[target]")) el.removeAttribute("target");
+      const rect = el.getBoundingClientRect();
+      const cx = rect.left + Math.max(5, Math.min(rect.width / 2, 30));
+      const cy = rect.top + Math.max(5, Math.min(rect.height / 2, 30));
+      const eventInit = {
+        bubbles: true,
+        cancelable: true,
+        view: window,
+        clientX: cx,
+        clientY: cy,
+        button: 0,
+      };
+      el.dispatchEvent(new PointerEvent("pointerdown", eventInit));
+      el.dispatchEvent(new MouseEvent("mousedown", eventInit));
+      el.dispatchEvent(new PointerEvent("pointerup", eventInit));
+      el.dispatchEvent(new MouseEvent("mouseup", eventInit));
+      el.dispatchEvent(new MouseEvent("click", eventInit));
+      if (typeof el.click === "function") el.click();
+    } catch (_) {
+      try { el.click(); } catch (_) {}
+    }
+  };
+
+  if (actionBtn) fireInteraction(actionBtn);
+  if (coverImg) fireInteraction(coverImg);
+  if (coverWrap && coverWrap !== coverImg) fireInteraction(coverWrap);
+  if (titleContainer) fireInteraction(titleContainer);
+  fireInteraction(targetCard);
+})();"##;
+
 fn ulearn_course_click_script(title: &str, locator: &str) -> String {
     let title_json = serde_json::to_string(title).unwrap_or_default();
     let locator_json = serde_json::to_string(locator).unwrap_or_default();
-    format!(
-        r#"(async () => {{
-          const targetTitle = {title_json};
-          const targetLocator = {locator_json};
-          const clean = (value) => String(value || "").replace(/\s+/g, " ").trim();
-
-          // 拦截 window.open 防止弹多余新窗口
-          try {{
-            window.open = (url) => {{
-              const next = clean(url);
-              if (next && next !== "about:blank" && !/^javascript:/i.test(next)) {{
-                try {{ window.location.assign(new URL(next, window.location.href).href); }} catch (_) {{}}
-              }}
-              try {{
-                window.location = {{
-                  set href(val) {{
-                    try {{ window.location.assign(new URL(val, window.location.href).href); }} catch (_) {{}}
-                  }}
-                }};
-              }} catch (_) {{}}
-              return window;
-            }};
-          }} catch (_) {{}}
-
-          const cleanTarget = clean(targetTitle);
-          try {{
-            if (window.__MTOOL_LEARNING_BRIDGE__ && typeof window.__MTOOL_LEARNING_BRIDGE__.setCourse === "function") {{
-              window.__MTOOL_LEARNING_BRIDGE__.setCourse(cleanTarget);
-            }}
-          }} catch (_) {{}}
-
-          const findTarget = () => {{
-            const byLocator = targetLocator ? document.querySelector(targetLocator) : null;
-            const all = Array.from(document.querySelectorAll("body *"));
-            const byTitle = all.find((el) => clean(el.innerText) === cleanTarget) ||
-              all.find((el) => {{
-                const text = clean(el.innerText);
-                return text.length <= cleanTarget.length + 8 && text.includes(cleanTarget);
-              }});
-            return byLocator || byTitle;
-          }};
-
-          let target = findTarget();
-          if (!target) return;
-
-          // 找到卡片或链接
-          let card = target;
-          for (let current = target, depth = 0; current && current !== document.body && depth < 6; current = current.parentElement, depth++) {{
-            if (current.matches("a[href], [class*='card'], [class*='item'], [class*='course']")) {{
-              card = current;
-              break;
-            }}
-          }}
-
-          try {{ card.scrollIntoView({{ block: "center", behavior: "instant" }}); }} catch (_) {{}}
-
-          const anchor = card.matches("a[href]") ? card : card.querySelector("a[href]");
-          const clickTarget = anchor || (card.matches("button, [role='button']") ? card : null) || target;
-
-          if (clickTarget.tagName === "A" && clickTarget.getAttribute("href") && !/^javascript:/i.test(clickTarget.getAttribute("href"))) {{
-            clickTarget.removeAttribute("target");
-            try {{
-              window.location.assign(new URL(clickTarget.getAttribute("href"), window.location.href).href);
-              return;
-            }} catch (_) {{}}
-          }}
-
-          clickTarget.querySelectorAll?.("a[target]").forEach((a) => a.removeAttribute("target"));
-          if (clickTarget.matches?.("a[target]")) clickTarget.removeAttribute("target");
-
-          const triggerClick = (el) => {{
-            if (!el) return;
-            try {{
-              const rect = el.getBoundingClientRect();
-              const init = {{
-                bubbles: true,
-                cancelable: true,
-                view: window,
-                clientX: rect.left + Math.max(5, Math.min(rect.width / 2, 25)),
-                clientY: rect.top + Math.max(5, Math.min(rect.height / 2, 25)),
-                button: 0,
-              }};
-              el.dispatchEvent(new PointerEvent("pointerdown", init));
-              el.dispatchEvent(new MouseEvent("mousedown", init));
-              el.dispatchEvent(new PointerEvent("pointerup", init));
-              el.dispatchEvent(new MouseEvent("mouseup", init));
-              el.dispatchEvent(new MouseEvent("click", init));
-              if (typeof el.click === "function") el.click();
-            }} catch (_) {{
-              try {{ el.click(); }} catch (_) {{}}
-            }}
-          }};
-
-          triggerClick(clickTarget);
-          if (card !== clickTarget) triggerClick(card);
-        }})();"#
-    )
+    ULEARN_COURSE_CLICK_TEMPLATE
+        .replace("__TARGET_TITLE__", &title_json)
+        .replace("__TARGET_LOCATOR__", &locator_json)
 }
 
 fn merchant_course_click_script(title: &str, section_title: &str, locator: &str) -> String {
@@ -2039,6 +2273,18 @@ fn ulearn_capture_script(request_id: &str) -> String {
                /^(起止时间|课程数|浏览人数|学习人数|完成标准|章节进度|学习进度)/.test(t);
       };
 
+      // 若专题尚未加入自学，自动点击【加入自学】激活专题状态
+      try {
+        const enrollBtn = Array.from(document.querySelectorAll("button, a, [role='button'], div, span")).find((el) => {
+          const t = clean(el.innerText);
+          return /^(加入自学|立即自学|立即报名|加入学习|开始自学)$/.test(t) && !el.disabled;
+        });
+        if (enrollBtn) {
+          enrollBtn.click();
+          await new Promise((r) => setTimeout(r, 400));
+        }
+      } catch (_) {}
+
       const findTopicTitle = () => {
         // 1. 优先通过页面信息头部特征锚点精准定位大标题
         const metaAnchor = Array.from(document.querySelectorAll("body *")).find((el) => {
@@ -2117,9 +2363,18 @@ fn ulearn_capture_script(request_id: &str) -> String {
       if (badgeMarkers.length > 0) {
         for (const marker of badgeMarkers) {
           let card = marker;
-          for (let depth = 0; card && card !== document.body && depth < 8; depth++, card = card.parentElement) {
+          for (let depth = 0; card && card !== document.body && depth < 8; depth++) {
+            const p = card.parentElement;
+            if (!p || p === document.body) break;
+            const pt = clean(p.innerText);
+            const badgeCount = (pt.match(/(?:未学习|已学习|学习中)/g) || []).length;
+            if (badgeCount > 1) {
+              rawCards.push(card);
+              break;
+            }
+            card = p;
             const t = clean(card.innerText);
-            if (/(学时|学分)/.test(t) && t.length < 600) {
+            if (/(学时|学分)/.test(t)) {
               rawCards.push(card);
               break;
             }
@@ -2165,8 +2420,18 @@ fn ulearn_capture_script(request_id: &str) -> String {
 
         const locator = cssPath(card);
         const link = card.matches("a[href]") ? card.getAttribute("href") : (card.querySelector("a[href]")?.getAttribute("href") || "");
-        const url = link ? new URL(link, location.href).href : location.href;
-        const externalId = url !== location.href ? url : (title + "_" + locator);
+        let url = "";
+        if (link && !/^javascript:/i.test(link) && link !== "#" && !link.startsWith("#/")) {
+          try {
+            const parsed = new URL(link, location.href).href;
+            const normParsed = parsed.replace(/#.*$/, "").replace(/\/$/, "");
+            const normLoc = location.href.replace(/#.*$/, "").replace(/\/$/, "");
+            if (normParsed !== normLoc) {
+              url = parsed;
+            }
+          } catch (_) {}
+        }
+        const externalId = url || (title + "_" + locator);
 
         // 状态判定：专属识别已学习与未学习（支持明确百分比进度）
         const progMatch = cardText.match(/(?:学习)?进度\s*[:：]?\s*(\d+(?:\.\d+)?)%/);
@@ -2174,7 +2439,10 @@ fn ulearn_capture_script(request_id: &str) -> String {
         const isIncomplete = /未学习/.test(cardText);
         let completed = false;
         let progress = 0;
-        if (progMatch) {
+        if (isIncomplete) {
+          completed = false;
+          progress = 0;
+        } else if (progMatch) {
           const pVal = Number(progMatch[1]) || 0;
           if (pVal >= 100) {
             completed = true;
@@ -2186,20 +2454,20 @@ fn ulearn_capture_script(request_id: &str) -> String {
         } else if (isCompleted) {
           completed = true;
           progress = 100;
-        } else if (!isIncomplete && /学习中/.test(cardText)) {
+        } else if (/学习中/.test(cardText)) {
           completed = false;
           progress = 50;
         }
 
-        // 时长识别（学时 1 -> 45分钟）
+        // 时长识别（支持小数，如 学时 0.5 -> 22.5分钟；学时 1 -> 45分钟）
         let durationSeconds = 0;
-        const durMatch = cardText.match(/学时\s*[:：]?\s*(\d+)/) || cardText.match(/(\d+)\s*分钟/);
+        const durMatch = cardText.match(/学时\s*[:：]?\s*(\d+(?:\.\d+)?)/) || cardText.match(/(\d+(?:\.\d+)?)\s*分钟/);
         if (durMatch) {
-          const val = Number(durMatch[1]) || 0;
+          const val = parseFloat(durMatch[1]) || 0;
           if (/学时/.test(durMatch[0])) {
-            durationSeconds = val * 45 * 60;
+            durationSeconds = Math.round(val * 45 * 60);
           } else {
-            durationSeconds = val * 60;
+            durationSeconds = Math.round(val * 60);
           }
         }
 
@@ -2219,30 +2487,14 @@ fn ulearn_capture_script(request_id: &str) -> String {
         });
       }
 
-      // 整专题全满校正
-      const isAllCompletedByStats = !!(
-        countMatch &&
-        Number(countMatch[1]) > 0 &&
-        Number(countMatch[1]) === Number(countMatch[2]) &&
-        courses.length === Number(countMatch[2]) &&
-        (topicProgressMatch ? Number(topicProgressMatch[1]) >= 100 : true)
-      );
-
-      if (isAllCompletedByStats) {
-        courses.forEach((c) => {
-          c.completed = true;
-          c.progress = 100;
-        });
-      }
-
       const topicTitle = findTopicTitle();
-      const completedCount = isAllCompletedByStats ? courses.length : (countMatch ? Number(countMatch[1]) : courses.filter((item) => item.completed).length);
+      const completedCount = countMatch ? Number(countMatch[1]) : courses.filter((item) => item.completed).length;
       const totalCount = countMatch ? Number(countMatch[2]) : courses.length;
 
       const payload = {
         title: String(topicTitle || "未知专题"),
         url: location.href,
-        progress: isAllCompletedByStats ? 100 : (topicProgressMatch ? Number(topicProgressMatch[1]) : (totalCount ? completedCount / totalCount * 100 : 0)),
+        progress: topicProgressMatch ? Number(topicProgressMatch[1]) : (totalCount ? completedCount / totalCount * 100 : 0),
         totalCount,
         completedCount,
         courses
@@ -3365,7 +3617,7 @@ fn merchant_capture_script(request_id: &str) -> String {
           const url = linkFrom(container);
           const externalId = externalIdFrom(container, url, locator, title);
 
-          const progressMatch = text.match(/(?:学习)?进度\s*[:：]?\s*\d+(?:\.\d+)?%/);
+          const progressMatch = text.match(/(?:学习)?进度\s*[:：]?\s*(\d+(?:\.\d+)?)%/i);
           let progress = 0;
           let completed = false;
 
@@ -3380,11 +3632,12 @@ fn merchant_capture_script(request_id: &str) -> String {
             }
           } else {
             const hasExplicitIncomplete = /(未学习|未开始|待学习|学习中|播放中)/.test(text);
-            if (!hasExplicitIncomplete) {
-              if (isElementCompleted(container) || /(已完成|已学完|已学习|已考合格|已通过|已考试)/.test(text)) {
-                completed = true;
-                progress = 100;
-              }
+            if (hasExplicitIncomplete) {
+              completed = false;
+              progress = 0;
+            } else if (isElementCompleted(container) || /(已完成|已学完|已学习|已考合格|已通过|已考试)/.test(text)) {
+              completed = true;
+              progress = 100;
             }
           }
 
@@ -3467,20 +3720,13 @@ fn merchant_capture_script(request_id: &str) -> String {
       (topicProgressMatch ? Number(topicProgressMatch[1]) >= 100 : true)
     );
 
-    if (isTopicExpired || isAllCompletedByStats) {
-      courses.forEach((c) => {
-        c.completed = true;
-        c.progress = 100;
-      });
-    }
-
     const topicTitle = findTopicTitle();
-    const completedCount = isTopicExpired || isAllCompletedByStats ? courses.length : (countMatch ? Number(countMatch[1]) : courses.filter((item) => item.completed).length);
+    const completedCount = countMatch ? Number(countMatch[1]) : courses.filter((item) => item.completed).length;
     const totalCount = countMatch ? Number(countMatch[2]) : courses.length;
     const payload = {
       title: String(topicTitle || "未知专题"),
       url: location.href,
-      progress: isTopicExpired || isAllCompletedByStats ? 100 : (topicProgressMatch ? Number(topicProgressMatch[1]) : (totalCount ? completedCount / totalCount * 100 : 0)),
+      progress: topicProgressMatch ? Number(topicProgressMatch[1]) : (totalCount ? (completedCount / totalCount * 100) : 0),
       totalCount,
       completedCount,
       courses
@@ -3630,8 +3876,8 @@ fn handle_bridge_title(
                     active.last_advanced_time = current_time;
                     active.last_progress_at = now();
                 }
-                // 校验伪造包：若为长视频课程（kind == "video" 且 duration > 120），收到来自文档探测的伪造 100s 包时予以忽略
-                let is_fake_doc_packet_for_video = active.kind == "video" && active.duration > 120.0 && duration <= 100.0;
+                // 校验伪造包：视频课程绝不接受来自文档探测的 100|100 伪造包
+                let is_fake_doc_packet_for_video = active.kind == "video" && ((current_time == 100.0 && duration == 100.0) || (active.duration > 120.0 && duration <= 100.0));
                 if !is_fake_doc_packet_for_video {
                     if current_time > 0.0 {
                         active.current_time = current_time;
@@ -3642,15 +3888,20 @@ fn handle_bridge_title(
                 }
                 if event == "ended" {
                     // 刚打开课程不到 8 秒就收到 ended，说明是上一门课的残留事件或旧弹窗，予以忽略防抖！
-                    if now() - active.started_at < 8 {
+                    if now() - active.started_at < 8 || is_fake_doc_packet_for_video {
                         return true;
                     }
-                    // 视频课程绝不接受来自文档探测的伪造 100s 完播包！
-                    if is_fake_doc_packet_for_video {
+                    // 防早退：如果视频时长大于 30 秒且当前播放时间小于时长的 80%，拒绝将其转入 ended 完播
+                    if active.duration > 30.0 && active.current_time < active.duration * 0.8 {
                         return true;
                     }
                     if active.phase != "ended" {
                         active.phase = "ended".to_string();
+                        active.phase_since = now();
+                    }
+                } else if event == "exam_required" {
+                    if active.phase != "exam_required" {
+                        active.phase = "exam_required".to_string();
                         active.phase_since = now();
                     }
                 } else if event == "need_login" {
@@ -4060,6 +4311,11 @@ fn import_capture(
             manual += 1;
             "manual"
         };
+        let clean_url = if is_same_page_url(&course.url, &capture.url) {
+            String::new()
+        } else {
+            course.url.clone()
+        };
         transaction
             .execute(
                 "INSERT INTO video_courses(
@@ -4067,24 +4323,32 @@ fn import_capture(
                    duration_seconds,progress,status,sort_order,last_error,updated_at
                  ) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,NULL,?14)
                  ON CONFLICT(topic_id,external_id) DO UPDATE SET
-                   title=excluded.title,url=excluded.url,locator=excluded.locator,
+                   title=excluded.title,
+                   url=CASE WHEN excluded.url != '' THEN excluded.url ELSE video_courses.url END,
+                   locator=excluded.locator,
                    section_title=excluded.section_title,kind=excluded.kind,
                    duration_seconds=CASE WHEN excluded.duration_seconds > 0 THEN excluded.duration_seconds ELSE video_courses.duration_seconds END,
                    progress=CASE
                      WHEN excluded.status='completed' OR excluded.progress >= 100.0 THEN 100.0
+                     WHEN ?3='ulearn' AND excluded.status='pending' AND excluded.progress <= 0.0 THEN 0.0
                      WHEN video_courses.status IN('opening','playing','verifying','paused','skipped','attention') AND video_courses.progress > excluded.progress THEN video_courses.progress
                      WHEN video_courses.status='completed' AND excluded.progress <= 0.0 AND excluded.kind NOT IN ('video','slides','material') THEN 100.0
                      ELSE excluded.progress
                    END,
                    status=CASE
                      WHEN excluded.status='completed' OR excluded.progress >= 100.0 THEN 'completed'
+                     WHEN ?3='ulearn' AND excluded.status='pending' AND excluded.progress <= 0.0 THEN 'pending'
                      WHEN video_courses.status='completed' AND excluded.progress <= 0.0 AND excluded.kind NOT IN ('video','slides','material') THEN 'completed'
                      WHEN excluded.status='manual' AND video_courses.status!='skipped' THEN 'manual'
                      WHEN video_courses.status IN('opening','playing','verifying','paused','skipped','attention') THEN video_courses.status
                      ELSE excluded.status
                    END,
                    sort_order=excluded.sort_order,
-                   last_error=CASE WHEN excluded.status='completed' THEN NULL ELSE video_courses.last_error END,
+                   last_error=CASE
+                     WHEN excluded.status='completed' THEN NULL
+                     WHEN ?3='ulearn' AND excluded.status='pending' AND video_courses.status='completed' THEN NULL
+                     ELSE video_courses.last_error
+                   END,
                    updated_at=excluded.updated_at",
                 params![
                     course_id,
@@ -4092,7 +4356,7 @@ fn import_capture(
                     provider.key(),
                     external_id,
                     course.title,
-                    course.url,
+                    clean_url,
                     course.locator,
                     course.section_title,
                     kind,
@@ -4231,13 +4495,101 @@ fn topic_url(path: &PathBuf, topic_id: &str) -> Result<String, String> {
     .map_err(|error| error.to_string())
 }
 
+// 专题卡片点击重试时间梯度（覆盖整个等待窗口，直到离开专题页或超时）
+fn topic_click_delays(already_at_topic: bool) -> Vec<u64> {
+    if already_at_topic {
+        vec![200, 800, 1600, 2800, 4500, 7000, 10000, 14000, 19000, 25000, 33000, 43000, 55000, 70000, 90000, 110000]
+    } else {
+        vec![1000, 2200, 3800, 5800, 8500, 12000, 16500, 22000, 28500, 36000, 45000, 56000, 70000, 86000, 105000]
+    }
+}
+
+fn spawn_topic_card_clicker(
+    click_window: tauri::WebviewWindow,
+    click_state: VideoTaskState,
+    click_provider: Provider,
+    click_course_id: String,
+    click_script: String,
+    topic_url: String,
+    delays: Vec<u64>,
+    token: u64,
+    auto_play: bool,
+) {
+    tauri::async_runtime::spawn(async move {
+        for delay in delays {
+            tokio::time::sleep(Duration::from_millis(delay)).await;
+            if !navigation_token_matches(&click_state, click_provider, token, !auto_play) {
+                break;
+            }
+            if auto_play {
+                let is_active_playing = click_state
+                    .runtime
+                    .lock()
+                    .ok()
+                    .and_then(|r| r.active.get(click_provider.key()).cloned())
+                    .map(|a| a.phase == "playing" || a.current_time > 0.0)
+                    .unwrap_or(false);
+                if is_active_playing {
+                    break;
+                }
+            }
+            let cur = click_window.url().ok();
+            if cur.as_ref().is_some_and(|c| {
+                !is_same_page_url(c.as_str(), &topic_url) && provider_accepts_url(click_provider, c)
+            }) {
+                if let Some(c) = cur {
+                    if let Ok(conn) = Connection::open(click_state.db_path.as_ref()) {
+                        let _ = conn.execute(
+                            "UPDATE video_courses SET url=?2,updated_at=?3 WHERE id=?1 AND (url IS NULL OR url='' OR url LIKE '%studySubjectDetail%')",
+                            params![click_course_id, c.as_str(), now()],
+                        );
+                    }
+                }
+                break;
+            }
+            if cur.as_ref().is_none_or(|c| !provider_accepts_url(click_provider, c)) {
+                let Ok(recovery_url) = topic_url.parse::<tauri::Url>() else { break; };
+                if click_window.navigate(recovery_url).is_err() { break; }
+                tokio::time::sleep(Duration::from_millis(1500)).await;
+            }
+            if !navigation_token_matches(&click_state, click_provider, token, !auto_play) {
+                break;
+            }
+            let _ = click_window.eval(&click_script);
+        }
+    });
+}
+
+fn spawn_autoplay_poller(
+    play_window: tauri::WebviewWindow,
+    play_state: VideoTaskState,
+    play_provider: Provider,
+    play_title: String,
+    play_kind: String,
+    token: u64,
+) {
+    tauri::async_runtime::spawn(async move {
+        for delay in [1000, 2200, 4000, 6500] {
+            tokio::time::sleep(Duration::from_millis(delay)).await;
+            if !playback_token_matches(&play_state, play_provider, token) {
+                break;
+            }
+            let settings = play_state
+                .settings
+                .lock()
+                .unwrap_or_else(|error| error.into_inner())
+                .clone();
+            let _ = play_window.eval(update_media_script(settings.speed, settings.muted, true, &play_title, &play_kind));
+        }
+    });
+}
+
 async fn open_course(
     app: &AppHandle,
     state: &VideoTaskState,
     course: &CourseRecord,
     auto_play: bool,
 ) -> Result<(), String> {
-    // 三个手动入口共用浏览窗口；队列只导航独立的后台播放器。
     let window = if auto_play {
         ensure_window(app, state, course.provider, false).await?
     } else {
@@ -4246,14 +4598,9 @@ async fn open_course(
     let token = CAPTURE_COUNTER.fetch_add(1, Ordering::Relaxed);
     {
         let mut runtime = state.runtime.lock().unwrap_or_else(|error| error.into_inner());
-        let tokens = if auto_play {
-            &mut runtime.playback_tokens
-        } else {
-            &mut runtime.browser_tokens
-        };
+        let tokens = if auto_play { &mut runtime.playback_tokens } else { &mut runtime.browser_tokens };
         tokens.insert(course.provider.key().to_string(), token);
     }
-
     let reset_course_js = format!(
         "try {{ if (window.__MTOOL_LEARNING_BRIDGE__ && typeof window.__MTOOL_LEARNING_BRIDGE__.setCourse === 'function') window.__MTOOL_LEARNING_BRIDGE__.setCourse({}, {}); }} catch (_) {{}}",
         serde_json::to_string(&course.title).unwrap_or_default(),
@@ -4261,96 +4608,35 @@ async fn open_course(
     );
     let _ = window.eval(&reset_course_js);
 
-    let already_running_this_course = {
-        let runtime = state
-            .runtime
-            .lock()
-            .unwrap_or_else(|error| error.into_inner());
-        runtime
-            .active
-            .get(course.provider.key())
-            .map(|active| active.course_id == course.id && (active.phase == "playing" || active.phase == "opening"))
-            .unwrap_or(false)
+    let is_running = {
+        let runtime = state.runtime.lock().unwrap_or_else(|error| error.into_inner());
+        runtime.active.get(course.provider.key()).map(|a| a.course_id == course.id && (a.phase == "playing" || a.phase == "opening")).unwrap_or(false)
     };
-    if auto_play && already_running_this_course {
-        let settings = state
-            .settings
-            .lock()
-            .unwrap_or_else(|error| error.into_inner())
-            .clone();
+    if auto_play && is_running {
+        let settings = state.settings.lock().unwrap_or_else(|error| error.into_inner()).clone();
         let _ = window.eval(update_media_script(settings.speed, settings.muted, auto_play, &course.title, &course.kind));
         return Ok(());
     }
-    if !course.url.is_empty() {
-        let url = course
-            .url
-            .parse::<tauri::Url>()
-            .map_err(|error| format!("课程网址无效: {error}"))?;
+    let topic_url = topic_url(state.db_path.as_ref(), &course.topic_id)?;
+    if has_distinct_course_url(&course.url, &topic_url) {
+        let url = course.url.parse::<tauri::Url>().map_err(|error| format!("课程网址无效: {error}"))?;
         if !provider_accepts_url(course.provider, &url) {
             return Err("课程链接跳转到了非教学平台域名，已阻止自动打开".to_string());
         }
         window.navigate(url).map_err(|error| error.to_string())?;
     } else {
-        let topic_url = topic_url(state.db_path.as_ref(), &course.topic_id)?;
-        let url = topic_url
-            .parse::<tauri::Url>()
-            .map_err(|error| error.to_string())?;
-        window.navigate(url).map_err(|error| error.to_string())?;
+        let topic_target = topic_url.parse::<tauri::Url>().map_err(|error| error.to_string())?;
+        let current_url = window.url().ok();
+        let already_at_topic = current_url.as_ref().map(|cur| is_same_page_url(cur.as_str(), &topic_url)).unwrap_or(false);
+        if !already_at_topic {
+            window.navigate(topic_target).map_err(|error| error.to_string())?;
+        }
         let click_script = course_click_script(&course.title, &course.section_title, &course.locator, course.provider);
-        let click_window = window.clone();
-        let click_provider = course.provider;
-        let click_state = state.clone();
-        tauri::async_runtime::spawn(async move {
-            for delay in [1200, 2500, 4500, 8000] {
-                tokio::time::sleep(Duration::from_millis(delay)).await;
-                if !navigation_token_matches(&click_state, click_provider, token, !auto_play) {
-                    break;
-                }
-                let current_url = click_window.url().ok();
-                if current_url.as_ref().is_some_and(|current| {
-                    current.as_str() != topic_url && provider_accepts_url(click_provider, current)
-                }) {
-                    break;
-                }
-                if current_url
-                    .as_ref()
-                    .is_none_or(|current| !provider_accepts_url(click_provider, current))
-                {
-                    let Ok(recovery_url) = topic_url.parse::<tauri::Url>() else {
-                        break;
-                    };
-                    if click_window.navigate(recovery_url).is_err() {
-                        break;
-                    }
-                    tokio::time::sleep(Duration::from_millis(1500)).await;
-                }
-                if !navigation_token_matches(&click_state, click_provider, token, !auto_play) {
-                    break;
-                }
-                let _ = click_window.eval(&click_script);
-            }
-        });
+        let delays = topic_click_delays(already_at_topic);
+        spawn_topic_card_clicker(window.clone(), state.clone(), course.provider, course.id.clone(), click_script, topic_url, delays, token, auto_play);
     }
     if auto_play {
-        let play_window = window.clone();
-        let play_state = state.clone();
-        let play_provider = course.provider;
-        let play_title = course.title.clone();
-        let play_kind = course.kind.clone();
-        tauri::async_runtime::spawn(async move {
-            for delay in [1000, 2200, 4000, 6500] {
-                tokio::time::sleep(Duration::from_millis(delay)).await;
-                if !playback_token_matches(&play_state, play_provider, token) {
-                    break;
-                }
-                let settings = play_state
-                    .settings
-                    .lock()
-                    .unwrap_or_else(|error| error.into_inner())
-                    .clone();
-                let _ = play_window.eval(update_media_script(settings.speed, settings.muted, true, &play_title, &play_kind));
-            }
-        });
+        spawn_autoplay_poller(window, state.clone(), course.provider, course.title.clone(), course.kind.clone(), token);
     }
     Ok(())
 }
@@ -5061,6 +5347,19 @@ pub async fn tick_video_queue(
             if now() - active.phase_since < 2 {
                 continue;
             }
+            let is_ulearn_exam = active.provider == Provider::Ulearn && (
+                active.kind == "exam" ||
+                load_course(state.db_path.as_ref(), &active.course_id).map(|c| c.kind == "exam").unwrap_or(false)
+            );
+            if is_ulearn_exam {
+                let conn = Connection::open(state.db_path.as_ref()).map_err(|error| error.to_string())?;
+                conn.execute(
+                    "UPDATE video_courses SET status='attention',kind='exam',last_error='视频已播放完毕，包含课程结业考试需手动答题',updated_at=?2 WHERE id=?1",
+                    params![active.course_id, now()],
+                ).map_err(|error| error.to_string())?;
+                state.runtime.lock().unwrap_or_else(|error| error.into_inner()).active.remove(active.provider.key());
+                continue;
+            }
             let timestamp = now();
             let conn =
                 Connection::open(state.db_path.as_ref()).map_err(|error| error.to_string())?;
@@ -5146,9 +5445,14 @@ pub async fn tick_video_queue(
                 && (active.current_time >= active.duration - 1.5 || progress >= 98.5);
             let stall_duration = now() - active.last_progress_at;
             if is_saturated && stall_duration >= 4 {
+                let is_ulearn_exam = active.provider == Provider::Ulearn && (
+                    active.kind == "exam" ||
+                    load_course(state.db_path.as_ref(), &active.course_id).map(|c| c.kind == "exam").unwrap_or(false)
+                );
+                let next_phase = if is_ulearn_exam { "exam_required" } else { "ended" };
                 let mut runtime = state.runtime.lock().unwrap_or_else(|error| error.into_inner());
                 if let Some(act) = runtime.active.get_mut(active.provider.key()) {
-                    act.phase = "ended".to_string();
+                    act.phase = next_phase.to_string();
                     act.phase_since = now();
                     act.current_time = act.duration;
                 }
@@ -5235,6 +5539,21 @@ pub async fn tick_video_queue(
                     .active
                     .remove(active.provider.key());
             }
+        } else if active.phase == "exam_required" {
+            pause_player(&app, state.inner(), active.provider);
+            let conn =
+                Connection::open(state.db_path.as_ref()).map_err(|error| error.to_string())?;
+            conn.execute(
+                "UPDATE video_courses SET status='attention',kind='exam',last_error='视频已播放完毕，包含课程结业考试需手动答题',updated_at=?2 WHERE id=?1",
+                params![active.course_id, now()],
+            )
+            .map_err(|error| error.to_string())?;
+            state
+                .runtime
+                .lock()
+                .unwrap_or_else(|error| error.into_inner())
+                .active
+                .remove(active.provider.key());
         } else if active.phase == "need_login" {
             pause_player(&app, state.inner(), active.provider);
             block_platform(state.db_path.as_ref(), &active)?;
@@ -5325,7 +5644,33 @@ pub async fn open_video_course(
     course_id: String,
 ) -> Result<(), String> {
     let course = load_course(state.db_path.as_ref(), &course_id)?;
-    // 打开仅改变浏览窗口的起始页面，不暂停队列或改写课程进度。
+    // 1. 若当前课程正在后台实时播放/加载中，直接唤起并展示播放器窗口，使用户实时看到当前播放画面与进度
+    let is_currently_running = {
+        let runtime = state
+            .runtime
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        runtime
+            .active
+            .get(course.provider.key())
+            .map(|active| active.course_id == course.id && (active.phase == "playing" || active.phase == "opening" || active.phase == "verifying"))
+            .unwrap_or(false)
+    };
+    if is_currently_running {
+        if let Some(player_win) = app.get_webview_window(&course.provider.player_label()) {
+            player_win.show().map_err(|error| error.to_string())?;
+            player_win.unminimize().map_err(|error| error.to_string())?;
+            player_win.set_focus().map_err(|error| error.to_string())?;
+            return Ok(());
+        }
+    }
+
+    // 2. 视频课程同一平台同一时刻仅允许播放一个，非当前播放视频拒绝另开窗口避免平台报错
+    if course.kind == "video" {
+        return Err("同一平台同时只能播放一个视频。请在正在播放的课程上点击【打开内容】，或点击该课程的【重试】/【继续播放】进行切换。".to_string());
+    }
+
+    // 3. 否则在浏览窗口打开该课程供用户查看（课件、考试、资料或异常排查）
     open_course(&app, state.inner(), &course, false).await
 }
 
@@ -5586,6 +5931,13 @@ pub async fn reset_video_course(
         params![course_id, next_status, now()],
     )
     .map_err(|error| error.to_string())?;
+    let _ = conn.execute(
+        "UPDATE video_topics SET
+         completed_count = (SELECT COUNT(*) FROM video_courses WHERE topic_id=?1 AND status='completed'),
+         progress = ROUND((CAST((SELECT COUNT(*) FROM video_courses WHERE topic_id=?1 AND status='completed') AS REAL) / MAX(1, (SELECT COUNT(*) FROM video_courses WHERE topic_id=?1))) * 100.0, 1)
+         WHERE id=?1",
+        params![course.topic_id],
+    );
     Ok(())
 }
 
@@ -6322,7 +6674,7 @@ mod tests {
     fn capture_script_recognizes_ulearn_completed_badge() {
         let script = capture_script("test_req", Provider::Ulearn);
         assert!(script.contains("已完成|已学完|已学习"));
-        assert!(script.contains("isAllCompletedByStats"));
+        assert!(script.contains("isIncomplete"));
     }
 
     #[test]
@@ -7412,5 +7764,140 @@ mod tests {
             |row| row.get(0),
         ).unwrap();
         assert_eq!(section_count, 2);
+    }
+
+    #[test]
+    fn test_is_same_page_url_and_has_distinct_course_url() {
+        let topic = "https://ulearn.cup.com.cn/train/detail?id=123";
+        // 相同页面判定
+        assert!(is_same_page_url(topic, topic));
+        assert!(is_same_page_url(&format!("{topic}/"), topic));
+        assert!(is_same_page_url(&format!("{topic}#"), topic));
+        assert!(is_same_page_url(&format!("{topic}#/"), topic));
+
+        // 具有独立子页面链接判定
+        assert!(!has_distinct_course_url("", topic));
+        assert!(!has_distinct_course_url("   ", topic));
+        assert!(!has_distinct_course_url("javascript:void(0)", topic));
+        assert!(!has_distinct_course_url(topic, topic));
+        assert!(!has_distinct_course_url(&format!("{topic}#"), topic));
+        assert!(!has_distinct_course_url(&format!("{topic}/"), topic));
+
+        // 真正的独立播放或课程页面
+        let course1 = "https://ulearn.cup.com.cn/train/course_player?id=123&courseId=456";
+        let course2 = "https://ulearn.cup.com.cn/course/view/456";
+        assert!(has_distinct_course_url(course1, topic));
+        assert!(has_distinct_course_url(course2, topic));
+    }
+
+    #[test]
+    fn test_init_db_heals_courses_sharing_topic_url() {
+        let path = std::env::temp_dir().join(format!("mtool_test_heal_{}.db", now()));
+        let _ = std::fs::remove_file(&path);
+        init_db(&path).expect("init db");
+        let conn = Connection::open(&path).expect("open db");
+
+        conn.execute(
+            "INSERT INTO video_topics (id, provider, title, url, progress, total_count, completed_count, last_synced_at)
+             VALUES ('top-heal', 'ulearn', '乐学专题', 'https://ulearn.cup.com.cn/train/detail?id=999', 0, 1, 0, ?1)",
+            params![now()],
+        ).expect("insert topic");
+
+        conn.execute(
+            "INSERT INTO video_courses (id, topic_id, provider, external_id, title, url, status, sort_order, updated_at)
+             VALUES ('c-heal-1', 'top-heal', 'ulearn', 'ext-heal-1', '课程1', 'https://ulearn.cup.com.cn/train/detail?id=999', 'pending', 1, ?1)",
+            params![now()],
+        ).expect("insert course");
+
+        // 重新调用 init_db 触发自愈迁移
+        init_db(&path).expect("re-init db for self-healing");
+
+        let saved_url: String = conn.query_row(
+            "SELECT url FROM video_courses WHERE id='c-heal-1'",
+            [],
+            |row| row.get(0),
+        ).expect("query url");
+        assert_eq!(saved_url, "", "与专题 URL 完全相同的课程 URL 应被自愈清空为可点击状态");
+
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn test_ulearn_capture_and_click_script_features() {
+        let capture = capture_script("test_ulearn_capture", Provider::Ulearn);
+        // 抓取脚本中链接如果无效或等于 location.href 时不再赋给 url
+        assert!(capture.contains("normParsed !== normLoc"));
+        assert!(capture.contains("let url = \"\";"));
+
+        let click = course_click_script("01. 乐学实战课", "", "#my-loc", Provider::Ulearn);
+        // 点击脚本支持操作按钮优先匹配与指针事件模拟
+        assert!(click.contains("去学习|开始学习|继续学习|立即学习|学习中|进入学习|进入|播放"));
+        assert!(click.contains("matchesTitle"));
+        assert!(click.contains("PointerEvent"));
+        assert!(!click.contains("ant-modal"));
+        assert!(!click.contains("stageHeaders"));
+    }
+
+    #[test]
+    fn test_premature_ended_and_ulearn_unlearned_guard() {
+        let capture = capture_script("test_unlearned", Provider::Ulearn);
+        // 抓取脚本针对“未学习”标签锁定未完成状态，且支持小数学时
+        assert!(capture.contains("isIncomplete"));
+        assert!(capture.contains("parseFloat(durMatch[1])"));
+
+        // 验证 bridge_script 移除了起止时间过期伪造完播，移除了原生视频借由 modal 篡改时长的伪造逻辑，且支持陈旧媒体隔离
+        let bridge = bridge_script(Provider::Ulearn, 2.0, true);
+        assert!(!bridge.contains("m = bodyText.match(/起止时间"));
+        assert!(!bridge.contains("const primary = allMedias[0]"));
+        assert!(bridge.contains("staleMedias"));
+        assert!(bridge.contains("activePlayedMedias"));
+    }
+
+    #[test]
+    fn test_ulearn_exam_detection_and_url_backfill() {
+        let bridge = bridge_script(Provider::Ulearn, 2.0, true);
+        assert!(bridge.contains("hasUnfinishedExam"));
+        assert!(bridge.contains("exam_required"));
+        assert!(bridge.contains("activePlayedMedias = new WeakSet()"));
+
+        let captures = Arc::new(Mutex::new(CaptureExchange::default()));
+        let runtime = Arc::new(Mutex::new(RuntimeState::default()));
+        {
+            let mut r = runtime.lock().unwrap();
+            r.active.insert("ulearn".to_string(), ActiveCourse {
+                course_id: "c1".into(),
+                topic_id: "t1".into(),
+                provider: Provider::Ulearn,
+                kind: "video".into(),
+                course_title: "包含考试的课程".into(),
+                started_at: now(),
+                phase: "playing".into(),
+                phase_since: now(),
+                last_media_at: now(),
+                last_progress_at: now(),
+                last_advanced_time: 10.0,
+                current_time: 10.0,
+                duration: 100.0,
+            });
+        }
+        assert!(handle_bridge_title("MTOOL_MEDIA|ulearn|exam_required|100|100", Provider::Ulearn, &captures, &runtime));
+        assert_eq!(runtime.lock().unwrap().active.get("ulearn").unwrap().phase, "exam_required");
+    }
+
+    #[test]
+    fn test_ulearn_capture_does_not_mark_expired_topic_as_all_completed() {
+        let capture = capture_script("test_no_expired_overwrite", Provider::Ulearn);
+        // 抓取脚本已彻底移除根据 isTopicExpired 暴力将所有课程标记为 completed 的错误逻辑
+        assert!(!capture.contains("c.completed = true;"));
+        assert!(!capture.contains("c.progress = 100;"));
+
+        // 验证单卡片点击脚本具备边界隔离，不会向外层网格扩散
+        let click = course_click_script("数据安全事件标准", "", "", Provider::Ulearn);
+        assert!(click.contains("stateCount > 1 || metaCount > 2"));
+        assert!(click.contains("targetCard = cur;"));
+
+        // 验证商银学堂保持独立实现不受乐学脚本影响
+        let merchant_click = course_click_script("商银课程", "", "", Provider::Merchant);
+        assert!(!merchant_click.contains("stateCount > 1"));
     }
 }
