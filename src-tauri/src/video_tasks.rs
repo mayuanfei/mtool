@@ -455,11 +455,17 @@ fn is_same_page_url(url1: &str, url2: &str) -> bool {
     let (Ok(p1), Ok(p2)) = (tauri::Url::parse(url1), tauri::Url::parse(url2)) else {
         return false;
     };
-    p1.scheme() == p2.scheme()
-        && p1.host_str() == p2.host_str()
-        && p1.port() == p2.port()
-        && p1.path().trim_end_matches('/') == p2.path().trim_end_matches('/')
-        && p1.query() == p2.query()
+    if p1.scheme() != p2.scheme()
+        || p1.host_str() != p2.host_str()
+        || p1.port() != p2.port()
+        || p1.path().trim_end_matches('/') != p2.path().trim_end_matches('/')
+        || p1.query() != p2.query()
+    {
+        return false;
+    }
+    let f1 = p1.fragment().map(|f| f.trim_end_matches('/')).filter(|f| !f.is_empty());
+    let f2 = p2.fragment().map(|f| f.trim_end_matches('/')).filter(|f| !f.is_empty());
+    f1 == f2
 }
 
 fn has_distinct_course_url(course_url: &str, topic_url: &str) -> bool {
@@ -514,12 +520,17 @@ fn bridge_script(provider: Provider, speed: f64, muted: bool) -> String {
     currentCourseTitle: "",
     currentCourseKind: "",
     lastDocProgress: 0,
+    targetResumeTime: 0,
+    targetResumeProgress: 0,
+    hasResumed: false,
   };
 
   try {
     const cached = JSON.parse(sessionStorage.getItem("__mtool_current_course__") || "{}");
     if (cached.title) state.currentCourseTitle = String(cached.title || "").trim();
     if (cached.kind) state.currentCourseKind = String(cached.kind || "").trim();
+    if (cached.resumeTime) state.targetResumeTime = Number(cached.resumeTime) || 0;
+    if (cached.resumeProgress) state.targetResumeProgress = Number(cached.resumeProgress) || 0;
   } catch (_) {}
 
   const setTitleMessage = (message) => {
@@ -620,11 +631,54 @@ fn bridge_script(provider: Provider, speed: f64, muted: bool) -> String {
     }
   };
 
+  const getTargetResumeSeconds = (media) => {
+    if (state.targetResumeTime > 2.0) {
+      return state.targetResumeTime;
+    }
+    const dur = media ? Number(media.duration) || 0 : 0;
+    if (state.targetResumeProgress > 0 && dur > 5.0) {
+      return (state.targetResumeProgress / 100.0) * dur;
+    }
+    return 0;
+  };
+
+  const tryResumePlayback = (media) => {
+    if (!media || state.hasResumed) return;
+    const targetSec = getTargetResumeSeconds(media);
+    if (targetSec <= 3.0) {
+      state.hasResumed = true;
+      return;
+    }
+    const dur = Number(media.duration) || 0;
+    if (dur <= 0 || isNaN(dur)) {
+      return;
+    }
+    const safeTarget = Math.max(0, Math.min(targetSec, dur - 1.5));
+    if (safeTarget > 3.0 && media.currentTime < safeTarget - 2.5) {
+      try {
+        media.currentTime = safeTarget;
+        state.hasResumed = true;
+        try { if (window.player && typeof window.player.seek === "function") window.player.seek(safeTarget); } catch (_) {}
+        try { if (window.aliplayer && typeof window.aliplayer.seek === "function") window.aliplayer.seek(safeTarget); } catch (_) {}
+        try { if (window.videoPlayer && typeof window.videoPlayer.seek === "function") window.videoPlayer.seek(safeTarget); } catch (_) {}
+      } catch (_) {}
+    } else if (media.currentTime >= safeTarget - 2.5) {
+      state.hasResumed = true;
+    }
+  };
+
   const track = (media) => {
     if (state.tracked.has(media)) return;
     state.tracked.add(media);
+    const onMetaReady = () => {
+      tryResumePlayback(media);
+    };
+    ["loadedmetadata", "canplay", "canplaythrough", "loadeddata", "durationchange"].forEach((evt) => {
+      media.addEventListener(evt, onMetaReady, true);
+    });
     ["play", "playing"].forEach((name) => {
       media.addEventListener(name, () => {
+        tryResumePlayback(media);
         if (!state.staleMedias.has(media) || media.currentTime < 2.0) {
           state.staleMedias.delete(media);
           state.activePlayedMedias.add(media);
@@ -632,7 +686,7 @@ fn bridge_script(provider: Provider, speed: f64, muted: bool) -> String {
         report(name, media);
       }, true);
     });
-    ["pause", "ended", "error", "canplay", "canplaythrough", "loadedmetadata", "durationchange"].forEach((name) => {
+    ["pause", "ended", "error"].forEach((name) => {
       media.addEventListener(name, () => {
         if (name === "ended") {
           if (state.staleMedias.has(media) && !state.activePlayedMedias.has(media)) {
@@ -647,6 +701,11 @@ fn bridge_script(provider: Provider, speed: f64, muted: bool) -> String {
       }, true);
     });
     media.addEventListener("timeupdate", () => {
+      tryResumePlayback(media);
+      const targetSec = getTargetResumeSeconds(media);
+      if (!state.hasResumed && targetSec > 3.0 && media.currentTime < targetSec - 2.5) {
+        return;
+      }
       if (isMediaReallyAdvancing(media) && (!state.staleMedias.has(media) || media.currentTime < 2.0)) {
         state.staleMedias.delete(media);
         state.activePlayedMedias.add(media);
@@ -749,8 +808,8 @@ fn bridge_script(provider: Provider, speed: f64, muted: bool) -> String {
         // 排除底部的播放器控制条切换键
         if (btn.matches(".prism-play-btn, .vjs-play-control, [class*='play-btn'], [class*='playBtn'], [class*='volume']")) return;
         const text = (btn.innerText || btn.value || btn.title || "").replace(/\s+/g, "");
-        if (/^(继续学习|继续播放|我知道了|确定|确认|知道了|继续|提交|完成|立即学习|开始学习|进入学习|立即观看|开始播放|立即播放|进入课程|开始观看|去学习|播放|好的|交卷|下一步)$/.test(text) ||
-            (text.length <= 12 && /(开始学习|立即学习|继续学习|进入学习|立即播放|开始播放)/.test(text))) {
+        if (/^(继续学习|继续播放|从上次播放|继续观看|从上次观看|从上次学到|我知道了|确定|确认|知道了|继续|提交|完成|立即学习|开始学习|进入学习|立即观看|开始播放|立即播放|进入课程|开始观看|去学习|播放|好的|交卷|下一步)$/.test(text) ||
+            (text.length <= 12 && /(开始学习|立即学习|继续学习|进入学习|立即播放|开始播放|继续观看|从上次)/.test(text))) {
           simulateFullClick(btn);
         }
       });
@@ -1085,13 +1144,17 @@ fn bridge_script(provider: Provider, speed: f64, muted: bool) -> String {
       doc.querySelectorAll("video, audio").forEach((media) => {
         allMedias.push(media);
         track(media);
+        tryResumePlayback(media);
         if (Math.abs(media.playbackRate - state.speed) > 0.05) {
           try { media.defaultPlaybackRate = state.speed; media.playbackRate = state.speed; } catch (_) {}
         }
         if (media.muted !== state.muted && !media.paused) {
           try { media.muted = state.muted; } catch (_) {}
         }
-        if (media.duration > 0 && !media.paused) {
+        const targetSec = getTargetResumeSeconds(media);
+        if (!state.hasResumed && targetSec > 3.0 && media.currentTime < targetSec - 2.5) {
+          // 续播尚未完成，暂不上报未就绪的时间
+        } else if (media.duration > 0 && !media.paused) {
           report("timeupdate", media);
         }
       });
@@ -1445,9 +1508,32 @@ fn bridge_script(provider: Provider, speed: f64, muted: bool) -> String {
     }
   };
 
-  state.setCourse = (title, kind) => {
-    state.currentCourseTitle = String(title || "").trim();
-    state.currentCourseKind = String(kind || "").trim();
+  state.setResumeTarget = (resumeTime, resumeProgress) => {
+    const timeNum = Number(resumeTime) || 0;
+    const progNum = Number(resumeProgress) || 0;
+    if (timeNum > 0 || progNum > 0) {
+      if (Math.abs(state.targetResumeTime - timeNum) > 1.0 || Math.abs(state.targetResumeProgress - progNum) > 0.5) {
+        state.targetResumeTime = timeNum;
+        state.targetResumeProgress = progNum;
+        state.hasResumed = false;
+        try {
+          sessionStorage.setItem("__mtool_current_course__", JSON.stringify({
+            title: state.currentCourseTitle,
+            kind: state.currentCourseKind,
+            resumeTime: state.targetResumeTime,
+            resumeProgress: state.targetResumeProgress,
+          }));
+        } catch (_) {}
+      }
+    }
+  };
+
+  state.setCourse = (title, kind, resumeTime, resumeProgress) => {
+    const cleanTitle = String(title || "").trim();
+    const cleanKind = String(kind || "").trim();
+    const isSameTitle = cleanTitle && cleanTitle === state.currentCourseTitle;
+    state.currentCourseTitle = cleanTitle;
+    if (cleanKind) state.currentCourseKind = cleanKind;
     state.lastDocProgress = 0;
     state.pageLoadedAt = Date.now();
     state.activePlayedMedias = new WeakSet();
@@ -1458,10 +1544,21 @@ fn bridge_script(provider: Provider, speed: f64, muted: bool) -> String {
         });
       });
     } catch (_) {}
+    if (resumeTime !== undefined && resumeTime !== null && Number(resumeTime) >= 0) {
+      state.targetResumeTime = Number(resumeTime);
+      state.targetResumeProgress = Number(resumeProgress) || 0;
+      state.hasResumed = false;
+    } else if (!isSameTitle) {
+      state.targetResumeTime = 0;
+      state.targetResumeProgress = 0;
+      state.hasResumed = false;
+    }
     try {
       sessionStorage.setItem("__mtool_current_course__", JSON.stringify({
         title: state.currentCourseTitle,
         kind: state.currentCourseKind,
+        resumeTime: state.targetResumeTime,
+        resumeProgress: state.targetResumeProgress,
       }));
     } catch (_) {}
     dismissCompletionModal();
@@ -1730,6 +1827,8 @@ fn update_media_script(
     auto_play: bool,
     title: &str,
     kind: &str,
+    resume_time: f64,
+    resume_progress: f64,
 ) -> String {
     let title_json = serde_json::to_string(title).unwrap_or_default();
     let kind_json = serde_json::to_string(kind).unwrap_or_default();
@@ -1740,7 +1839,12 @@ fn update_media_script(
           const autoPlay = {};
           const courseTitle = {title_json};
           const courseKind = {kind_json};
+          const resumeTime = {:.2};
+          const resumeProgress = {:.2};
           if (window.__MTOOL_LEARNING_BRIDGE__) {{
+            if (typeof window.__MTOOL_LEARNING_BRIDGE__.setResumeTarget === "function") {{
+              window.__MTOOL_LEARNING_BRIDGE__.setResumeTarget(resumeTime, resumeProgress);
+            }}
             window.__MTOOL_LEARNING_BRIDGE__.update(speed, muted, autoPlay, courseTitle, courseKind);
             return;
           }}
@@ -1756,6 +1860,9 @@ fn update_media_script(
                 media.defaultPlaybackRate = speed;
                 media.playbackRate = speed;
                 media.muted = muted;
+                if (resumeTime > 3.0 && media.currentTime < resumeTime - 2.5 && media.duration > 0) {{
+                  try {{ media.currentTime = Math.min(resumeTime, media.duration - 1.5); }} catch (_) {{}}
+                }}
                 if (autoPlay && media.paused && !media.ended) {{
                   media.muted = true;
                   media.play().catch(() => {{}});
@@ -1766,7 +1873,9 @@ fn update_media_script(
         }})();"#,
         clamp_speed(speed),
         if muted { "true" } else { "false" },
-        if auto_play { "true" } else { "false" }
+        if auto_play { "true" } else { "false" },
+        resume_time.max(0.0),
+        resume_progress.max(0.0),
     )
 }
 
@@ -1999,28 +2108,34 @@ fn merchant_course_click_script(title: &str, section_title: &str, locator: &str)
           const targetSectionTitle = {section_title_json};
           const targetLocator = {locator_json};
           const clean = (value) => String(value || "").replace(/\s+/g, " ").trim();
+          const norm = (value) => clean(value).replace(/\s+/g, "").toLowerCase();
           const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-          // 拦截 window.open 防止弹空白页
+          // 拦截 window.open 防止弹空白页并提供兼容的 location 代理
           try {{
             window.open = (url) => {{
               const next = clean(url);
               if (next && next !== "about:blank" && !/^javascript:/i.test(next)) {{
                 try {{ window.location.assign(new URL(next, window.location.href).href); }} catch (_) {{}}
               }}
-              try {{
-                window.location = {{
-                  set href(val) {{
-                    try {{ window.location.assign(new URL(val, window.location.href).href); }} catch (_) {{}}
-                  }}
-                }};
-              }} catch (_) {{}}
-              return window;
+              return {{
+                location: {{
+                  assign: (u) => {{ try {{ window.location.assign(new URL(u, window.location.href).href); }} catch (_) {{}} }},
+                  replace: (u) => {{ try {{ window.location.replace(new URL(u, window.location.href).href); }} catch (_) {{}} }},
+                  set href(u) {{ try {{ window.location.assign(new URL(u, window.location.href).href); }} catch (_) {{}} }},
+                  get href() {{ return window.location.href; }}
+                }},
+                focus: () => {{}},
+                close: () => {{}},
+                document: window.document
+              }};
             }};
           }} catch (_) {{}}
 
           const cleanTarget = clean(targetTitle);
+          const normTargetTitle = norm(cleanTarget);
           const cleanTargetSection = clean(targetSectionTitle);
+          const normTargetSection = norm(cleanTargetSection);
           const baseTitle = cleanTarget.replace(/^\d{{1,2}}\s*[.、-]\s*/, "").trim();
           const targetIdxMatch = cleanTarget.match(/^(\d{{1,2}})[\s.、-]/);
           const targetIdx = targetIdxMatch ? parseInt(targetIdxMatch[1], 10) : null;
@@ -2034,15 +2149,22 @@ fn merchant_course_click_script(title: &str, section_title: &str, locator: &str)
           const matchesTarget = (rawText) => {{
             const text = clean(rawText);
             if (!text) return false;
+            const normText = norm(text);
+            if (normText === normTargetTitle) return true;
+            // 排除课件与考试的互相误判
+            const targetHasSlides = /(课件|ppt|pptx)/i.test(cleanTarget);
+            const targetHasExam = /(考试|测验|测试)/.test(cleanTarget);
+            if (!targetHasSlides && /(课件|ppt|pptx)/i.test(text)) return false;
+            if (!targetHasExam && /(考试|测验|测试)/.test(text)) return false;
+
             if (targetIdx !== null) {{
               const rowIdxMatch = text.match(/(?:^|[\s(（【\[])(\d{{1,2}})[\s.、-]/);
               if (rowIdxMatch && parseInt(rowIdxMatch[1], 10) !== targetIdx) {{
                 return false;
               }}
             }}
-            if (text === cleanTarget) return true;
-            if (text.length <= cleanTarget.length + 10 && text.includes(cleanTarget)) return true;
-            if (baseTitle.length >= 3 && text.length <= baseTitle.length + 12 && text.includes(baseTitle)) return true;
+            if (normText.length <= normTargetTitle.length + 8 && normText.includes(normTargetTitle)) return true;
+            if (baseTitle.length >= 3 && normText.length <= baseTitle.length + 10 && normText.includes(norm(baseTitle))) return true;
             return false;
           }};
 
@@ -2077,18 +2199,24 @@ fn merchant_course_click_script(title: &str, section_title: &str, locator: &str)
           let target = null;
 
           // 1. 若提供了章节名称，优先在匹配的章节容器内部查找目标小节
-          if (cleanTargetSection) {{
+          if (normTargetSection) {{
             const matchedHeader = stageHeaders.find((h) => {{
-              const ht = clean(h.innerText);
-              return ht === cleanTargetSection || ht.includes(cleanTargetSection) || cleanTargetSection.includes(ht);
+              const nh = norm(h.innerText);
+              return nh && (nh === normTargetSection || nh.includes(normTargetSection) || normTargetSection.includes(nh));
             }});
             if (matchedHeader) {{
               await expandHeader(matchedHeader);
-              const sectionScope = (matchedHeader.parentElement ? matchedHeader.parentElement.closest("[class*='stage'], [class*='chapter'], .ant-collapse-item, [class*='collapse-item']") : null) || matchedHeader.parentElement;
+              let sectionScope = matchedHeader.closest ?
+                matchedHeader.closest("[class*='stage-item'], .ant-collapse-item, [class*='collapse-item'], [class*='stage'], [class*='chapter'], [class*='section']") : null;
+              if (!sectionScope) sectionScope = matchedHeader.parentElement;
+              if (sectionScope && !sectionScope.querySelector(".course-content-item, [class*='content-item'], [class*='lesson']")) {{
+                let sib = matchedHeader.nextElementSibling || (sectionScope.nextElementSibling);
+                if (sib) sectionScope = sib;
+              }}
               if (sectionScope) {{
                 const inScopeLocator = targetLocator ? sectionScope.querySelector(targetLocator) : null;
                 const inScopeAll = Array.from(sectionScope.querySelectorAll("body *"));
-                const inScopeByTitle = inScopeAll.find((el) => clean(el.innerText) === cleanTarget) ||
+                const inScopeByTitle = inScopeAll.find((el) => norm(el.innerText) === normTargetTitle) ||
                   inScopeAll.find((el) => matchesTarget(el.innerText));
                 target = inScopeLocator || inScopeByTitle;
               }}
@@ -2098,7 +2226,7 @@ fn merchant_course_click_script(title: &str, section_title: &str, locator: &str)
           const findTarget = () => {{
             const byLocator = targetLocator ? document.querySelector(targetLocator) : null;
             const all = Array.from(document.querySelectorAll("body *"));
-            const byTitle = all.find((el) => clean(el.innerText) === cleanTarget) ||
+            const byTitle = all.find((el) => norm(el.innerText) === normTargetTitle) ||
               all.find((el) => matchesTarget(el.innerText));
             return byLocator || byTitle;
           }};
@@ -2161,12 +2289,14 @@ fn merchant_course_click_script(title: &str, section_title: &str, locator: &str)
             if (!el) return;
             try {{
               const rect = el.getBoundingClientRect();
+              const cx = rect.width > 0 ? (rect.left + rect.width / 2) : (rect.left + 25);
+              const cy = rect.height > 0 ? (rect.top + rect.height / 2) : (rect.top + 20);
               const init = {{
                 bubbles: true,
                 cancelable: true,
                 view: window,
-                clientX: rect.left + Math.max(5, Math.min(rect.width / 2, 25)),
-                clientY: rect.top + Math.max(5, Math.min(rect.height / 2, 25)),
+                clientX: Math.max(5, cx),
+                clientY: Math.max(5, cy),
                 button: 0,
               }};
               el.dispatchEvent(new PointerEvent("pointerdown", init));
@@ -2181,8 +2311,13 @@ fn merchant_course_click_script(title: &str, section_title: &str, locator: &str)
           }};
 
           triggerClick(clickTarget);
-          if (card !== clickTarget) triggerClick(card);
-          if (target !== clickTarget && target !== card) triggerClick(target);
+          if (target && target !== clickTarget) triggerClick(target);
+          if (card && card !== clickTarget && card !== target) triggerClick(card);
+          // 向上依次触发各级父元素以穿透各类 React/Vue 绑定的事件委托
+          let p = target ? target.parentElement : null;
+          for (let d = 0; p && p !== document.body && d < 3; d++, p = p.parentElement) {{
+            if (p !== card && p !== clickTarget) triggerClick(p);
+          }}
 
           // 等待弹窗或主界面渲染，自动触发【开始考试】/【进入考试】/【参加考试】
           await sleep(400);
@@ -2578,11 +2713,11 @@ fn merchant_capture_script(request_id: &str) -> String {
       return parts.join(" > ");
     };
     const countMatches = (str, regex) => (String(str || "").match(regex) || []).length;
-    const isTagOrBadge = (s) => /^(知识|课程|考试|测验|测试|课件|文档|阅读材料|参考资料|视频|音频|图文|直播|ppt|pptx|pdf|word|excel|线下课|线上课|面授|面授课|公开课|问卷|调查问卷|评价表|满意度评价|调研|签到|打卡|活动|讨论|实操|练习|作业|大纲|目录|必修|选修|必修课|选修课|必修学分|选修学分|未完成|已完成|已学完|已学习|未学习|学习中|已考试|已通过|未通过|进行中|全部|展开|收起|去学习|立即学习|开始学习|重新学习|继续学习|查看|详情|上次学习|试看|播放中|需本人处理|\d{1,2})$/i.test(clean(s));
+    const isTagOrBadge = (s) => /^(知识|课程|考试|测验|测试|课件|文档|阅读材料|参考资料|视频|音频|图文|直播|ppt|pptx|pdf|word|excel|线下课|线上课|面授|面授课|公开课|问卷|调查问卷|评价表|满意度评价|调研|签到|打卡|活动|讨论|实操|练习|作业|大纲|目录|必修|选修|必修课|选修课|必修学分|选修学分|未完成|已完成|已学完|已学习|未学习|待学习|学习中|待开始|待播放|播放中|已考试|未考试|待考试|去考试|参加考试|开始考试|进入考试|立即考试|重新考试|补考|免考|已通过|未通过|合格|不合格|已交卷|未交卷|进行中|全部|展开|收起|去学习|立即学习|开始学习|重新学习|继续学习|查看|详情|上次学习|试看|需本人处理|\d{1,2})$/i.test(clean(s));
     const isPureTagOrBadge = (s) => {
       const t = clean(s);
       if (!t) return true;
-      return /^(?:(?:知识|课程|考试|测验|测试|课件|文档|资料|手册|阅读材料|参考资料|视频|音频|图文|直播|ppt|pptx|pdf|word|excel|问卷|调查问卷|评价表|满意度评价|未完成|已完成|已学完|已学习|未学习|学习中|已考试|已通过|未通过|进行中|上次学习|试看|播放中|去学习|立即学习|开始学习|重新学习|继续学习|必修|选修|需本人处理)\s*)+$/i.test(t);
+      return /^(?:(?:知识|课程|考试|测验|测试|课件|文档|资料|手册|阅读材料|参考资料|视频|音频|图文|直播|ppt|pptx|pdf|word|excel|问卷|调查问卷|评价表|满意度评价|未完成|已完成|已学完|已学习|未学习|待学习|学习中|待开始|待播放|播放中|已考试|未考试|待考试|去考试|参加考试|开始考试|进入考试|立即考试|重新考试|补考|免考|已通过|未通过|合格|不合格|已交卷|未交卷|进行中|上次学习|试看|去学习|立即学习|开始学习|重新学习|继续学习|必修|选修|需本人处理)\s*)+$/i.test(t);
     };
     const isMeta = (s) => {
       const t = clean(s);
@@ -3328,10 +3463,11 @@ fn merchant_capture_script(request_id: &str) -> String {
 
       // 当父子两层都满足单课条件时（例如外层行与内层标题 div），保留包含更多元信息（类型徽章/进度/时长/考试）的外层行
       const leafCandidates = singleLessonItems.filter((item) => {
+        const iText = nodeText(item);
+        if (isTagOrBadge(iText) || isPureTagOrBadge(iText)) return false;
         const parent = item.parentElement;
         if (parent && singleLessonItems.includes(parent)) {
           const pText = nodeText(parent);
-          const iText = nodeText(item);
           // 若父容器文本并没有多包含其他小节，且包含类型、进度或考试，则保留父容器
           if (/(视频|文档|课件|ppt|pptx|考试|测验|测试|线下课|面授|问卷|评价表|进度|%|分钟|未完成)/i.test(pText) && !/(视频|文档|课件|ppt|pptx|考试|测验|测试|线下课|面授|问卷|评价表|进度|%|分钟|未完成)/i.test(iText)) {
             return false;
@@ -3368,12 +3504,12 @@ fn merchant_capture_script(request_id: &str) -> String {
           .replace(/\s*\d+\s*分钟.*$/, "")
           .replace(/\s*上次学习.*$/, "");
         // 彻底清洗标题末尾拼接的类型标签与状态词（如 "考试 未完成"、"需本人处理"、"未完成"、"视频" 等）
-        title = title.replace(/(?:\s+(?:视频|课件|文档|资料|手册|ppt课件|ppt|pptx|考试|测验|测试|问卷|未完成|已完成|未学习|学习中|已考试|合格|不合格|已通过|未通过|需本人处理|去学习|立即学习|开始学习|待播放|播放中))+$/i, "").trim();
+        title = title.replace(/(?:\s+(?:视频|课件|文档|资料|手册|ppt课件|ppt|pptx|考试|测验|测试|问卷|未完成|已完成|未学习|学习中|已考试|未考试|待考试|去考试|合格|不合格|已通过|未通过|需本人处理|去学习|立即学习|开始学习|待播放|播放中))+$/i, "").trim();
 
         const sectionTitle = sectionTitleFrom(item) || sectionTitleFrom(card);
         const courseKey = (sectionTitle ? sectionTitle + "___" : "") + title;
 
-        if (!title || title.length < 2 || isInvalidTopicTitle(title) || isPhaseOrSectionHeader(title) || catalogSeen.has(courseKey)) return;
+        if (!title || title.length < 2 || isInvalidTopicTitle(title) || isPhaseOrSectionHeader(title) || isTagOrBadge(title) || isPureTagOrBadge(title) || catalogSeen.has(courseKey)) return;
         catalogSeen.add(courseKey);
 
         const locator = cssPath(item);
@@ -3672,6 +3808,8 @@ fn merchant_capture_script(request_id: &str) -> String {
     courses = courses.filter((c) => {
       if (!c.title || isInvalidTopicTitle(c.title)) return false;
       if (isPhaseOrSectionHeader(c.title)) return false;
+      if (isTagOrBadge(c.title) || isPureTagOrBadge(c.title)) return false;
+      if (/^(未考试|已考试|待考试|去考试|参加考试|开始考试|进入考试|立即考试|重新考试|补考|免考|已通过|未通过|合格|不合格|已交卷|未交卷|已完成|未完成|未学习|已学习|学习中|需本人处理)$/.test(c.title)) return false;
       return true;
     });
 
@@ -3879,7 +4017,8 @@ fn handle_bridge_title(
                 // 校验伪造包：视频课程绝不接受来自文档探测的 100|100 伪造包
                 let is_fake_doc_packet_for_video = active.kind == "video" && ((current_time == 100.0 && duration == 100.0) || (active.duration > 120.0 && duration <= 100.0));
                 if !is_fake_doc_packet_for_video {
-                    if current_time > 0.0 {
+                    // 防倒退保护：视频播放进度单调递增，绝不接受比已有进度更小的倒退时间（防止重新开播冲掉已学进度）
+                    if current_time > 0.0 && current_time >= active.current_time {
                         active.current_time = current_time;
                     }
                     if duration > 0.0 {
@@ -4019,11 +4158,18 @@ async fn ensure_platform_window(
                 .lock()
                 .unwrap_or_else(|error| error.into_inner())
                 .clone();
-            let (course_title, course_kind) = {
+            let (course_title, course_kind, initial_time, initial_progress) = {
                 let runtime = runtime_for_load.lock().unwrap_or_else(|error| error.into_inner());
-                runtime.active.get(provider.key()).map(|a| (a.course_title.clone(), a.kind.clone())).unwrap_or_default()
+                runtime.active.get(provider.key()).map(|a| {
+                    let p = if a.duration > 0.0 && a.current_time > 0.0 {
+                        ((a.current_time / a.duration) * 100.0).clamp(0.0, 100.0)
+                    } else {
+                        0.0
+                    };
+                    (a.course_title.clone(), a.kind.clone(), a.current_time, p)
+                }).unwrap_or_default()
             };
-            let _ = window.eval(update_media_script(settings.speed, settings.muted, false, &course_title, &course_kind));
+            let _ = window.eval(update_media_script(settings.speed, settings.muted, false, &course_title, &course_kind, initial_time, initial_progress));
         })
         .on_new_window(move |url, _features| {
             if matches!(url.scheme(), "http" | "https") {
@@ -4498,9 +4644,9 @@ fn topic_url(path: &PathBuf, topic_id: &str) -> Result<String, String> {
 // 专题卡片点击重试时间梯度（覆盖整个等待窗口，直到离开专题页或超时）
 fn topic_click_delays(already_at_topic: bool) -> Vec<u64> {
     if already_at_topic {
-        vec![200, 800, 1600, 2800, 4500, 7000, 10000, 14000, 19000, 25000, 33000, 43000, 55000, 70000, 90000, 110000]
+        vec![150, 600, 1200, 2000, 3200, 4800, 7000, 10000, 14000, 19000, 25000, 33000, 43000, 55000, 70000, 90000]
     } else {
-        vec![1000, 2200, 3800, 5800, 8500, 12000, 16500, 22000, 28500, 36000, 45000, 56000, 70000, 86000, 105000]
+        vec![400, 1200, 2200, 3800, 5800, 8500, 12000, 16500, 22000, 28500, 36000, 45000, 56000, 70000, 86000]
     }
 }
 
@@ -4566,6 +4712,8 @@ fn spawn_autoplay_poller(
     play_provider: Provider,
     play_title: String,
     play_kind: String,
+    resume_time: f64,
+    resume_progress: f64,
     token: u64,
 ) {
     tauri::async_runtime::spawn(async move {
@@ -4579,7 +4727,7 @@ fn spawn_autoplay_poller(
                 .lock()
                 .unwrap_or_else(|error| error.into_inner())
                 .clone();
-            let _ = play_window.eval(update_media_script(settings.speed, settings.muted, true, &play_title, &play_kind));
+            let _ = play_window.eval(update_media_script(settings.speed, settings.muted, true, &play_title, &play_kind, resume_time, resume_progress));
         }
     });
 }
@@ -4601,10 +4749,18 @@ async fn open_course(
         let tokens = if auto_play { &mut runtime.playback_tokens } else { &mut runtime.browser_tokens };
         tokens.insert(course.provider.key().to_string(), token);
     }
+    let initial_duration = course.duration_seconds as f64;
+    let initial_time = if initial_duration > 0.0 && course.progress > 0.0 {
+        (course.progress / 100.0) * initial_duration
+    } else {
+        0.0
+    };
     let reset_course_js = format!(
-        "try {{ if (window.__MTOOL_LEARNING_BRIDGE__ && typeof window.__MTOOL_LEARNING_BRIDGE__.setCourse === 'function') window.__MTOOL_LEARNING_BRIDGE__.setCourse({}, {}); }} catch (_) {{}}",
+        "try {{ if (window.__MTOOL_LEARNING_BRIDGE__ && typeof window.__MTOOL_LEARNING_BRIDGE__.setCourse === 'function') window.__MTOOL_LEARNING_BRIDGE__.setCourse({}, {}, {:.2}, {:.2}); }} catch (_) {{}}",
         serde_json::to_string(&course.title).unwrap_or_default(),
-        serde_json::to_string(&course.kind).unwrap_or_default()
+        serde_json::to_string(&course.kind).unwrap_or_default(),
+        initial_time,
+        course.progress
     );
     let _ = window.eval(&reset_course_js);
 
@@ -4613,8 +4769,19 @@ async fn open_course(
         runtime.active.get(course.provider.key()).map(|a| a.course_id == course.id && (a.phase == "playing" || a.phase == "opening")).unwrap_or(false)
     };
     if auto_play && is_running {
+        let (current_time, progress) = {
+            let runtime = state.runtime.lock().unwrap_or_else(|error| error.into_inner());
+            runtime.active.get(course.provider.key()).map(|a| {
+                let p = if a.duration > 0.0 && a.current_time > 0.0 {
+                    ((a.current_time / a.duration) * 100.0).clamp(0.0, 100.0)
+                } else {
+                    course.progress
+                };
+                (a.current_time, p)
+            }).unwrap_or((initial_time, course.progress))
+        };
         let settings = state.settings.lock().unwrap_or_else(|error| error.into_inner()).clone();
-        let _ = window.eval(update_media_script(settings.speed, settings.muted, auto_play, &course.title, &course.kind));
+        let _ = window.eval(update_media_script(settings.speed, settings.muted, auto_play, &course.title, &course.kind, current_time, progress));
         return Ok(());
     }
     let topic_url = topic_url(state.db_path.as_ref(), &course.topic_id)?;
@@ -4636,7 +4803,7 @@ async fn open_course(
         spawn_topic_card_clicker(window.clone(), state.clone(), course.provider, course.id.clone(), click_script, topic_url, delays, token, auto_play);
     }
     if auto_play {
-        spawn_autoplay_poller(window, state.clone(), course.provider, course.title.clone(), course.kind.clone(), token);
+        spawn_autoplay_poller(window, state.clone(), course.provider, course.title.clone(), course.kind.clone(), initial_time, course.progress, token);
     }
     Ok(())
 }
@@ -4712,7 +4879,8 @@ fn persist_stopped_course(
         None
     };
     conn.execute(
-        "UPDATE video_courses SET status=?2,progress=COALESCE(?3,progress),
+        "UPDATE video_courses SET status=?2,
+         progress=CASE WHEN ?3 IS NOT NULL AND ?3 > progress THEN ?3 ELSE progress END,
          duration_seconds=CASE WHEN ?4>0 THEN ?4 ELSE duration_seconds END,
          last_error=?5,updated_at=?6 WHERE id=?1 AND status!='completed'",
         params![
@@ -5154,7 +5322,7 @@ pub async fn update_video_task_settings(
     for provider in [Provider::Ulearn, Provider::Merchant] {
         if let Some(window) = app.get_webview_window(&provider.player_label()) {
             window
-                .eval(update_media_script(settings.speed, settings.muted, false, "", ""))
+                .eval(update_media_script(settings.speed, settings.muted, false, "", "", 0.0, 0.0))
                 .map_err(|error| error.to_string())?;
         }
     }
@@ -5391,18 +5559,18 @@ pub async fn tick_video_queue(
                 .active
                 .remove(active.provider.key());
         } else if active.phase == "opening" || active.phase == "playing" {
-            if let Some(window) = app.get_webview_window(&active.provider.player_label()) {
-                let _ = window.eval(update_media_script(settings.speed, settings.muted, true, &active.course_title, &active.kind));
-            }
             let progress = if active.duration > 0.0 {
                 ((active.current_time / active.duration) * 100.0).clamp(0.0, 100.0)
             } else {
                 0.0
             };
+            if let Some(window) = app.get_webview_window(&active.provider.player_label()) {
+                let _ = window.eval(update_media_script(settings.speed, settings.muted, true, &active.course_title, &active.kind, active.current_time, progress));
+            }
             if active.phase == "playing" && active.duration > 0.0 {
                 if let Ok(conn) = Connection::open(state.db_path.as_ref()) {
                     let _ = conn.execute(
-                        "UPDATE video_courses SET progress=?2,duration_seconds=CASE WHEN duration_seconds > 0 THEN duration_seconds ELSE ?3 END,updated_at=?4 WHERE id=?1",
+                        "UPDATE video_courses SET progress=CASE WHEN ?2 > progress THEN ?2 ELSE progress END,duration_seconds=CASE WHEN duration_seconds > 0 THEN duration_seconds ELSE ?3 END,updated_at=?4 WHERE id=?1",
                         params![active.course_id, progress, active.duration as i64, now()],
                     );
                 }
@@ -5498,7 +5666,7 @@ pub async fn tick_video_queue(
                 let wait_mins = stall_threshold / 60;
                 let last_error = format!("课程学习进度卡住超过{wait_mins}分钟未推进（停在约{mins}分钟），已自动跳过并开始播放下一门");
                 conn.execute(
-                    "UPDATE video_courses SET status='attention',progress=?2,last_error=?3,updated_at=?4 WHERE id=?1",
+                    "UPDATE video_courses SET status='attention',progress=CASE WHEN ?2 > progress THEN ?2 ELSE progress END,last_error=?3,updated_at=?4 WHERE id=?1",
                     params![active.course_id, progress, last_error, now()],
                 )
                 .map_err(|error| error.to_string())?;
@@ -5661,6 +5829,41 @@ pub async fn open_video_course(
             player_win.show().map_err(|error| error.to_string())?;
             player_win.unminimize().map_err(|error| error.to_string())?;
             player_win.set_focus().map_err(|error| error.to_string())?;
+            let initial_duration = course.duration_seconds as f64;
+            let initial_time = if initial_duration > 0.0 && course.progress > 0.0 {
+                (course.progress / 100.0) * initial_duration
+            } else {
+                0.0
+            };
+            let (target_time, target_progress) = {
+                let runtime = state.runtime.lock().unwrap_or_else(|error| error.into_inner());
+                runtime.active.get(course.provider.key()).map(|a| {
+                    let p = if a.duration > 0.0 && a.current_time > 0.0 {
+                        ((a.current_time / a.duration) * 100.0).clamp(0.0, 100.0)
+                    } else {
+                        course.progress
+                    };
+                    (a.current_time.max(initial_time), p.max(course.progress))
+                }).unwrap_or((initial_time, course.progress))
+            };
+            let settings = state.settings.lock().unwrap_or_else(|e| e.into_inner()).clone();
+            let _ = player_win.eval(update_media_script(
+                settings.speed,
+                settings.muted,
+                true,
+                &course.title,
+                &course.kind,
+                target_time,
+                target_progress,
+            ));
+            let is_opening = {
+                let runtime = state.runtime.lock().unwrap_or_else(|error| error.into_inner());
+                runtime.active.get(course.provider.key()).map(|a| a.phase == "opening").unwrap_or(false)
+            };
+            if is_opening {
+                let click_script = course_click_script(&course.title, &course.section_title, &course.locator, course.provider);
+                let _ = player_win.eval(&click_script);
+            }
             return Ok(());
         }
     }
@@ -6110,14 +6313,18 @@ mod tests {
     #[test]
     fn playback_bridge_integrates_full_autoplay_and_ui_triggers() {
         let bridge = bridge_script(Provider::Ulearn, 2.0, true);
-        let update = update_media_script(2.0, true, true, "", "");
+        let update = update_media_script(2.0, true, true, "", "", 183.0, 7.0);
 
         assert!(bridge.contains("tryPlayMedia"));
         assert!(bridge.contains("triggerPlayUI"));
         assert!(bridge.contains("simulateFullClick"));
         assert!(bridge.contains("window.setInterval(() => apply(false), 1500)"));
+        assert!(bridge.contains("tryResumePlayback"));
+        assert!(bridge.contains("getTargetResumeSeconds"));
+        assert!(bridge.contains("setResumeTarget"));
 
         assert!(update.contains("window.__MTOOL_LEARNING_BRIDGE__.update(speed, muted, autoPlay, courseTitle, courseKind)"));
+        assert!(update.contains("setResumeTarget(resumeTime, resumeProgress)"));
     }
 
     #[test]
@@ -6158,6 +6365,89 @@ mod tests {
         assert_eq!(active.phase, "playing");
         assert_eq!(active.current_time, 15.5);
         assert_eq!(active.duration, 900.0);
+    }
+
+    #[test]
+    fn test_resume_playback_and_progress_never_regresses() {
+        let captures = Arc::new(Mutex::new(CaptureExchange::default()));
+        let runtime = Arc::new(Mutex::new(RuntimeState::default()));
+        // 模拟 YS 学堂课程已有 7% 进度（183.4 秒 / 2620 秒）
+        runtime
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .active
+            .insert(
+                "merchant".to_string(),
+                ActiveCourse {
+                    course_id: "m-course-1".to_string(),
+                    topic_id: "m-topic-1".to_string(),
+                    provider: Provider::Merchant,
+                    kind: "video".to_string(),
+                    course_title: "算法安全制度及AI内容安全护栏介绍2026".to_string(),
+                    started_at: now(),
+                    phase: "opening".to_string(),
+                    phase_since: now(),
+                    last_media_at: now(),
+                    last_progress_at: now(),
+                    last_advanced_time: 183.4,
+                    current_time: 183.4,
+                    duration: 2620.0,
+                },
+            );
+
+        // 模拟页面刚加载出来时，视频从 00:03 秒上报了 timeupdate
+        assert!(handle_bridge_title(
+            "MTOOL_MEDIA|merchant|timeupdate|3.0|2620.0",
+            Provider::Merchant,
+            &captures,
+            &runtime,
+        ));
+
+        // 校验：active.current_time 绝不被覆盖倒退为 3.0，依然稳固保持在 183.4 秒！
+        {
+            let state = runtime.lock().unwrap_or_else(|error| error.into_inner());
+            let active = state.active.get("merchant").expect("active course exists");
+            assert_eq!(active.current_time, 183.4);
+            assert_eq!(active.phase, "playing");
+        }
+
+        // 续播成功推进超过原有历史进度（例如到达 200 秒）
+        assert!(handle_bridge_title(
+            "MTOOL_MEDIA|merchant|timeupdate|200.0|2620.0",
+            Provider::Merchant,
+            &captures,
+            &runtime,
+        ));
+        {
+            let state = runtime.lock().unwrap_or_else(|error| error.into_inner());
+            let active = state.active.get("merchant").expect("active course exists");
+            assert_eq!(active.current_time, 200.0);
+        }
+
+        // 数据库层面验证：CASE WHEN ? > progress THEN ? ELSE progress 保证 7% 绝不倒退为 2%
+        let path = std::env::temp_dir().join(format!("mtool-regression-test-{}.db", now()));
+        let conn = Connection::open(&path).unwrap();
+        conn.execute("CREATE TABLE video_courses (id TEXT PRIMARY KEY, progress REAL)", []).unwrap();
+        conn.execute("INSERT INTO video_courses (id, progress) VALUES ('c1', 7.0)", []).unwrap();
+
+        // 尝试用 2.0% 覆盖 7.0%
+        let smaller_progress = 2.0;
+        conn.execute(
+            "UPDATE video_courses SET progress=CASE WHEN ?2 > progress THEN ?2 ELSE progress END WHERE id=?1",
+            params!["c1", smaller_progress],
+        ).unwrap();
+        let p: f64 = conn.query_row("SELECT progress FROM video_courses WHERE id='c1'", [], |r| r.get(0)).unwrap();
+        assert_eq!(p, 7.0);
+
+        // 正常增加到 8.5%
+        let larger_progress = 8.5;
+        conn.execute(
+            "UPDATE video_courses SET progress=CASE WHEN ?2 > progress THEN ?2 ELSE progress END WHERE id=?1",
+            params!["c1", larger_progress],
+        ).unwrap();
+        let p: f64 = conn.query_row("SELECT progress FROM video_courses WHERE id='c1'", [], |r| r.get(0)).unwrap();
+        assert_eq!(p, 8.5);
+        let _ = std::fs::remove_file(path);
     }
 
     #[test]
@@ -7788,6 +8078,34 @@ mod tests {
         let course2 = "https://ulearn.cup.com.cn/course/view/456";
         assert!(has_distinct_course_url(course1, topic));
         assert!(has_distinct_course_url(course2, topic));
+
+        // 单页应用 Hash 路由场景判定
+        let hash_topic = "https://merchant.example.com/#/studySubjectDetail?id=123";
+        let hash_course = "https://merchant.example.com/#/courseDetail?id=456";
+        assert!(is_same_page_url(hash_topic, hash_topic));
+        assert!(is_same_page_url(&format!("{hash_topic}/"), hash_topic));
+        assert!(!is_same_page_url(hash_course, hash_topic));
+        assert!(has_distinct_course_url(hash_course, hash_topic));
+    }
+
+    #[test]
+    fn test_merchant_capture_and_click_script_features() {
+        let capture_js = merchant_capture_script("req-test");
+        // 确保 isTagOrBadge 与 isPureTagOrBadge 正确包含未考试等状态词
+        assert!(capture_js.contains("未考试"));
+        assert!(capture_js.contains("isTagOrBadge(title) || isPureTagOrBadge(title)"));
+        assert!(capture_js.contains("/^(未考试|已考试|待考试|去考试|参加考试"));
+
+        let click_js = merchant_course_click_script(
+            "算法安全制度及AI内容安全护栏介绍2026",
+            "03第五期：算法安全制度及AI内容安全护栏",
+            ".course-item",
+        );
+        // 确保去除空格规范化比对章节与标题
+        assert!(click_js.contains("normTargetSection"));
+        assert!(click_js.contains("normTargetTitle"));
+        assert!(click_js.contains("targetHasSlides"));
+        assert!(click_js.contains("targetHasExam"));
     }
 
     #[test]
